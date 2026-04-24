@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "./stores/useAppStore";
 import Sidebar from "./components/Sidebar/Sidebar";
 import TerminalTab from "./components/Terminal/TerminalTab";
 import SftpPanel from "./components/Sftp/SftpPanel";
 import MonitorPanel from "./components/Monitor/MonitorPanel";
 import ServerDialog from "./components/ServerDialog/ServerDialog";
+import CredentialGroupDialog from "./components/CredentialGroupDialog/CredentialGroupDialog";
 import {
   Server,
   Terminal,
@@ -13,6 +15,8 @@ import {
   X,
   PanelLeftClose,
   PanelLeft,
+  ArrowDown,
+  ArrowUp,
 } from "lucide-react";
 
 const TAB_ICONS: Record<string, React.ReactNode> = {
@@ -21,13 +25,55 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   monitor: <Activity size={14} />,
 };
 
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec < 1024) return `${bytesPerSec} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+function TrafficDisplay({ sessionId }: { sessionId: string }) {
+  const [speed, setSpeed] = useState({ down: 0, up: 0 });
+  const prevRef = useRef({ read: 0, written: 0, time: Date.now() });
+
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const stats = await invoke<{ bytes_read: number; bytes_written: number }>("get_ssh_traffic", { sessionId });
+        const now = Date.now();
+        const dt = (now - prevRef.current.time) / 1000;
+        if (dt > 0) {
+          setSpeed({
+            down: Math.max(0, Math.round((stats.bytes_read - prevRef.current.read) / dt)),
+            up: Math.max(0, Math.round((stats.bytes_written - prevRef.current.written) / dt)),
+          });
+        }
+        prevRef.current = { read: stats.bytes_read, written: stats.bytes_written, time: now };
+      } catch {}
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [sessionId]);
+
+  return (
+    <span className="flex items-center gap-2 ml-auto">
+      <span className="flex items-center gap-0.5 text-accent-cyan">
+        <ArrowDown size={11} /> {formatSpeed(speed.down)}
+      </span>
+      <span className="flex items-center gap-0.5 text-accent-yellow">
+        <ArrowUp size={11} /> {formatSpeed(speed.up)}
+      </span>
+    </span>
+  );
+}
+
 export default function App() {
   const {
     tabs,
     activeTabId,
     sidebarCollapsed,
     dialogOpen,
+    cgDialogOpen,
     loadServers,
+    loadCredentialGroups,
     setActiveTab,
     removeTab,
     toggleSidebar,
@@ -35,6 +81,7 @@ export default function App() {
 
   useEffect(() => {
     loadServers();
+    loadCredentialGroups();
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -42,6 +89,7 @@ export default function App() {
   return (
     <div className="flex h-full">
       {dialogOpen && <ServerDialog />}
+      {cgDialogOpen && <CredentialGroupDialog />}
 
       <div
         className={`flex flex-col border-r border-border ${
@@ -137,6 +185,9 @@ export default function App() {
               ? `${activeTab.serverName} (${activeTab.type})`
               : "就绪"}
           </span>
+          {activeTab?.type === "terminal" && activeTab.sessionId && (
+            <TrafficDisplay sessionId={activeTab.sessionId} />
+          )}
         </div>
       </div>
     </div>

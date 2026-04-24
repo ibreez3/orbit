@@ -8,7 +8,10 @@ export interface Server {
   username: string;
   password: string;
   private_key: string;
+  key_source: string;
+  key_file_path: string;
   key_passphrase: string;
+  credential_group_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -22,16 +25,35 @@ export interface ServerInput {
   username: string;
   password?: string;
   private_key?: string;
+  key_source?: string;
+  key_file_path?: string;
   key_passphrase?: string;
+  credential_group_id?: string;
 }
 
-export interface FileEntry {
+export interface CredentialGroup {
+  id: string;
   name: string;
-  path: string;
-  is_dir: boolean;
-  size: number;
-  modified: string;
-  permissions: string;
+  auth_type: string;
+  username: string;
+  password: string;
+  private_key: string;
+  key_source: string;
+  key_file_path: string;
+  key_passphrase: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CredentialGroupInput {
+  name: string;
+  auth_type?: string;
+  username: string;
+  password?: string;
+  private_key?: string;
+  key_source?: string;
+  key_file_path?: string;
+  key_passphrase?: string;
 }
 
 export interface ServerStats {
@@ -44,6 +66,15 @@ export interface ServerStats {
   disk_percent: number;
   uptime: string;
   load_avg: string;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified: string;
+  permissions: string;
 }
 
 export interface Tab {

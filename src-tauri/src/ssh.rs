@@ -1,21 +1,30 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use serde::Serialize;
 use ssh2::Session;
 use tauri::{AppHandle, Emitter};
 
-use crate::models::Server;
+use crate::models::{CredentialGroup, ResolvedAuth, Server};
+
+#[derive(Serialize, Clone)]
+pub struct TrafficStats {
+    pub bytes_read: u64,
+    pub bytes_written: u64,
+}
 
 struct ActiveSession {
     session: Session,
     channel: Arc<std::sync::Mutex<ssh2::Channel>>,
     running: Arc<AtomicBool>,
     reader_handle: Option<std::thread::JoinHandle<()>>,
+    bytes_read: Arc<AtomicU64>,
+    bytes_written: Arc<AtomicU64>,
 }
 
 pub struct SshManager {
@@ -33,42 +42,19 @@ impl SshManager {
         &mut self,
         session_id: &str,
         server: &Server,
+        group: Option<&CredentialGroup>,
         app_handle: AppHandle,
     ) -> Result<()> {
+        let auth = ResolvedAuth::resolve(server, group)?;
+
         let tcp = TcpStream::connect((server.host.as_str(), server.port))
-            .map_err(|e| anyhow!("连接失败 {}:{}", server.host, server.port))?;
+            .map_err(|_| anyhow!("连接失败 {}:{}", server.host, server.port))?;
         tcp.set_nonblocking(false)?;
 
         let mut session = Session::new()?;
         session.set_tcp_stream(tcp);
         session.handshake()?;
-
-        match server.auth_type.as_str() {
-            "password" => {
-                session
-                    .userauth_password(&server.username, &server.password)
-                    .map_err(|_| anyhow!("密码认证失败"))?;
-            }
-            "key" => {
-                if server.private_key.is_empty() {
-                    return Err(anyhow!("私钥内容为空"));
-                }
-                let passphrase = if server.key_passphrase.is_empty() {
-                    None
-                } else {
-                    Some(server.key_passphrase.as_str())
-                };
-                session
-                    .userauth_pubkey_memory(
-                        &server.username,
-                        None,
-                        &server.private_key,
-                        passphrase,
-                    )
-                    .map_err(|e| anyhow!("密钥认证失败: {}", e))?;
-            }
-            _ => return Err(anyhow!("不支持的认证类型: {}", server.auth_type)),
-        }
+        auth.authenticate(&mut session)?;
 
         if !session.authenticated() {
             return Err(anyhow!("认证失败"));
@@ -77,15 +63,16 @@ impl SshManager {
         let mut channel = session.channel_session()?;
         channel.request_pty("xterm-256color", None, None)?;
         channel.shell()?;
-
         session.set_blocking(false);
 
         let channel = Arc::new(std::sync::Mutex::new(channel));
         let running = Arc::new(AtomicBool::new(true));
-
+        let bytes_read = Arc::new(AtomicU64::new(0));
+        let bytes_written = Arc::new(AtomicU64::new(0));
         let sid = session_id.to_string();
         let ch = channel.clone();
         let run = running.clone();
+        let br = bytes_read.clone();
         let handle = app_handle.clone();
 
         let reader_handle = std::thread::spawn(move || {
@@ -101,6 +88,7 @@ impl SshManager {
                 match ch.read(&mut buf) {
                     Ok(n) if n > 0 => {
                         let data: Vec<u8> = buf[..n].to_vec();
+                        br.fetch_add(n as u64, Ordering::Relaxed);
                         let _ = handle.emit(&format!("ssh-data-{}", sid), data);
                     }
                     Ok(_) => {
@@ -128,30 +116,34 @@ impl SshManager {
                 channel,
                 running,
                 reader_handle: Some(reader_handle),
+                bytes_read,
+                bytes_written,
             },
         );
-
         Ok(())
     }
 
     pub fn write(&self, session_id: &str, data: &[u8]) -> Result<()> {
-        let s = self
-            .sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow!("会话不存在: {}", session_id))?;
+        let s = self.sessions.get(session_id).ok_or_else(|| anyhow!("会话不存在"))?;
         let mut ch = s.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
         ch.write_all(data)?;
+        s.bytes_written.fetch_add(data.len() as u64, Ordering::Relaxed);
         Ok(())
     }
 
     pub fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<()> {
-        let s = self
-            .sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow!("会话不存在: {}", session_id))?;
+        let s = self.sessions.get(session_id).ok_or_else(|| anyhow!("会话不存在"))?;
         let mut ch = s.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
         ch.request_pty_size(cols, rows, None, None)?;
         Ok(())
+    }
+
+    pub fn get_traffic(&self, session_id: &str) -> Result<TrafficStats> {
+        let s = self.sessions.get(session_id).ok_or_else(|| anyhow!("会话不存在"))?;
+        Ok(TrafficStats {
+            bytes_read: s.bytes_read.load(Ordering::Relaxed),
+            bytes_written: s.bytes_written.load(Ordering::Relaxed),
+        })
     }
 
     pub fn disconnect(&mut self, session_id: &str) -> Result<()> {
@@ -165,31 +157,18 @@ impl SshManager {
         Ok(())
     }
 
-    pub fn exec_command(&self, server: &Server, command: &str) -> Result<String> {
+    pub fn exec_command(
+        &self,
+        server: &Server,
+        group: Option<&CredentialGroup>,
+        command: &str,
+    ) -> Result<String> {
+        let auth = ResolvedAuth::resolve(server, group)?;
         let tcp = TcpStream::connect((server.host.as_str(), server.port))?;
         let mut session = Session::new()?;
         session.set_tcp_stream(tcp);
         session.handshake()?;
-
-        match server.auth_type.as_str() {
-            "password" => {
-                session.userauth_password(&server.username, &server.password)?;
-            }
-            "key" => {
-                let passphrase = if server.key_passphrase.is_empty() {
-                    None
-                } else {
-                    Some(server.key_passphrase.as_str())
-                };
-                session.userauth_pubkey_memory(
-                    &server.username,
-                    None,
-                    &server.private_key,
-                    passphrase,
-                )?;
-            }
-            _ => return Err(anyhow!("不支持的认证类型")),
-        }
+        auth.authenticate(&mut session)?;
 
         let mut channel = session.channel_session()?;
         channel.exec(command)?;

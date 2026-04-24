@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import type { Tab } from "../../types";
+import { useAppStore } from "../../stores/useAppStore";
 
 interface Props {
   tab: Tab;
@@ -18,6 +19,7 @@ export default function TerminalTab({ tab }: Props) {
   const sessionIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
   const connectedRef = useRef(false);
+  const updateTabSessionId = useAppStore((s) => s.updateTabSessionId);
 
   const connect = useCallback(async () => {
     if (connectedRef.current || !containerRef.current) return;
@@ -70,6 +72,7 @@ export default function TerminalTab({ tab }: Props) {
       });
       sessionIdRef.current = sessionId;
       connectedRef.current = true;
+      updateTabSessionId(tab.id, sessionId);
 
       term.onData((data) => {
         if (sessionIdRef.current) {

@@ -19,11 +19,11 @@ interface Props {
 }
 
 export default function SftpPanel({ tab }: Props) {
-  const [path, setPath] = useState("/root");
+  const [path, setPath] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<FileEntry | null>(null);
-  const [pathHistory, setPathHistory] = useState<string[]>(["/root"]);
+  const [pathHistory, setPathHistory] = useState<string[]>([]);
 
   const loadDir = useCallback(
     async (dirPath: string) => {
@@ -46,7 +46,17 @@ export default function SftpPanel({ tab }: Props) {
   );
 
   useEffect(() => {
-    loadDir(path);
+    invoke<string>("get_server_home", { serverId: tab.serverId })
+      .then((home) => {
+        setPath(home);
+        setPathHistory([home]);
+        loadDir(home);
+      })
+      .catch(() => {
+        setPath("/");
+        setPathHistory(["/"]);
+        loadDir("/");
+      });
   }, []);
 
   const navigateTo = (newPath: string) => {
