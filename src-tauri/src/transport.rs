@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use ssh2::Session;
@@ -12,7 +13,7 @@ use crate::models::{CredentialGroup, ResolvedAuth, Server};
 
 pub struct ProxyGuard {
     handle: Option<std::thread::JoinHandle<()>>,
-    running: Arc<AtomicBool>,
+    running: std::sync::Arc<AtomicBool>,
 }
 
 impl Drop for ProxyGuard {
@@ -104,10 +105,10 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
     })
 }
 
-fn start_local_proxy(tunnel: ssh2::Channel, keep_alive: Session) -> (u16, std::thread::JoinHandle<()>, Arc<AtomicBool>) {
+fn start_local_proxy(tunnel: ssh2::Channel, keep_alive: Session) -> (u16, std::thread::JoinHandle<()>, std::sync::Arc<AtomicBool>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("无法绑定本地代理端口");
     let proxy_port = listener.local_addr().unwrap().port();
-    let running = Arc::new(AtomicBool::new(true));
+    let running = std::sync::Arc::new(AtomicBool::new(true));
     let run = running.clone();
 
     let handle = std::thread::spawn(move || {
@@ -174,4 +175,86 @@ fn start_local_proxy(tunnel: ssh2::Channel, keep_alive: Session) -> (u16, std::t
     });
 
     (proxy_port, handle, running)
+}
+
+struct PooledEntry {
+    guard: SessionGuard,
+    last_used: Instant,
+    ref_count: usize,
+}
+
+pub struct SessionPool {
+    inner: Mutex<HashMap<String, PooledEntry>>,
+}
+
+impl SessionPool {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn acquire(&self, server: &Server, db: &Database) -> Result<()> {
+        let mut pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
+        if let Some(entry) = pool.get_mut(&server.id) {
+            if entry.guard.session.authenticated() {
+                entry.last_used = Instant::now();
+                entry.ref_count += 1;
+                return Ok(());
+            }
+            pool.remove(&server.id);
+        }
+        let guard = create_session(server, db)?;
+        pool.insert(
+            server.id.clone(),
+            PooledEntry {
+                guard,
+                last_used: Instant::now(),
+                ref_count: 1,
+            },
+        );
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn with_session<F, T>(&self, server_id: &str, f: F) -> Result<T>
+    where
+        F: FnOnce(&Session) -> Result<T>,
+    {
+        let pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
+        let entry = pool.get(server_id).ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
+        f(&entry.guard.session)
+    }
+
+    pub fn with_session_mut<F, T>(&self, server_id: &str, f: F) -> Result<T>
+    where
+        F: FnOnce(&mut Session) -> Result<T>,
+    {
+        let mut pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
+        let entry = pool.get_mut(server_id).ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
+        f(&mut entry.guard.session)
+    }
+
+    pub fn release(&self, server_id: &str) {
+        if let Ok(mut pool) = self.inner.lock() {
+            if let Some(entry) = pool.get_mut(server_id) {
+                entry.ref_count = entry.ref_count.saturating_sub(1);
+            }
+        }
+    }
+
+    pub fn remove(&self, server_id: &str) {
+        if let Ok(mut pool) = self.inner.lock() {
+            pool.remove(server_id);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn cleanup_idle(&self, timeout: Duration) {
+        if let Ok(mut pool) = self.inner.lock() {
+            pool.retain(|_, entry| {
+                entry.ref_count > 0 || entry.last_used.elapsed() < timeout
+            });
+        }
+    }
 }

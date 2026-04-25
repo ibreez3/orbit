@@ -153,17 +153,21 @@ impl SshManager {
     }
 
     pub fn exec_command(
-        &self,
+        pool: &transport::SessionPool,
         server: &Server,
         db: &Database,
         command: &str,
     ) -> Result<String> {
-        let guard = transport::create_session(server, db)?;
-        let mut channel = guard.session.channel_session()?;
-        channel.exec(command)?;
-        let mut output = String::new();
-        channel.read_to_string(&mut output)?;
-        Ok(output)
+        pool.acquire(server, db)?;
+        let result = pool.with_session_mut(&server.id, |session| {
+            let mut channel = session.channel_session()?;
+            channel.exec(command)?;
+            let mut output = String::new();
+            channel.read_to_string(&mut output)?;
+            Ok(output)
+        });
+        pool.release(&server.id);
+        result
     }
 }
 

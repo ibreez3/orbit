@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-Orbit 是一款基于 Tauri 2 + React 的桌面 SSH 管理终端，面向需要管理多台 Linux 服务器的开发者与运维人员。
+Orbit 是一款基于 Tauri 2 + React 的桌面 SSH 管理终端，面向需要管理多台 Linux 服务器的开发者与运维人员。支持跳板机（堡垒机）代理连接。
 
 GitHub: https://github.com/ibreez3/orbit
 
@@ -44,6 +44,7 @@ make clean           # 清理构建产物
 ```
 ssh-manager/
 ├── AGENTS.md                      # 本文件
+├── TODO.md                        # 待办事项（优化项 + 新功能规划）
 ├── Makefile                       # 构建命令
 ├── app-icon.png                   # 应用图标 (1024x1024)
 ├── package.json
@@ -69,7 +70,7 @@ ssh-manager/
 │   │   ├── Monitor/
 │   │   │   └── MonitorPanel.tsx   # 资源监控面板 + 趋势图
 │   │   ├── ServerDialog/
-│   │   │   └── ServerDialog.tsx   # 服务器添加/编辑弹窗
+│   │   │   └── ServerDialog.tsx   # 服务器添加/编辑弹窗（含跳板机选择）
 │   │   └── CredentialGroupDialog/
 │   │       └── CredentialGroupDialog.tsx  # 凭据分组弹窗
 │
@@ -85,12 +86,38 @@ ssh-manager/
         ├── lib.rs                 # 所有 Tauri Command 注册 + 应用启动
         ├── models.rs              # 数据模型 + ResolvedAuth 凭据解析
         ├── db.rs                  # SQLite 数据库 CRUD（servers + credential_groups）
+        ├── transport.rs           # 统一连接工厂（直连/跳板机，SessionGuard + ProxyGuard）
         ├── ssh.rs                 # SSH 会话管理（连接、读写、断开）
         ├── sftp.rs                # SFTP 文件操作（列表、上传、下载、删除）
         └── monitor.rs             # 资源监控脚本 + 输出解析
 ```
 
 ## 架构设计
+
+### 连接层（transport.rs）
+
+所有 SSH 连接通过 `transport::create_session()` 统一创建，上层代码无需关心直连还是跳板机：
+
+```
+create_session(server, db)
+  → server.jump_server_id 为空？
+    → 是：create_direct_session() — TcpStream → handshake → auth
+    → 否：create_jump_session()
+      → create_direct_session(jump_server) — 先连跳板机
+      → channel_direct_tcpip(target_host, target_port) — TCP 转发隧道
+      → start_local_proxy(tunnel) — 本地 TCP 代理线程
+      → 通过本地代理连接目标服务器 → handshake → auth
+  ← 返回 SessionGuard { session, _proxy }
+
+SessionGuard  Drop 时自动清理：
+  - session 断开
+  - ProxyGuard Drop → 停止代理线程 + 断开跳板机连接
+```
+
+**关键实现细节：**
+- `ProxyGuard` 持有代理线程 `JoinHandle` 和跳板机 `SessionGuard`
+- 代理线程使用非阻塞 I/O（`set_blocking(false)`），polling 循环转发 tunnel ↔ local_tcp 数据
+- 密钥认证使用临时文件 + `userauth_pubkey_file`（兼容 Windows）
 
 ### 前后端通信
 
@@ -99,7 +126,8 @@ ssh-manager/
 ```
 前端 invoke("connect_ssh", { serverId })
   → 后端 Command connect_ssh()
-    → 建立 SSH 连接，创建 shell channel
+    → transport::create_session() 建立连接（直连或跳板机）
+    → 创建 shell channel
     → 启动线程读取 channel 输出
     → 通过 app_handle.emit("ssh-data-{id}", bytes) 发送到前端
   ← 返回 session_id
@@ -124,10 +152,10 @@ ssh-manager/
     → 有 credential_group_id？加载 CredentialGroup
   → models.rs: ResolvedAuth::resolve()
     → auth_type == "password" → 跳过密钥解析
-    → auth_type == "key" && key_source == "file" → 展开路径（~ → home） → 读取文件
+    → auth_type == "key" && key_source == "file" → expand_tilde() → 读取文件
     → auth_type == "key" && key_source == "content" → 直接使用内容
   → ResolvedAuth::authenticate()
-    → ssh2 密码认证 或 密钥认证
+    → ssh2 密码认证 或 密钥认证（临时文件方式）
 ```
 
 ### 数据库
@@ -147,6 +175,7 @@ ssh-manager/
 | username, password | 密码认证凭据 |
 | private_key, key_source, key_file_path, key_passphrase | 密钥认证凭据 |
 | credential_group_id | 关联的凭据分组 ID（空=使用自身凭据） |
+| jump_server_id | 跳板机服务器 ID（空=直连） |
 
 **credential_groups** — 凭据分组（共享认证）
 
@@ -157,9 +186,15 @@ ssh-manager/
 | auth_type, username, password | 认证信息 |
 | private_key, key_source, key_file_path, key_passphrase | 密钥信息 |
 
-数据库迁移：`db.rs` 的 `new()` 函数中用 `ALTER TABLE ... ADD COLUMN` 处理旧数据库升级，忽略 "列已存在" 错误。
+数据库迁移：`db.rs` 的 `new()` 函数中用 `ALTER TABLE ... ADD COLUMN` 处理旧数据库升级，忽略 "列已存在" 错误。参数绑定统一使用 `rusqlite::params![]` 宏。
 
 ## 开发规范
+
+### 分支策略
+
+- `main` 分支受保护（需要 PR + 1 个审批）
+- 开发在 `develop` 分支进行，完成后提 PR 合并到 `main`
+- CI 仅在 `main` 分支 push tag 时触发 Release 构建
 
 ### 代码风格
 
@@ -184,7 +219,7 @@ accent-blue    #7aa2f7   主强调色
 accent-green   #9ece6a   在线/成功
 accent-red     #f7768e   错误/删除
 accent-yellow  #e0af68   编辑/警告
-accent-cyan    #7dcfff   CPU/信息
+accent-cyan    #7dcfff   CPU/信息/跳板机
 accent-purple  #bb9af7   凭据分组
 ```
 
@@ -207,6 +242,7 @@ accent-purple  #bb9af7   凭据分组
 - 凭据明文存储在 SQLite（后续可改为 AES 加密或系统 keychain）
 - SFTP 每次操作建立新 SSH 连接（后续可改为连接池）
 - 监控数据通过 SSH 执行 shell 脚本采集（依赖 Linux，不兼容 macOS/BSD）
+- 跳板机依赖 `AllowTcpForwarding yes`（或 `local`），需跳板机 sshd_config 开启
 - Windows/Linux 构建未在本地验证（依赖 GitHub Actions CI）
 
 ## 发布流程
