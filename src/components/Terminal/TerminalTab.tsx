@@ -4,6 +4,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import type { Tab } from "../../types";
 import { useAppStore } from "../../stores/useAppStore";
@@ -62,6 +63,13 @@ export default function TerminalTab({ tab }: Props) {
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(containerRef.current);
+
+    try {
+      term.loadAddon(new WebglAddon());
+    } catch {
+      console.warn("WebGL 渲染器加载失败，使用 Canvas 回退");
+    }
+
     fitAddon.fit();
 
     xtermRef.current = term;
