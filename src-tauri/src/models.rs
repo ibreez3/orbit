@@ -15,6 +15,7 @@ pub struct Server {
     pub key_file_path: String,
     pub key_passphrase: String,
     pub credential_group_id: String,
+    pub jump_server_id: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -33,6 +34,7 @@ pub struct ServerInput {
     pub key_file_path: Option<String>,
     pub key_passphrase: Option<String>,
     pub credential_group_id: Option<String>,
+    pub jump_server_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

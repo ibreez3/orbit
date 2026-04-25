@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
-use ssh2::Session;
 use tauri::{AppHandle, Emitter};
 
-use crate::models::{CredentialGroup, ResolvedAuth, Server};
+use crate::models::Server;
+use crate::db::Database;
+use crate::transport;
 
 #[derive(Serialize, Clone)]
 pub struct TrafficStats {
@@ -19,7 +19,7 @@ pub struct TrafficStats {
 }
 
 struct ActiveSession {
-    session: Session,
+    guard: transport::SessionGuard,
     channel: Arc<std::sync::Mutex<ssh2::Channel>>,
     running: Arc<AtomicBool>,
     reader_handle: Option<std::thread::JoinHandle<()>>,
@@ -42,29 +42,24 @@ impl SshManager {
         &mut self,
         session_id: &str,
         server: &Server,
-        group: Option<&CredentialGroup>,
+        db: &Database,
         app_handle: AppHandle,
     ) -> Result<()> {
-        let auth = ResolvedAuth::resolve(server, group)?;
-
-        let tcp = TcpStream::connect((server.host.as_str(), server.port))
-            .map_err(|_| anyhow!("连接失败 {}:{}", server.host, server.port))?;
-        tcp.set_nonblocking(false)?;
-
-        let mut session = Session::new()?;
-        session.set_tcp_stream(tcp);
-        session.handshake()?;
-        auth.authenticate(&mut session)?;
-
-        if !session.authenticated() {
-            return Err(anyhow!("认证失败"));
-        }
-
-        let mut channel = session.channel_session()?;
+        let guard = transport::create_session(server, db)?;
+        let mut channel = guard.session.channel_session()?;
         channel.request_pty("xterm-256color", None, None)?;
         channel.shell()?;
-        session.set_blocking(false);
+        guard.session.set_blocking(false);
+        self.spawn_reader_and_insert(session_id, guard, channel, app_handle)
+    }
 
+    fn spawn_reader_and_insert(
+        &mut self,
+        session_id: &str,
+        guard: transport::SessionGuard,
+        channel: ssh2::Channel,
+        app_handle: AppHandle,
+    ) -> Result<()> {
         let channel = Arc::new(std::sync::Mutex::new(channel));
         let running = Arc::new(AtomicBool::new(true));
         let bytes_read = Arc::new(AtomicU64::new(0));
@@ -112,7 +107,7 @@ impl SshManager {
         self.sessions.insert(
             session_id.to_string(),
             ActiveSession {
-                session,
+                guard,
                 channel,
                 running,
                 reader_handle: Some(reader_handle),
@@ -152,7 +147,7 @@ impl SshManager {
             if let Some(h) = s.reader_handle.take() {
                 let _ = h.join();
             }
-            let _ = s.session.disconnect(None, "bye", None);
+            let _ = s.guard.session.disconnect(None, "bye", None);
         }
         Ok(())
     }
@@ -160,17 +155,11 @@ impl SshManager {
     pub fn exec_command(
         &self,
         server: &Server,
-        group: Option<&CredentialGroup>,
+        db: &Database,
         command: &str,
     ) -> Result<String> {
-        let auth = ResolvedAuth::resolve(server, group)?;
-        let tcp = TcpStream::connect((server.host.as_str(), server.port))?;
-        let mut session = Session::new()?;
-        session.set_tcp_stream(tcp);
-        session.handshake()?;
-        auth.authenticate(&mut session)?;
-
-        let mut channel = session.channel_session()?;
+        let guard = transport::create_session(server, db)?;
+        let mut channel = guard.session.channel_session()?;
         channel.exec(command)?;
         let mut output = String::new();
         channel.read_to_string(&mut output)?;
@@ -185,7 +174,7 @@ impl Drop for SshManager {
             if let Some(h) = s.reader_handle.take() {
                 let _ = h.join();
             }
-            let _ = s.session.disconnect(None, "bye", None);
+            let _ = s.guard.session.disconnect(None, "bye", None);
         }
     }
 }

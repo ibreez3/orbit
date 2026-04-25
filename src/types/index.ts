@@ -12,6 +12,7 @@ export interface Server {
   key_file_path: string;
   key_passphrase: string;
   credential_group_id: string;
+  jump_server_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +30,7 @@ export interface ServerInput {
   key_file_path?: string;
   key_passphrase?: string;
   credential_group_id?: string;
+  jump_server_id?: string;
 }
 
 export interface CredentialGroup {

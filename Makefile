@@ -6,10 +6,14 @@ release:
 dev:
 	npx tauri dev
 
-debug:
-	npx tauri build --debug
+check:
+	@cd src-tauri && cargo check
+	@npx tsc --noEmit
 
-build:
+debug: check
+	@npx tauri build --debug
+
+build: check
 	npx tauri build
 
 build-arm:

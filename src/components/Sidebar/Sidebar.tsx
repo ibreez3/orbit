@@ -1,7 +1,7 @@
 import { useAppStore } from "../../stores/useAppStore";
 import {
   Plus, Server, FolderSync, Terminal, FolderOpen, Activity,
-  Pencil, Trash2, ChevronRight, ChevronDown, KeyRound,
+  Pencil, Trash2, ChevronRight, ChevronDown, KeyRound, Route,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { Server as ServerType, Tab } from "../../types";
@@ -137,7 +137,10 @@ export default function Sidebar() {
                     onDoubleClick={() => openTab(server, "terminal")}
                     onContextMenu={(e) => { e.preventDefault(); setContextMenu({ server, x: e.clientX, y: e.clientY }); }}
                   >
-                    <FolderSync size={14} className="text-accent-green flex-shrink-0" />
+                    <div className="flex items-center gap-1">
+                      <FolderSync size={14} className="text-accent-green flex-shrink-0" />
+                      {server.jump_server_id && <Route size={10} className="text-accent-cyan flex-shrink-0" />}
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-text-secondary">{server.name}</div>
                       <div className="text-xs text-text-muted truncate">

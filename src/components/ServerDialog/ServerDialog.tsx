@@ -2,11 +2,11 @@ import { useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as dialogOpen } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../../stores/useAppStore";
-import { X, Eye, EyeOff, Plug, Loader2, FileKey, ClipboardPaste } from "lucide-react";
+import { X, Eye, EyeOff, Plug, Loader2, FileKey, ClipboardPaste, Route } from "lucide-react";
 import type { ServerInput } from "../../types";
 
 export default function ServerDialog() {
-  const { editingServer, credentialGroups, dialogDefaults, closeDialog, addServer, updateServer, deleteServer } = useAppStore();
+  const { editingServer, credentialGroups, dialogDefaults, servers, closeDialog, addServer, updateServer, deleteServer } = useAppStore();
 
   const [form, setForm] = useState<ServerInput>({
     name: editingServer?.name ?? "",
@@ -21,6 +21,7 @@ export default function ServerDialog() {
     key_file_path: editingServer?.key_file_path ?? "",
     key_passphrase: editingServer?.key_passphrase ?? "",
     credential_group_id: editingServer?.credential_group_id ?? "",
+    jump_server_id: editingServer?.jump_server_id ?? "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showKeyPass, setShowKeyPass] = useState(false);
@@ -50,7 +51,6 @@ export default function ServerDialog() {
   const pickKeyFile = async () => {
     const selected = await dialogOpen({
       multiple: false,
-      filters: [{ name: "Private Key", extensions: ["pem", "key", "id_rsa", "id_ed25519", "id_ecdsa", ""] }],
     });
     if (selected) {
       update("key_file_path", selected as string);
@@ -159,6 +159,33 @@ export default function ServerDialog() {
               <input type="number" value={form.port ?? 22} onChange={(e) => update("port", parseInt(e.target.value) || 22)} className={inputCls} />
             </div>
           </div>
+
+          {/* Jump Server */}
+          <div>
+            <label className="block text-xs text-text-muted mb-2">跳板机</label>
+            <div className="flex gap-2">
+              <button onClick={() => { update("jump_server_id", ""); }}
+                className={`flex-1 py-2 rounded text-sm transition-colors ${!form.jump_server_id ? "bg-accent-blue/20 text-accent-blue border border-accent-blue/50" : "bg-bg-primary text-text-muted border border-border hover:border-text-muted"}`}>
+                直连
+              </button>
+              <button onClick={() => { if (!form.jump_server_id && servers.length > 0) update("jump_server_id", servers[0].id); }}
+                className={`flex-1 py-2 rounded text-sm transition-colors flex items-center justify-center gap-1 ${form.jump_server_id ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/50" : "bg-bg-primary text-text-muted border border-border hover:border-text-muted"}`}>
+                <Route size={12} /> 通过跳板机
+              </button>
+            </div>
+          </div>
+
+          {form.jump_server_id && (
+            <div>
+              <label className="block text-xs text-text-muted mb-1">选择跳板机</label>
+              <select value={form.jump_server_id} onChange={(e) => update("jump_server_id", e.target.value)} className={inputCls}>
+                {servers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.host}:{s.port})</option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-xs text-text-muted">将通过跳板机执行 <code className="text-accent-cyan">ssh {form.username}@{form.host} -p {form.port}</code></p>
+            </div>
+          )}
 
           {/* Credential source */}
           <div>

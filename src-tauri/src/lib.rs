@@ -3,6 +3,7 @@ mod models;
 mod monitor;
 mod sftp;
 mod ssh;
+mod transport;
 
 use std::sync::Mutex;
 use tauri::{AppHandle, State};
@@ -12,13 +13,6 @@ struct AppState {
     db: db::Database,
     ssh: Mutex<ssh::SshManager>,
     sftp: Mutex<sftp::SftpManager>,
-}
-
-fn resolve_group(state: &AppState, server: &Server) -> Result<Option<CredentialGroup>, String> {
-    if server.credential_group_id.is_empty() {
-        return Ok(None);
-    }
-    state.db.get_credential_group(&server.credential_group_id).map(Some).map_err(|e| e.to_string())
 }
 
 // --- Server commands ---
@@ -59,18 +53,12 @@ async fn test_connection(state: State<'_, AppState>, input: ServerInput) -> Resu
         key_file_path: input.key_file_path.clone().unwrap_or_default(),
         key_passphrase: input.key_passphrase.clone().unwrap_or_default(),
         credential_group_id: input.credential_group_id.clone().unwrap_or_default(),
+        jump_server_id: input.jump_server_id.clone().unwrap_or_default(),
         created_at: String::new(),
         updated_at: String::new(),
     };
-    let group = resolve_group(&state, &server)?;
-    let auth = ResolvedAuth::resolve(&server, group.as_ref()).map_err(|e| e.to_string())?;
-
-    let tcp = std::net::TcpStream::connect((server.host.as_str(), server.port)).map_err(|e| format!("连接失败: {}", e))?;
-    let mut session = ssh2::Session::new().map_err(|e| format!("SSH会话创建失败: {}", e))?;
-    session.set_tcp_stream(tcp);
-    session.handshake().map_err(|e| format!("握手失败: {}", e))?;
-    auth.authenticate(&mut session).map_err(|e| e.to_string())?;
-    Ok(session.authenticated())
+    let guard = transport::create_session(&server, &state.db).map_err(|e| e.to_string())?;
+    Ok(guard.session.authenticated())
 }
 
 // --- SSH commands ---
@@ -78,10 +66,9 @@ async fn test_connection(state: State<'_, AppState>, input: ServerInput) -> Resu
 #[tauri::command]
 async fn connect_ssh(state: State<'_, AppState>, server_id: String, app_handle: AppHandle) -> Result<String, String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let session_id = uuid::Uuid::new_v4().to_string();
     let mut mgr = state.ssh.lock().map_err(|e| e.to_string())?;
-    mgr.connect(&session_id, &server, group.as_ref(), app_handle).map_err(|e| e.to_string())?;
+    mgr.connect(&session_id, &server, &state.db, app_handle).map_err(|e| e.to_string())?;
     Ok(session_id)
 }
 
@@ -114,41 +101,42 @@ async fn get_ssh_traffic(state: State<'_, AppState>, session_id: String) -> Resu
 #[tauri::command]
 async fn sftp_list(state: State<'_, AppState>, server_id: String, path: String) -> Result<Vec<FileEntry>, String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
-    mgr.list_dir(&server, group.as_ref(), &path).map_err(|e| e.to_string())
+    mgr.list_dir(&server, &state.db, &path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn sftp_download(state: State<'_, AppState>, server_id: String, remote_path: String, local_path: String) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
-    mgr.download_file(&server, group.as_ref(), &remote_path, &local_path).map_err(|e| e.to_string())
+    mgr.download_file(&server, &state.db, &remote_path, &local_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn sftp_upload(state: State<'_, AppState>, server_id: String, local_path: String, remote_path: String) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
-    mgr.upload_file(&server, group.as_ref(), &local_path, &remote_path).map_err(|e| e.to_string())
+    mgr.upload_file(&server, &state.db, &local_path, &remote_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn sftp_mkdir(state: State<'_, AppState>, server_id: String, path: String) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
-    mgr.mkdir(&server, group.as_ref(), &path).map_err(|e| e.to_string())
+    mgr.mkdir(&server, &state.db, &path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn sftp_remove(state: State<'_, AppState>, server_id: String, path: String, is_dir: bool) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
-    mgr.remove(&server, group.as_ref(), &path, is_dir).map_err(|e| e.to_string())
+    mgr.remove(&server, &state.db, &path, is_dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn sftp_disconnect(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
+    let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
+    mgr.disconnect(&server_id).map_err(|e| e.to_string())
 }
 
 // --- Monitor ---
@@ -156,9 +144,8 @@ async fn sftp_remove(state: State<'_, AppState>, server_id: String, path: String
 #[tauri::command]
 async fn get_server_stats(state: State<'_, AppState>, server_id: String) -> Result<ServerStats, String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mgr = state.ssh.lock().map_err(|e| e.to_string())?;
-    let output = mgr.exec_command(&server, group.as_ref(), monitor::get_monitor_script()).map_err(|e| e.to_string())?;
+    let output = mgr.exec_command(&server, &state.db, monitor::get_monitor_script()).map_err(|e| e.to_string())?;
     monitor::collect_stats(&output).map_err(|e| e.to_string())
 }
 
@@ -187,9 +174,8 @@ async fn delete_credential_group(state: State<'_, AppState>, id: String) -> Resu
 #[tauri::command]
 async fn get_server_home(state: State<'_, AppState>, server_id: String) -> Result<String, String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    let group = resolve_group(&state, &server)?;
     let mgr = state.ssh.lock().map_err(|e| e.to_string())?;
-    let output = mgr.exec_command(&server, group.as_ref(), "echo $HOME").map_err(|e| e.to_string())?;
+    let output = mgr.exec_command(&server, &state.db, "echo $HOME").map_err(|e| e.to_string())?;
     Ok(output.trim().to_string())
 }
 
@@ -217,7 +203,7 @@ pub fn run() {
             test_connection,
             connect_ssh, write_ssh, resize_ssh, disconnect_ssh,
             get_ssh_traffic,
-            sftp_list, sftp_download, sftp_upload, sftp_mkdir, sftp_remove,
+            sftp_list, sftp_download, sftp_upload, sftp_mkdir, sftp_remove, sftp_disconnect,
             get_server_stats,
             list_credential_groups, add_credential_group, update_credential_group, delete_credential_group,
             get_server_home,
