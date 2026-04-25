@@ -5,7 +5,7 @@ use serde::Serialize;
 use ssh2::Sftp;
 use tauri::{AppHandle, Emitter};
 use tracing::{info, error};
-use crate::models::{FileEntry, Server};
+use crate::models::{FileEntry, Server, expand_tilde};
 use crate::db::Database;
 use crate::transport;
 
@@ -18,9 +18,6 @@ pub struct TransferProgress {
 pub struct SftpManager;
 
 impl SftpManager {
-    #[allow(dead_code)]
-    pub fn new() -> Self { Self }
-
     fn with_sftp<F, T>(pool: &transport::SessionPool, server: &Server, db: &Database, f: F) -> Result<T>
     where
         F: FnOnce(&Sftp) -> Result<T>,
@@ -147,18 +144,4 @@ impl SftpManager {
             Ok(())
         })
     }
-}
-
-fn expand_tilde(path: &str) -> String {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return format!("{}/{}", home.display(), rest);
-        }
-    }
-    if path == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return format!("{}", home.display());
-        }
-    }
-    path.to_string()
 }

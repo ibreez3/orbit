@@ -17,6 +17,8 @@ fn derive_key() -> [u8; 32] {
     key
 }
 
+const ENCRYPTION_PREFIX: &[u8] = b"ORB1";
+
 pub fn encrypt(plaintext: &str) -> String {
     if plaintext.is_empty() {
         return String::new();
@@ -26,7 +28,8 @@ pub fn encrypt(plaintext: &str) -> String {
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
     match cipher.encrypt(&nonce, plaintext.as_bytes()) {
         Ok(ciphertext) => {
-            let mut combined = nonce.to_vec();
+            let mut combined = ENCRYPTION_PREFIX.to_vec();
+            combined.extend_from_slice(&nonce);
             combined.extend_from_slice(&ciphertext);
             STANDARD.encode(&combined)
         }
@@ -42,10 +45,14 @@ pub fn decrypt(ciphertext: &str) -> String {
         Ok(b) => b,
         Err(_) => return ciphertext.to_string(),
     };
-    if bytes.len() < 13 {
+    if bytes.len() < ENCRYPTION_PREFIX.len() + 12 + 1 {
         return ciphertext.to_string();
     }
-    let (nonce_bytes, encrypted) = bytes.split_at(12);
+    let (prefix, rest) = bytes.split_at(ENCRYPTION_PREFIX.len());
+    if prefix != ENCRYPTION_PREFIX {
+        return ciphertext.to_string();
+    }
+    let (nonce_bytes, encrypted) = rest.split_at(12);
     let key = derive_key();
     let cipher = Aes256Gcm::new_from_slice(&key).expect("AES key init failed");
     let nonce = Nonce::from_slice(nonce_bytes);
@@ -59,5 +66,7 @@ pub fn is_encrypted(value: &str) -> bool {
     if value.is_empty() {
         return false;
     }
-    STANDARD.decode(value).map_or(false, |bytes| bytes.len() >= 13)
+    STANDARD.decode(value).map_or(false, |bytes| {
+        bytes.len() >= ENCRYPTION_PREFIX.len() + 12 && &bytes[..ENCRYPTION_PREFIX.len()] == ENCRYPTION_PREFIX
+    })
 }

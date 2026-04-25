@@ -185,7 +185,7 @@ impl ResolvedAuth {
     }
 }
 
-fn expand_tilde(path: &str) -> String {
+pub fn expand_tilde(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
             return format!("{}/{}", home.display(), rest);

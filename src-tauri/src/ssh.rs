@@ -151,6 +151,7 @@ impl SshManager {
             if let Some(h) = s.reader_handle.take() {
                 let _ = h.join();
             }
+            let _ = s.guard.session.set_blocking(true);
             let _ = s.guard.session.disconnect(None, "bye", None);
             info!(session_id, "SSH 会话已断开");
         }
@@ -187,6 +188,7 @@ impl Drop for SshManager {
             if let Some(h) = s.reader_handle.take() {
                 let _ = h.join();
             }
+            let _ = s.guard.session.set_blocking(true);
             let _ = s.guard.session.disconnect(None, "bye", None);
         }
     }

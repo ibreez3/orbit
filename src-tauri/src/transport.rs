@@ -304,16 +304,6 @@ impl SessionPool {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn with_session<F, T>(&self, server_id: &str, f: F) -> Result<T>
-    where
-        F: FnOnce(&Session) -> Result<T>,
-    {
-        let pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
-        let entry = pool.get(server_id).ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
-        f(&entry.guard.session)
-    }
-
     pub fn with_session_mut<F, T>(&self, server_id: &str, f: F) -> Result<T>
     where
         F: FnOnce(&mut Session) -> Result<T>,
@@ -339,22 +329,4 @@ impl SessionPool {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn cleanup_idle(&self, timeout: Duration) {
-        if let Ok(mut pool) = self.inner.lock() {
-            let before = pool.len();
-            pool.retain(|id, entry| {
-                if entry.ref_count > 0 || entry.last_used.elapsed() < timeout {
-                    true
-                } else {
-                    info!(server_id = %id, idle = ?entry.last_used.elapsed(), "清理空闲连接");
-                    false
-                }
-            });
-            let removed = before - pool.len();
-            if removed > 0 {
-                debug!(removed, remaining = pool.len(), "空闲连接清理完成");
-            }
-        }
-    }
 }

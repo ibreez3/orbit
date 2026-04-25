@@ -82,7 +82,7 @@ export default function SftpPanel({ tab }: Props) {
         setPathHistory(["/"]);
         loadDir("/");
       });
-  }, []);
+  }, [tab.serverId, loadDir]);
 
   useEffect(() => {
     let dlUnlisten: UnlistenFn | undefined;

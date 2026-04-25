@@ -37,11 +37,11 @@ export default function ServerDialog() {
 
   const existingGroups = useMemo(() => {
     const s = new Set<string>();
-    for (const sv of useAppStore.getState().servers) {
+    for (const sv of servers) {
       if (sv.group_name) s.add(sv.group_name);
     }
     return Array.from(s).sort();
-  }, []);
+  }, [servers]);
 
   const update = (key: keyof ServerInput, value: string | number) => {
     setForm((prev) => ({ ...prev, [key]: value }));

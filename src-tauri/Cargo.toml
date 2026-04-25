@@ -1,6 +1,6 @@
 [package]
 name = "orbit"
-version = "0.0.2"
+version = "0.0.3"
 description = "Orbit - A lightweight SSH management terminal"
 edition = "2021"
 

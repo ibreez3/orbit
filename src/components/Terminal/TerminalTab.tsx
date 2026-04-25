@@ -9,28 +9,19 @@ import "@xterm/xterm/css/xterm.css";
 import type { Tab } from "../../types";
 import { useAppStore } from "../../stores/useAppStore";
 
-const XTERM_THEME = {
-  background: "#1a1b26",
-  foreground: "#c0caf5",
-  cursor: "#c0caf5",
-  cursorAccent: "#1a1b26",
-  selectionBackground: "#33467c",
-  black: "#15161e",
-  red: "#f7768e",
-  green: "#9ece6a",
-  yellow: "#e0af68",
-  blue: "#7aa2f7",
-  magenta: "#bb9af7",
-  cyan: "#7dcfff",
-  white: "#a9b1d6",
-  brightBlack: "#414868",
-  brightRed: "#f7768e",
-  brightGreen: "#9ece6a",
-  brightYellow: "#e0af68",
-  brightBlue: "#7aa2f7",
-  brightMagenta: "#bb9af7",
-  brightCyan: "#7dcfff",
-  brightWhite: "#c0caf5",
+const THEME = {
+  background: "#1e1e2e",
+  foreground: "#cdd6f4",
+  cursor: "#f5e0dc",
+  selectionBackground: "#585b70",
+  black: "#45475a",
+  red: "#f38ba8",
+  green: "#a6e3a1",
+  yellow: "#f9e2af",
+  blue: "#89b4fa",
+  magenta: "#f5c2e7",
+  cyan: "#94e2d5",
+  white: "#bac2de",
 };
 
 interface Props {
@@ -43,17 +34,18 @@ export default function TerminalTab({ tab }: Props) {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
   const updateTabSessionId = useAppStore((s) => s.updateTabSessionId);
-  const mountedRef = useRef(false);
+  const aliveRef = useRef(false);
 
   useEffect(() => {
-    if (mountedRef.current || !containerRef.current) return;
-    mountedRef.current = true;
+    if (!containerRef.current) return;
+    aliveRef.current = true;
 
     const term = new XTerm({
-      theme: XTERM_THEME,
+      theme: THEME,
       fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: "'JetBrainsMono Nerd Font', 'FiraCode Nerd Font', Menlo, Monaco, monospace",
       cursorBlink: true,
+      cursorStyle: "bar",
       scrollback: 10000,
       convertEol: true,
     });
@@ -65,49 +57,67 @@ export default function TerminalTab({ tab }: Props) {
     term.open(containerRef.current);
 
     try {
-      term.loadAddon(new WebglAddon());
-    } catch {
-      console.warn("WebGL 渲染器加载失败，使用 Canvas 回退");
-    }
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+      });
+      term.loadAddon(webglAddon);
+    } catch {}
 
     fitAddon.fit();
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    const safeWrite = (data: string | Uint8Array) => {
+      if (!aliveRef.current) return;
+      try {
+        term.write(data);
+      } catch {}
+    };
+
     const attachSession = async (sessionId: string) => {
+      if (!aliveRef.current) return;
+
       term.onData((data) => {
+        if (!aliveRef.current) return;
         invoke("write_ssh", {
           sessionId,
           data: Array.from(new TextEncoder().encode(data)),
-        });
+        }).catch(() => {});
       });
 
       term.onResize(({ cols, rows }) => {
-        invoke("resize_ssh", { sessionId, cols, rows });
+        if (!aliveRef.current) return;
+        invoke("resize_ssh", { sessionId, cols, rows }).catch(() => {});
       });
 
       const unlistenData = await listen<number[]>(
         `ssh-data-${sessionId}`,
         (event) => {
-          const bytes = new Uint8Array(event.payload);
-          term.write(bytes);
+          safeWrite(new Uint8Array(event.payload));
         }
       );
 
       const unlistenClosed = await listen(
         `ssh-closed-${sessionId}`,
         () => {
-          term.write("\r\n\x1b[31m--- 连接已关闭 ---\x1b[0m\r\n");
+          safeWrite("\r\n\x1b[31m--- 连接已关闭 ---\x1b[0m\r\n");
         }
       );
+
+      if (!aliveRef.current) {
+        unlistenData();
+        unlistenClosed();
+        return;
+      }
 
       unlistenRef.current = [unlistenData, unlistenClosed];
       await invoke("resize_ssh", {
         sessionId,
         cols: term.cols,
         rows: term.rows,
-      });
+      }).catch(() => {});
     };
 
     if (tab.sessionId) {
@@ -115,17 +125,21 @@ export default function TerminalTab({ tab }: Props) {
     } else {
       invoke<string>("connect_ssh", { serverId: tab.serverId })
         .then((sessionId) => {
+          if (!aliveRef.current) return;
           updateTabSessionId(tab.id, sessionId);
           return attachSession(sessionId);
         })
         .catch((e) => {
-          term.write(`\r\n\x1b[31m连接失败: ${e}\x1b[0m\r\n`);
+          safeWrite(`\r\n\x1b[31m连接失败: ${e}\x1b[0m\r\n`);
         });
     }
 
     const handleResize = () => {
+      if (!aliveRef.current) return;
       if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
+        try {
+          fitAddonRef.current.fit();
+        } catch {}
       }
     };
 
@@ -136,10 +150,14 @@ export default function TerminalTab({ tab }: Props) {
     }
 
     return () => {
+      aliveRef.current = false;
       window.removeEventListener("resize", handleResize);
       observer.disconnect();
       unlistenRef.current.forEach((fn) => fn());
-      xtermRef.current?.dispose();
+      unlistenRef.current = [];
+      try {
+        term.dispose();
+      } catch {}
       xtermRef.current = null;
       fitAddonRef.current = null;
     };

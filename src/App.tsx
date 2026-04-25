@@ -159,14 +159,19 @@ export default function App() {
   }, []);
 
   const handleCloseTab = async (tab: Tab) => {
-    if (tab.type === "terminal" && tab.sessionId) {
-      const confirmed = await ask(`确定关闭终端 "${tab.title}" 吗？\n连接将被断开。`, {
-        title: "关闭确认",
-        kind: "warning",
-      });
-      if (!confirmed) return;
+    try {
+      if (tab.type === "terminal" && tab.sessionId) {
+        const confirmed = await ask(`确定关闭终端 "${tab.title}" 吗？\n连接将被断开。`, {
+          title: "关闭确认",
+          kind: "warning",
+        });
+        if (!confirmed) return;
+      }
+      removeTab(tab.id);
+    } catch (e) {
+      console.error("关闭 Tab 失败:", e);
+      removeTab(tab.id);
     }
-    removeTab(tab.id);
   };
 
   const activeTab = tabs.find((t) => t.id === activeTabId);

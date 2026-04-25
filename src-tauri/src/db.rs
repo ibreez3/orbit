@@ -193,8 +193,8 @@ impl Database {
             key_passphrase: input.key_passphrase.clone().unwrap_or_default(),
             credential_group_id: input.credential_group_id.clone().unwrap_or_default(),
             jump_server_id: input.jump_server_id.clone().unwrap_or_default(),
-            created_at: now.clone(),
-            updated_at: now,
+            created_at: now,
+            updated_at: chrono::Utc::now().to_rfc3339(),
         };
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -296,8 +296,8 @@ impl Database {
             key_source: input.key_source.clone().unwrap_or_else(|| "content".into()),
             key_file_path: input.key_file_path.clone().unwrap_or_default(),
             key_passphrase: input.key_passphrase.clone().unwrap_or_default(),
-            created_at: now.clone(),
-            updated_at: now,
+            created_at: now,
+            updated_at: chrono::Utc::now().to_rfc3339(),
         };
         let conn = self.conn.lock().unwrap();
         conn.execute(
