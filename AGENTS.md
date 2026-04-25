@@ -211,8 +211,14 @@ accent-purple  #bb9af7   凭据分组
 
 ## 发布流程
 
-1. 更新 `src-tauri/tauri.conf.json` 中的 `version`
-2. 提交代码到 main 分支
-3. 打 tag: `git tag -a v0.x.0 -m "release notes"`
-4. 推送 tag: `git push origin v0.x.0`
-5. GitHub Actions 自动构建 macOS/Linux/Windows 并创建 Release
+```bash
+# 一键发版（自动更新版本号、提交、打 tag）
+make release VERSION=0.0.1
+
+# 推送代码和 tag 触发 CI 构建
+git push origin main && git push origin v0.0.1
+```
+
+脚本会自动更新以下文件的版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`
+
+Release assets 命名格式：`Orbit_<OS>_<架构>_<版本>.<后缀>`

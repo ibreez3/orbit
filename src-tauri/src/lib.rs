@@ -123,7 +123,7 @@ async fn sftp_list(state: State<'_, AppState>, server_id: String, path: String) 
 async fn sftp_download(state: State<'_, AppState>, server_id: String, remote_path: String, local_path: String) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
     let group = resolve_group(&state, &server)?;
-    let mgr = state.sftp.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
     mgr.download_file(&server, group.as_ref(), &remote_path, &local_path).map_err(|e| e.to_string())
 }
 
@@ -131,7 +131,7 @@ async fn sftp_download(state: State<'_, AppState>, server_id: String, remote_pat
 async fn sftp_upload(state: State<'_, AppState>, server_id: String, local_path: String, remote_path: String) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
     let group = resolve_group(&state, &server)?;
-    let mgr = state.sftp.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
     mgr.upload_file(&server, group.as_ref(), &local_path, &remote_path).map_err(|e| e.to_string())
 }
 
@@ -139,7 +139,7 @@ async fn sftp_upload(state: State<'_, AppState>, server_id: String, local_path: 
 async fn sftp_mkdir(state: State<'_, AppState>, server_id: String, path: String) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
     let group = resolve_group(&state, &server)?;
-    let mgr = state.sftp.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
     mgr.mkdir(&server, group.as_ref(), &path).map_err(|e| e.to_string())
 }
 
@@ -147,7 +147,7 @@ async fn sftp_mkdir(state: State<'_, AppState>, server_id: String, path: String)
 async fn sftp_remove(state: State<'_, AppState>, server_id: String, path: String, is_dir: bool) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
     let group = resolve_group(&state, &server)?;
-    let mgr = state.sftp.lock().map_err(|e| e.to_string())?;
+    let mut mgr = state.sftp.lock().map_err(|e| e.to_string())?;
     mgr.remove(&server, group.as_ref(), &path, is_dir).map_err(|e| e.to_string())
 }
 

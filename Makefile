@@ -1,4 +1,7 @@
-.PHONY: dev debug build clean
+.PHONY: dev debug build clean release
+
+release:
+	@./scripts/release.sh $(VERSION)
 
 dev:
 	npx tauri dev

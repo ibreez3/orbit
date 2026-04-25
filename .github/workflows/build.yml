@@ -15,19 +15,15 @@ jobs:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
             target: aarch64-apple-darwin
-            artifact: orbit-aarch64
+            rust_target: aarch64-apple-darwin
           - platform: macos-latest
             args: --target x86_64-apple-darwin
             target: x86_64-apple-darwin
-            artifact: orbit-x86_64
+            rust_target: x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
             target: ""
-            artifact: orbit-linux
-          # - platform: windows-latest
-          #   args: ""
-          #   target: ""
-          #   artifact: orbit-windows
+            rust_target: x86_64-unknown-linux-gnu
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -67,20 +63,43 @@ jobs:
           tauriScript: npx tauri
           args: ${{ matrix.args }}
 
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          if [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ]; then
+              ARCH="aarch64"
+            else
+              ARCH="x86_64"
+            fi
+            DMG="src-tauri/target/${{ matrix.target }}/release/bundle/dmg/Orbit_${VERSION}_${ARCH}.dmg"
+            if [ -f "$DMG" ]; then
+              cp "$DMG" "release-assets/Orbit_macOS_${ARCH}_${VERSION}.dmg"
+            fi
+          fi
+
+          if [ "${{ matrix.platform }}" = "ubuntu-22.04" ]; then
+            DEB=$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' 2>/dev/null | head -1)
+            if [ -n "$DEB" ]; then
+              cp "$DEB" "release-assets/Orbit_Linux_x86_64_${VERSION}.deb"
+            fi
+            APPIMAGE=$(find src-tauri/target/release/bundle/AppImage -maxdepth 1 -name '*.AppImage' 2>/dev/null | head -1)
+            if [ -n "$APPIMAGE" ]; then
+              cp "$APPIMAGE" "release-assets/Orbit_Linux_x86_64_${VERSION}.AppImage"
+            fi
+          fi
+
+          echo "--- Release Assets ---"
+          ls -la release-assets/
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*
-            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*
-            src-tauri/target/${{ matrix.target }}/release/bundle/AppImage/*
-            src-tauri/target/release/bundle/dmg/*
-            src-tauri/target/release/bundle/msi/*
-            src-tauri/target/release/bundle/deb/*
-            src-tauri/target/release/bundle/AppImage/*
-          if-no-files-found: ignore
+          name: release-${{ matrix.rust_target }}
+          path: release-assets/*
+          if-no-files-found: error
 
   release:
     needs: build
@@ -91,14 +110,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: release-assets
+          merge-multiple: true
 
-      - name: List artifacts
-        run: find artifacts -type f | head -30
+      - name: List release assets
+        run: ls -la release-assets/
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %h %s" --no-merges)
+          else
+            COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %h %s" --no-merges)
+          fi
+
+          echo "## Changelog" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "$COMMITS" >> CHANGELOG.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -106,8 +142,8 @@ jobs:
           name: Orbit ${{ github.ref_name }}
           draft: false
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
-          generate_release_notes: true
+          body_path: CHANGELOG.md
           files: |
-            artifacts/**/*
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

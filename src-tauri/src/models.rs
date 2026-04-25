@@ -159,9 +159,23 @@ impl ResolvedAuth {
                 } else {
                     Some(self.key_passphrase.as_str())
                 };
-                session
-                    .userauth_pubkey_memory(&self.username, None, &self.private_key_content, passphrase)
-                    .map_err(|e| anyhow::anyhow!("密钥认证失败: {}", e))?;
+                let tmp_dir = std::env::temp_dir();
+                let tmp_key = tmp_dir.join(format!("orbit_key_{}", uuid::Uuid::new_v4()));
+                std::fs::write(&tmp_key, &self.private_key_content)
+                    .map_err(|e| anyhow::anyhow!("写入临时密钥文件失败: {}", e))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&tmp_key, std::fs::Permissions::from_mode(0o600));
+                }
+                let result = session.userauth_pubkey_file(
+                    &self.username,
+                    None,
+                    std::path::Path::new(&tmp_key),
+                    passphrase,
+                );
+                let _ = std::fs::remove_file(&tmp_key);
+                result.map_err(|e| anyhow::anyhow!("密钥认证失败: {}", e))?;
             }
             _ => return Err(anyhow::anyhow!("不支持的认证类型: {}", self.auth_type)),
         }

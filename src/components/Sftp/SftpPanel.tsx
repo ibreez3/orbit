@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   FolderOpen,
   File,
@@ -83,13 +84,51 @@ export default function SftpPanel({ tab }: Props) {
   const handleDownload = async () => {
     if (!selectedEntry || selectedEntry.is_dir) return;
     try {
+      const savePath = await save({
+        defaultPath: selectedEntry.name,
+      });
+      if (!savePath) return;
       await invoke("sftp_download", {
         serverId: tab.serverId,
         remotePath: selectedEntry.path,
-        localPath: `~/Downloads/${selectedEntry.name}`,
+        localPath: savePath,
       });
     } catch (e) {
       console.error("下载失败:", e);
+    }
+  };
+
+  const handleUpload = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+      });
+      if (!selected) return;
+      const fileName = selected.split("/").pop() || selected.split("\\").pop() || "upload";
+      const remotePath = path === "/" ? `/${fileName}` : `${path}/${fileName}`;
+      await invoke("sftp_upload", {
+        serverId: tab.serverId,
+        localPath: selected,
+        remotePath,
+      });
+      loadDir(path);
+    } catch (e) {
+      console.error("上传失败:", e);
+    }
+  };
+
+  const handleMkdir = async () => {
+    const name = prompt("文件夹名称:");
+    if (!name) return;
+    try {
+      const dirPath = path === "/" ? `/${name}` : `${path}/${name}`;
+      await invoke("sftp_mkdir", {
+        serverId: tab.serverId,
+        path: dirPath,
+      });
+      loadDir(path);
+    } catch (e) {
+      console.error("创建文件夹失败:", e);
     }
   };
 
@@ -172,12 +211,14 @@ export default function SftpPanel({ tab }: Props) {
           <Download size={14} />
         </button>
         <button
+          onClick={handleUpload}
           className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-accent-blue"
           title="上传"
         >
           <Upload size={14} />
         </button>
         <button
+          onClick={handleMkdir}
           className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-accent-yellow"
           title="新建文件夹"
         >
