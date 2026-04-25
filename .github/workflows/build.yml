@@ -74,8 +74,8 @@ jobs:
             else
               ARCH="x86_64"
             fi
-            DMG="src-tauri/target/${{ matrix.target }}/release/bundle/dmg/Orbit_${VERSION}_${ARCH}.dmg"
-            if [ -f "$DMG" ]; then
+            DMG=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' 2>/dev/null | head -1)
+            if [ -n "$DMG" ]; then
               cp "$DMG" "release-assets/Orbit_macOS_${ARCH}_${VERSION}.dmg"
             fi
           fi
