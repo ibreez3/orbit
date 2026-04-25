@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "./stores/useAppStore";
 import Sidebar from "./components/Sidebar/Sidebar";
 import TerminalTab from "./components/Terminal/TerminalTab";
@@ -18,6 +19,7 @@ import {
   ArrowDown,
   ArrowUp,
 } from "lucide-react";
+import type { Tab } from "./types";
 
 const TAB_ICONS: Record<string, React.ReactNode> = {
   terminal: <Terminal size={14} />,
@@ -84,6 +86,17 @@ export default function App() {
     loadCredentialGroups();
   }, []);
 
+  const handleCloseTab = async (tab: Tab) => {
+    if (tab.type === "terminal" && tab.sessionId) {
+      const confirmed = await ask(`确定关闭终端 "${tab.title}" 吗？\n连接将被断开。`, {
+        title: "关闭确认",
+        kind: "warning",
+      });
+      if (!confirmed) return;
+    }
+    removeTab(tab.id);
+  };
+
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   return (
@@ -136,7 +149,7 @@ export default function App() {
                   className="ml-1 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-bg-tertiary transition-all"
                   onClick={(e) => {
                     e.stopPropagation();
-                    removeTab(tab.id);
+                    handleCloseTab(tab);
                   }}
                 >
                   <X size={12} />
@@ -154,13 +167,11 @@ export default function App() {
                 tab.id === activeTabId ? "block" : "hidden"
               }`}
             >
-              {tab.type === "terminal" && (
-                <TerminalTab tab={tab} />
-              )}
-              {tab.type === "sftp" && (
+              {tab.type === "terminal" ? (
+                tab.id === activeTabId && <TerminalTab tab={tab} />
+              ) : tab.type === "sftp" ? (
                 <SftpPanel tab={tab} />
-              )}
-              {tab.type === "monitor" && (
+              ) : (
                 <MonitorPanel tab={tab} />
               )}
             </div>

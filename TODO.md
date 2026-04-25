@@ -6,8 +6,7 @@
 - [x] SFTP 大文件流式传输 — 当前全量 read\_to\_end 再写，大文件会 OOM，改为分块流式读写
 - [x] 凭据加密存储 — 密码/密钥明文存 SQLite，改用 macOS Keychain 或 AES-256 加密
 - [x] 跳板机连接错误提示 — channel\_direct\_tcpip 失败时区分"TCP 转发被禁用"和"目标不可达"
-- [ ] Terminal 关闭确认 — 长连接关闭 Tab 时弹确认框
-- [ ] ActiveSession 拆分 — ssh.rs 的 connect + spawn\_reader\_and\_insert 合并简化
+- [x] Terminal 关闭确认 — 长连接关闭 Tab 时弹确认框
 
 ## 新功能
 

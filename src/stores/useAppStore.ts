@@ -122,6 +122,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeTab: (id) => {
+    const tab = get().tabs.find((t) => t.id === id);
+    if (tab?.type === "terminal" && tab.sessionId) {
+      invoke("disconnect_ssh", { sessionId: tab.sessionId }).catch(() => {});
+    }
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
       let activeTabId = s.activeTabId;
