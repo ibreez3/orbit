@@ -87,3 +87,10 @@ export interface Tab {
   title: string;
   sessionId?: string;
 }
+
+export interface Pane {
+  id: string;
+  tabId: string | null;
+  direction: "horizontal" | "vertical";
+  size: number;
+}

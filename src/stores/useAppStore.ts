@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { Server, Tab, CredentialGroup, ServerInput } from "../types";
+import type { Server, Tab, Pane, CredentialGroup, ServerInput } from "../types";
 
 interface AppState {
   servers: Server[];
@@ -14,6 +14,9 @@ interface AppState {
   cgDialogOpen: boolean;
   editingCg: CredentialGroup | null;
   loading: boolean;
+  panes: Pane[];
+  activePaneId: string | null;
+  contextMenu: { tabId: string; x: number; y: number } | null;
 
   loadServers: () => Promise<void>;
   addServer: (input: any) => Promise<void>;
@@ -33,6 +36,11 @@ interface AppState {
   moveServerToGroup: (serverId: string, groupName: string) => Promise<void>;
   openCgDialog: (cg?: CredentialGroup) => void;
   closeCgDialog: () => void;
+  splitPane: (tabId: string, direction: "horizontal" | "vertical") => void;
+  closePane: (paneId: string) => void;
+  setActivePane: (paneId: string) => void;
+  showContextMenu: (tabId: string, x: number, y: number) => void;
+  hideContextMenu: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -47,6 +55,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   cgDialogOpen: false,
   editingCg: null,
   loading: false,
+  panes: [],
+  activePaneId: null,
+  contextMenu: null,
 
   loadServers: async () => {
     set({ loading: true });
@@ -74,10 +85,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteServer: async (id) => {
     await invoke("delete_server", { id });
-    set((s) => ({
-      servers: s.servers.filter((sv) => sv.id !== id),
-      tabs: s.tabs.filter((t) => t.serverId !== id),
-    }));
+    set((s) => {
+      const tabsToRemove = s.tabs.filter((t) => t.serverId === id);
+      tabsToRemove.forEach((t) => {
+        if (t.type === "terminal" && t.sessionId) {
+          invoke("disconnect_ssh", { sessionId: t.sessionId }).catch(() => {});
+        }
+      });
+      return {
+        servers: s.servers.filter((sv) => sv.id !== id),
+        tabs: s.tabs.filter((t) => t.serverId !== id),
+        panes: s.panes.filter((p) => !tabsToRemove.some((t) => t.id === p.tabId)),
+      };
+    });
   },
 
   loadCredentialGroups: async () => {
@@ -133,7 +153,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const idx = s.tabs.findIndex((t) => t.id === id);
         activeTabId = tabs.length > 0 ? tabs[Math.min(idx, tabs.length - 1)].id : null;
       }
-      return { tabs, activeTabId };
+      const panes = s.panes.filter((p) => p.tabId !== id);
+      return { tabs, activeTabId, panes };
     });
   },
 
@@ -170,4 +191,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   openCgDialog: (cg?: CredentialGroup) => set({ cgDialogOpen: true, editingCg: cg ?? null }),
   closeCgDialog: () => set({ cgDialogOpen: false, editingCg: null }),
+
+  splitPane: (tabId, direction) => {
+    const paneId = `pane-${Date.now()}`;
+    set((s) => ({
+      panes: [
+        ...s.panes,
+        { id: paneId, tabId, direction, size: 50 },
+      ],
+      activePaneId: paneId,
+    }));
+  },
+
+  closePane: (paneId) => {
+    set((s) => {
+      const panes = s.panes.filter((p) => p.id !== paneId);
+      let activePaneId = s.activePaneId;
+      if (activePaneId === paneId) {
+        activePaneId = panes.length > 0 ? panes[panes.length - 1].id : null;
+      }
+      return { panes, activePaneId };
+    });
+  },
+
+  setActivePane: (paneId) => set({ activePaneId: paneId }),
+
+  showContextMenu: (tabId, x, y) => set({ contextMenu: { tabId, x, y } }),
+  hideContextMenu: () => set({ contextMenu: null }),
 }));
