@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use tracing::{info, debug, warn};
 
 use crate::models::Server;
 use crate::db::Database;
@@ -50,6 +51,7 @@ impl SshManager {
         channel.request_pty("xterm-256color", None, None)?;
         channel.shell()?;
         guard.session.set_blocking(false);
+        info!(session_id, server = %server.name, "SSH 终端连接成功");
         self.spawn_reader_and_insert(session_id, guard, channel, app_handle)
     }
 
@@ -87,6 +89,7 @@ impl SshManager {
                         let _ = handle.emit(&format!("ssh-data-{}", sid), data);
                     }
                     Ok(_) => {
+                        debug!(session_id = %sid, "SSH 会话正常关闭");
                         let _ = handle.emit(&format!("ssh-closed-{}", sid), ());
                         run.store(false, Ordering::Relaxed);
                         break;
@@ -97,6 +100,7 @@ impl SshManager {
                             std::thread::sleep(Duration::from_millis(5));
                             continue;
                         }
+                        warn!(session_id = %sid, error = %e, "SSH 读取错误，关闭会话");
                         run.store(false, Ordering::Relaxed);
                         break;
                     }
@@ -148,6 +152,7 @@ impl SshManager {
                 let _ = h.join();
             }
             let _ = s.guard.session.disconnect(None, "bye", None);
+            info!(session_id, "SSH 会话已断开");
         }
         Ok(())
     }
@@ -158,6 +163,7 @@ impl SshManager {
         db: &Database,
         command: &str,
     ) -> Result<String> {
+        debug!(server = %server.name, command, "执行远程命令");
         pool.acquire(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let mut channel = session.channel_session()?;
@@ -167,6 +173,9 @@ impl SshManager {
             Ok(output)
         });
         pool.release(&server.id);
+        if let Err(ref e) = result {
+            warn!(server = %server.name, command, error = %e, "远程命令执行失败");
+        }
         result
     }
 }

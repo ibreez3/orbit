@@ -26,3 +26,10 @@ uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+aes-gcm = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+gethostname = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
+tracing-appender = "0.2"

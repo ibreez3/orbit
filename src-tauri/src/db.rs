@@ -1,7 +1,9 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::sync::Mutex;
+use tracing::{info, debug};
 use crate::models::*;
+use crate::crypto;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -53,9 +55,79 @@ impl Database {
             let _ = conn.execute_batch(sql);
         }
 
-        Ok(Self {
+        let db = Self {
             conn: Mutex::new(conn),
-        })
+        };
+        db.migrate_encrypt()?;
+        info!("数据库初始化完成: {}", path);
+        Ok(db)
+    }
+
+    fn migrate_encrypt(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let mut encrypted_count = 0;
+
+        let servers: Vec<(String, String, String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, password, private_key, key_passphrase FROM servers")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        for (id, password, private_key, key_passphrase) in &servers {
+            let needs_update = !crypto::is_encrypted(password)
+                || !crypto::is_encrypted(private_key)
+                || !crypto::is_encrypted(key_passphrase);
+            if !needs_update {
+                continue;
+            }
+            let enc_pw = if crypto::is_encrypted(password) { password.clone() } else { crypto::encrypt(password) };
+            let enc_key = if crypto::is_encrypted(private_key) { private_key.clone() } else { crypto::encrypt(private_key) };
+            let enc_pp = if crypto::is_encrypted(key_passphrase) { key_passphrase.clone() } else { crypto::encrypt(key_passphrase) };
+            conn.execute(
+                "UPDATE servers SET password=?1, private_key=?2, key_passphrase=?3 WHERE id=?4",
+                rusqlite::params![enc_pw, enc_key, enc_pp, id],
+            )?;
+            encrypted_count += 1;
+        }
+
+        if encrypted_count > 0 {
+            info!(count = encrypted_count, "已加密 servers 表中的明文凭据");
+        }
+
+        let groups: Vec<(String, String, String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, password, private_key, key_passphrase FROM credential_groups")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        for (id, password, private_key, key_passphrase) in &groups {
+            let needs_update = !crypto::is_encrypted(password)
+                || !crypto::is_encrypted(private_key)
+                || !crypto::is_encrypted(key_passphrase);
+            if !needs_update {
+                continue;
+            }
+            let enc_pw = if crypto::is_encrypted(password) { password.clone() } else { crypto::encrypt(password) };
+            let enc_key = if crypto::is_encrypted(private_key) { private_key.clone() } else { crypto::encrypt(private_key) };
+            let enc_pp = if crypto::is_encrypted(key_passphrase) { key_passphrase.clone() } else { crypto::encrypt(key_passphrase) };
+            conn.execute(
+                "UPDATE credential_groups SET password=?1, private_key=?2, key_passphrase=?3 WHERE id=?4",
+                rusqlite::params![enc_pw, enc_key, enc_pp, id],
+            )?;
+        }
+
+        if encrypted_count > 0 {
+            debug!("凭据加密迁移完成");
+        } else {
+            debug!("所有凭据已是加密状态");
+        }
+
+        drop(conn);
+        Ok(())
     }
 
     fn row_to_server(row: &rusqlite::Row) -> rusqlite::Result<Server> {
@@ -67,11 +139,11 @@ impl Database {
             group_name: row.get(4)?,
             auth_type: row.get(5)?,
             username: row.get(6)?,
-            password: row.get(7)?,
-            private_key: row.get(8)?,
+            password: crypto::decrypt(&row.get::<_, String>(7)?),
+            private_key: crypto::decrypt(&row.get::<_, String>(8)?),
             key_source: row.get(9)?,
             key_file_path: row.get(10)?,
-            key_passphrase: row.get(11)?,
+            key_passphrase: crypto::decrypt(&row.get::<_, String>(11)?),
             credential_group_id: row.get(12)?,
             jump_server_id: row.get(13)?,
             created_at: row.get(14)?,
@@ -103,6 +175,9 @@ impl Database {
     pub fn add_server(&self, input: &ServerInput) -> Result<Server> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let enc_password = crypto::encrypt(&input.password.clone().unwrap_or_default());
+        let enc_private_key = crypto::encrypt(&input.private_key.clone().unwrap_or_default());
+        let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.clone().unwrap_or_default());
         let server = Server {
             id: id.clone(),
             name: input.name.clone(),
@@ -127,8 +202,8 @@ impl Database {
             rusqlite::params![
                 server.id, server.name, server.host, server.port,
                 server.group_name, server.auth_type, server.username,
-                server.password, server.private_key, server.key_source,
-                server.key_file_path, server.key_passphrase,
+                enc_password, enc_private_key, server.key_source,
+                server.key_file_path, enc_key_passphrase,
                 server.credential_group_id, server.jump_server_id,
                 server.created_at, server.updated_at,
             ],
@@ -138,6 +213,9 @@ impl Database {
 
     pub fn update_server(&self, id: &str, input: &ServerInput) -> Result<Server> {
         let now = chrono::Utc::now().to_rfc3339();
+        let enc_password = crypto::encrypt(&input.password.as_deref().unwrap_or(""));
+        let enc_private_key = crypto::encrypt(&input.private_key.as_deref().unwrap_or(""));
+        let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.as_deref().unwrap_or(""));
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE servers SET name=?1,host=?2,port=?3,group_name=?4,auth_type=?5,username=?6,password=?7,private_key=?8,key_source=?9,key_file_path=?10,key_passphrase=?11,credential_group_id=?12,jump_server_id=?13,updated_at=?14 WHERE id=?15",
@@ -146,11 +224,10 @@ impl Database {
                 input.group_name.as_deref().unwrap_or(""),
                 input.auth_type.as_deref().unwrap_or("password"),
                 input.username,
-                input.password.as_deref().unwrap_or(""),
-                input.private_key.as_deref().unwrap_or(""),
+                enc_password, enc_private_key,
                 input.key_source.as_deref().unwrap_or("content"),
                 input.key_file_path.as_deref().unwrap_or(""),
-                input.key_passphrase.as_deref().unwrap_or(""),
+                enc_key_passphrase,
                 input.credential_group_id.as_deref().unwrap_or(""),
                 input.jump_server_id.as_deref().unwrap_or(""),
                 now, id,
@@ -166,19 +243,17 @@ impl Database {
         Ok(())
     }
 
-    // --- Credential Groups ---
-
     fn row_to_credential_group(row: &rusqlite::Row) -> rusqlite::Result<CredentialGroup> {
         Ok(CredentialGroup {
             id: row.get(0)?,
             name: row.get(1)?,
             auth_type: row.get(2)?,
             username: row.get(3)?,
-            password: row.get(4)?,
-            private_key: row.get(5)?,
+            password: crypto::decrypt(&row.get::<_, String>(4)?),
+            private_key: crypto::decrypt(&row.get::<_, String>(5)?),
             key_source: row.get(6)?,
             key_file_path: row.get(7)?,
-            key_passphrase: row.get(8)?,
+            key_passphrase: crypto::decrypt(&row.get::<_, String>(8)?),
             created_at: row.get(9)?,
             updated_at: row.get(10)?,
         })
@@ -208,6 +283,9 @@ impl Database {
     pub fn add_credential_group(&self, input: &CredentialGroupInput) -> Result<CredentialGroup> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let enc_password = crypto::encrypt(&input.password.clone().unwrap_or_default());
+        let enc_private_key = crypto::encrypt(&input.private_key.clone().unwrap_or_default());
+        let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.clone().unwrap_or_default());
         let group = CredentialGroup {
             id,
             name: input.name.clone(),
@@ -224,32 +302,34 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             &format!("INSERT INTO credential_groups ({}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", Self::CG_COLUMNS),
-            (
+            rusqlite::params![
                 &group.id, &group.name, &group.auth_type, &group.username,
-                &group.password, &group.private_key, &group.key_source,
-                &group.key_file_path, &group.key_passphrase,
+                enc_password, enc_private_key, &group.key_source,
+                &group.key_file_path, enc_key_passphrase,
                 &group.created_at, &group.updated_at,
-            ),
+            ],
         )?;
         Ok(group)
     }
 
     pub fn update_credential_group(&self, id: &str, input: &CredentialGroupInput) -> Result<CredentialGroup> {
         let now = chrono::Utc::now().to_rfc3339();
+        let enc_password = crypto::encrypt(&input.password.as_deref().unwrap_or(""));
+        let enc_private_key = crypto::encrypt(&input.private_key.as_deref().unwrap_or(""));
+        let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.as_deref().unwrap_or(""));
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE credential_groups SET name=?1,auth_type=?2,username=?3,password=?4,private_key=?5,key_source=?6,key_file_path=?7,key_passphrase=?8,updated_at=?9 WHERE id=?10",
-            (
+            rusqlite::params![
                 &input.name,
                 input.auth_type.as_deref().unwrap_or("password"),
                 &input.username,
-                input.password.as_deref().unwrap_or(""),
-                input.private_key.as_deref().unwrap_or(""),
+                enc_password, enc_private_key,
                 input.key_source.as_deref().unwrap_or("content"),
                 input.key_file_path.as_deref().unwrap_or(""),
-                input.key_passphrase.as_deref().unwrap_or(""),
+                enc_key_passphrase,
                 &now, id,
-            ),
+            ],
         )?;
         drop(conn);
         self.get_credential_group(id)

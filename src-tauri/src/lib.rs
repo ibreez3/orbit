@@ -1,3 +1,4 @@
+mod crypto;
 mod db;
 mod models;
 mod monitor;
@@ -167,7 +168,11 @@ async fn get_server_home(state: State<'_, AppState>, server_id: String) -> Resul
 pub fn run() {
     let app_dir = dirs_next().expect("无法获取应用数据目录");
     std::fs::create_dir_all(&app_dir).expect("无法创建应用数据目录");
+
+    init_logging(&app_dir);
+
     let db_path = format!("{}/orbit.db", app_dir);
+    tracing::info!("Orbit starting, data dir: {}", dirs_next().unwrap_or_default());
 
     let database = db::Database::new(&db_path).expect("数据库初始化失败");
 
@@ -192,6 +197,42 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("启动失败");
+}
+
+fn init_logging(app_dir: &str) {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::Layer;
+
+    let log_path = format!("{}/orbit.log", app_dir);
+    let file_appender = tracing_appender::rolling::never(
+        std::path::Path::new(app_dir),
+        "orbit.log",
+    );
+    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_writer)
+        .with_ansi(false)
+        .with_target(true)
+        .with_filter(EnvFilter::try_new("orbit=debug").unwrap_or_else(|_| EnvFilter::new("debug")));
+
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(true)
+        .with_target(false)
+        .with_filter(EnvFilter::try_new("orbit=info").unwrap_or_else(|_| EnvFilter::new("info")));
+
+    let subscriber = tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layer);
+
+    if subscriber.try_init().is_err() {
+        eprintln!("日志系统初始化失败");
+    }
+
+    tracing::info!("日志文件: {}", log_path);
+    std::mem::forget(_guard);
 }
 
 fn dirs_next() -> Option<String> {

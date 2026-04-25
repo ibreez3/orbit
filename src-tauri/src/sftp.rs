@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde::Serialize;
 use ssh2::Sftp;
 use tauri::{AppHandle, Emitter};
+use tracing::{info, error};
 use crate::models::{FileEntry, Server};
 use crate::db::Database;
 use crate::transport;
@@ -65,6 +66,7 @@ impl SftpManager {
         app_handle: &AppHandle,
     ) -> Result<()> {
         let event_name = format!("sftp-download-{}", server.id);
+        info!(server = %server.name, remote_path, local_path, "开始下载文件");
         pool.acquire(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let sftp = session.sftp()?;
@@ -83,9 +85,13 @@ impl SftpManager {
                 transferred += n as u64;
                 let _ = app_handle.emit(&event_name, TransferProgress { transferred, total });
             }
+            info!(remote_path, transferred, total, "文件下载完成");
             Ok(())
         });
         pool.release(&server.id);
+        if let Err(ref e) = result {
+            error!(remote_path, error = %e, "文件下载失败");
+        }
         result
     }
 
@@ -101,6 +107,7 @@ impl SftpManager {
         let expanded = expand_tilde(local_path);
         let metadata = std::fs::metadata(&expanded)?;
         let total = metadata.len();
+        info!(server = %server.name, local_path, remote_path, total, "开始上传文件");
 
         pool.acquire(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
@@ -117,9 +124,13 @@ impl SftpManager {
                 transferred += n as u64;
                 let _ = app_handle.emit(&event_name, TransferProgress { transferred, total });
             }
+            info!(remote_path, transferred, total, "文件上传完成");
             Ok(())
         });
         pool.release(&server.id);
+        if let Err(ref e) = result {
+            error!(remote_path, error = %e, "文件上传失败");
+        }
         result
     }
 
