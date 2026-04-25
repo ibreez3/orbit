@@ -100,15 +100,15 @@ async fn sftp_list(state: State<'_, AppState>, server_id: String, path: String) 
 }
 
 #[tauri::command]
-async fn sftp_download(state: State<'_, AppState>, server_id: String, remote_path: String, local_path: String) -> Result<(), String> {
+async fn sftp_download(state: State<'_, AppState>, server_id: String, remote_path: String, local_path: String, app_handle: AppHandle) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    sftp::SftpManager::download_file(&state.pool, &server, &state.db, &remote_path, &local_path).map_err(|e| e.to_string())
+    sftp::SftpManager::download_file(&state.pool, &server, &state.db, &remote_path, &local_path, &app_handle).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn sftp_upload(state: State<'_, AppState>, server_id: String, local_path: String, remote_path: String) -> Result<(), String> {
+async fn sftp_upload(state: State<'_, AppState>, server_id: String, local_path: String, remote_path: String, app_handle: AppHandle) -> Result<(), String> {
     let server = state.db.get_server(&server_id).map_err(|e| e.to_string())?;
-    sftp::SftpManager::upload_file(&state.pool, &server, &state.db, &local_path, &remote_path).map_err(|e| e.to_string())
+    sftp::SftpManager::upload_file(&state.pool, &server, &state.db, &local_path, &remote_path, &app_handle).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

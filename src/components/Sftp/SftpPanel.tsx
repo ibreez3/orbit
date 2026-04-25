@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   FolderOpen,
@@ -19,12 +20,35 @@ interface Props {
   tab: Tab;
 }
 
+interface TransferProgress {
+  transferred: number;
+  total: number;
+}
+
+function formatSize(bytes: number) {
+  if (bytes === 0) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) {
+    size /= 1024;
+    i++;
+  }
+  return `${size.toFixed(1)} ${units[i]}`;
+}
+
 export default function SftpPanel({ tab }: Props) {
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<FileEntry | null>(null);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
+  const [transfer, setTransfer] = useState<{
+    direction: "upload" | "download";
+    fileName: string;
+    transferred: number;
+    total: number;
+  } | null>(null);
 
   const loadDir = useCallback(
     async (dirPath: string) => {
@@ -60,6 +84,43 @@ export default function SftpPanel({ tab }: Props) {
       });
   }, []);
 
+  useEffect(() => {
+    let dlUnlisten: UnlistenFn | undefined;
+    let ulUnlisten: UnlistenFn | undefined;
+
+    const dlEvent = `sftp-download-${tab.serverId}`;
+    const ulEvent = `sftp-upload-${tab.serverId}`;
+
+    listen<TransferProgress>(dlEvent, (e) => {
+      setTransfer((prev) => {
+        const transferred = e.payload.transferred;
+        const total = e.payload.total;
+        if (transferred >= total) return null;
+        if (prev?.direction === "download") {
+          return { ...prev, transferred, total };
+        }
+        return prev;
+      });
+    }).then((fn) => { dlUnlisten = fn; });
+
+    listen<TransferProgress>(ulEvent, (e) => {
+      setTransfer((prev) => {
+        const transferred = e.payload.transferred;
+        const total = e.payload.total;
+        if (transferred >= total) return null;
+        if (prev?.direction === "upload") {
+          return { ...prev, transferred, total };
+        }
+        return prev;
+      });
+    }).then((fn) => { ulUnlisten = fn; });
+
+    return () => {
+      dlUnlisten?.();
+      ulUnlisten?.();
+    };
+  }, [tab.serverId]);
+
   const navigateTo = (newPath: string) => {
     setPathHistory((prev) => [...prev, newPath]);
     loadDir(newPath);
@@ -88,12 +149,15 @@ export default function SftpPanel({ tab }: Props) {
         defaultPath: selectedEntry.name,
       });
       if (!savePath) return;
+      setTransfer({ direction: "download", fileName: selectedEntry.name, transferred: 0, total: selectedEntry.size });
       await invoke("sftp_download", {
         serverId: tab.serverId,
         remotePath: selectedEntry.path,
         localPath: savePath,
       });
+      setTransfer(null);
     } catch (e) {
+      setTransfer(null);
       console.error("下载失败:", e);
     }
   };
@@ -106,13 +170,16 @@ export default function SftpPanel({ tab }: Props) {
       if (!selected) return;
       const fileName = selected.split("/").pop() || selected.split("\\").pop() || "upload";
       const remotePath = path === "/" ? `/${fileName}` : `${path}/${fileName}`;
+      setTransfer({ direction: "upload", fileName, transferred: 0, total: 0 });
       await invoke("sftp_upload", {
         serverId: tab.serverId,
         localPath: selected,
         remotePath,
       });
+      setTransfer(null);
       loadDir(path);
     } catch (e) {
+      setTransfer(null);
       console.error("上传失败:", e);
     }
   };
@@ -146,17 +213,9 @@ export default function SftpPanel({ tab }: Props) {
     }
   };
 
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return "-";
-    const units = ["B", "KB", "MB", "GB"];
-    let i = 0;
-    let size = bytes;
-    while (size >= 1024 && i < units.length - 1) {
-      size /= 1024;
-      i++;
-    }
-    return `${size.toFixed(1)} ${units[i]}`;
-  };
+  const transferPercent = transfer && transfer.total > 0
+    ? Math.round((transfer.transferred / transfer.total) * 100)
+    : 0;
 
   return (
     <div className="flex flex-col h-full bg-bg-primary">
@@ -204,7 +263,7 @@ export default function SftpPanel({ tab }: Props) {
         </div>
         <button
           onClick={handleDownload}
-          disabled={!selectedEntry || selectedEntry.is_dir}
+          disabled={!selectedEntry || selectedEntry.is_dir || !!transfer}
           className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-accent-green disabled:opacity-30"
           title="下载"
         >
@@ -212,7 +271,8 @@ export default function SftpPanel({ tab }: Props) {
         </button>
         <button
           onClick={handleUpload}
-          className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-accent-blue"
+          disabled={!!transfer}
+          className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-accent-blue disabled:opacity-30"
           title="上传"
         >
           <Upload size={14} />
@@ -296,6 +356,26 @@ export default function SftpPanel({ tab }: Props) {
           </table>
         )}
       </div>
+
+      {transfer && (
+        <div className="px-3 py-1.5 border-t border-border bg-bg-secondary">
+          <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+            <span>
+              {transfer.direction === "download" ? "下载" : "上传"}: {transfer.fileName}
+            </span>
+            <span>
+              {formatSize(transfer.transferred)} / {transfer.total > 0 ? formatSize(transfer.total) : "..."}
+              {transfer.total > 0 && ` (${transferPercent}%)`}
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-bg-primary rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent-blue rounded-full transition-all duration-150"
+              style={{ width: `${transferPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="px-3 py-1.5 border-t border-border bg-bg-secondary text-xs text-text-muted flex items-center gap-4">
         <span>{entries.length} 项</span>
