@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <linearGradient id="chromeGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#151D2B" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#111827" stop-opacity="0.92"/>
+    </linearGradient>
+    <linearGradient id="sidebarGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0F1726" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0C1322" stop-opacity="1"/>
+    </linearGradient>
+    <linearGradient id="selGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4DA3FF" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#4DA3FF" stop-opacity="0.12"/>
+    </linearGradient>
+    <style>
+      .h1 { font-family: -apple-system, system-ui, "SF Pro Display", "Helvetica Neue", Arial, sans-serif; font-size: 16px; fill: #E6EDF7; font-weight: 600; }
+      .h2 { font-family: -apple-system, system-ui, "SF Pro Display", "Helvetica Neue", Arial, sans-serif; font-size: 13px; fill: #B7C3D9; font-weight: 600; }
+      .t  { font-family: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; font-size: 12px; fill: #B7C3D9; }
+      .t2 { font-family: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; font-size: 11px; fill: #7E8AA6; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; fill: #D7E0F2; }
+      .btn { fill: rgba(255,255,255,0.06); stroke: #25324A; stroke-width: 1; }
+      .btnText { font-family: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; font-size: 12px; fill: #B7C3D9; font-weight: 600; }
+      .segText { font-family: -apple-system, system-ui, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; font-size: 12px; fill: #B7C3D9; font-weight: 600; }
+      .segTextOn { fill: #E6EDF7; }
+      .rule { stroke: #1D2940; stroke-width: 1; }
+    </style>
+  </defs>
+<rect x="0" y="0" width="1600" height="1000" fill="#0B0F14"/>
+<rect x="60" y="60" width="1480" height="880" rx="18" fill="#121824" filter="url(#shadow)"/>
+<rect x="60" y="60" width="1480" height="56" rx="18" fill="url(#chromeGrad)"/>
+<rect x="60" y="98" width="1480" height="18" fill="url(#chromeGrad)"/>
+<line x1="60" y1="116" x2="1540" y2="116" class="rule"/>
+<rect x="60" y="116" width="310" height="794" fill="url(#sidebarGrad)"/>
+<line x1="370" y1="116" x2="370" y2="910" class="rule"/>
+<rect x="60" y="910" width="1480" height="30" fill="#111827"/>
+<line x1="60" y1="910" x2="1540" y2="910" class="rule"/>
+<circle cx="80" cy="78" r="6" fill="#FF5F57"/>
+<circle cx="94" cy="78" r="6" fill="#FEBC2E"/>
+<circle cx="108" cy="78" r="6" fill="#28C840"/>
+<text x="170" y="83" class="h1">Orbit</text>
+<text x="170" y="101" class="t2">轻量 SSH 管理终端</text>
+<rect x="620.0" y="73" width="360" height="30" rx="9" fill="rgba(255,255,255,0.06)" stroke="#25324A" stroke-width="1"/>
+<text x="634.0" y="93" class="t2">搜索服务器</text>
+<rect x="1458" y="73" width="64" height="30" rx="9" class="btn"/>
+<text x="1490" y="93" text-anchor="middle" class="btnText">设置</text>
+<rect x="1386" y="73" width="64" height="30" rx="9" class="btn"/>
+<text x="1418" y="93" text-anchor="middle" class="btnText">添加</text>
+<text x="78" y="140" class="h2">服务器</text>
+<text x="78" y="162" class="t2">生产环境  ·  2</text>
+<rect x="70" y="166" width="290" height="34" rx="10" fill="url(#selGrad)" stroke="rgba(77,163,255,0.35)" stroke-width="1"/>
+<circle cx="84" cy="183" r="4" fill="#42D392"/>
+<text x="96" y="186" class="t">web-01</text>
+<text x="96" y="202" class="t2">root@10.0.1.8:22</text>
+<rect x="70" y="206" width="290" height="34" rx="10" fill="rgba(255,255,255,0.00)"/>
+<circle cx="84" cy="223" r="4" fill="rgba(66,211,146,0.75)"/>
+<text x="96" y="226" class="t">db-01</text>
+<text x="96" y="242" class="t2">ubuntu@10.0.1.9:22</text>
+<text x="78" y="260" class="t2">测试环境  ·  1</text>
+<rect x="70" y="264" width="290" height="34" rx="10" fill="rgba(255,255,255,0.00)"/>
+<circle cx="84" cy="281" r="4" fill="rgba(66,211,146,0.75)"/>
+<text x="96" y="284" class="t">staging-01</text>
+<text x="96" y="300" class="t2">dev@10.0.2.4:22</text>
+<text x="78" y="318" class="t2">默认  ·  1</text>
+<rect x="70" y="322" width="290" height="34" rx="10" fill="rgba(255,255,255,0.00)"/>
+<circle cx="84" cy="339" r="4" fill="rgba(66,211,146,0.75)"/>
+<text x="96" y="342" class="t">local-vm</text>
+<text x="96" y="358" class="t2">user@192.168.64.2:22</text>
+<rect x="390" y="74" width="310" height="28" rx="9" fill="rgba(255,255,255,0.05)" stroke="#25324A" stroke-width="1"/>
+<line x1="493.3333333333333" y1="79" x2="493.3333333333333" y2="97" stroke="#25324A" stroke-width="1"/>
+<line x1="596.6666666666666" y1="79" x2="596.6666666666666" y2="97" stroke="#25324A" stroke-width="1"/>
+<rect x="597.6666666666666" y="75" width="101.33333333333333" height="26" rx="8" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+<text x="441.6666666666667" y="93" text-anchor="middle" class="segText">终端</text>
+<text x="545.0" y="93" text-anchor="middle" class="segText">文件</text>
+<text x="648.3333333333333" y="93" text-anchor="middle" class="segText segTextOn">监控</text>
+<rect x="370" y="116" width="1170" height="794" fill="#121824"/>
+<rect x="390" y="134" width="1130" height="758" rx="14" fill="#0F1624" stroke="#1D2940" stroke-width="1"/>
+<text x="408" y="168" class="h2">资源监控 - web-01</text>
+<text x="1502" y="168" text-anchor="end" class="t2">自动刷新：开启  •  3s</text>
+<line x1="390" y1="182" x2="1520" y2="182" class="rule"/>
+<rect x="408.0" y="204" width="352.6666666666667" height="150" rx="14" fill="rgba(255,255,255,0.03)" stroke="#1D2940" stroke-width="1"/>
+<text x="424.0" y="236" class="t2">CPU 使用率</text>
+<text x="424.0" y="278" class="h1" fill="#4DA3FF">34.8%</text>
+<rect x="424.0" y="302" width="320.6666666666667" height="10" rx="5" fill="rgba(255,255,255,0.06)"/>
+<rect x="424.0" y="302" width="111.592" height="10" rx="5" fill="#4DA3FF" opacity="0.85"/>
+<rect x="778.6666666666667" y="204" width="352.6666666666667" height="150" rx="14" fill="rgba(255,255,255,0.03)" stroke="#1D2940" stroke-width="1"/>
+<text x="794.6666666666667" y="236" class="t2">内存使用</text>
+<text x="794.6666666666667" y="278" class="h1" fill="#B58CFF">62.1%</text>
+<rect x="794.6666666666667" y="302" width="320.6666666666667" height="10" rx="5" fill="rgba(255,255,255,0.06)"/>
+<rect x="794.6666666666667" y="302" width="199.13400000000001" height="10" rx="5" fill="#B58CFF" opacity="0.85"/>
+<text x="794.6666666666667" y="332" class="t2">8123 MB / 13056 MB</text>
+<rect x="1149.3333333333335" y="204" width="352.6666666666667" height="150" rx="14" fill="rgba(255,255,255,0.03)" stroke="#1D2940" stroke-width="1"/>
+<text x="1165.3333333333335" y="236" class="t2">磁盘使用</text>
+<text x="1165.3333333333335" y="278" class="h1" fill="#F5C25A">41.0%</text>
+<rect x="1165.3333333333335" y="302" width="320.6666666666667" height="10" rx="5" fill="rgba(255,255,255,0.06)"/>
+<rect x="1165.3333333333335" y="302" width="131.47333333333333" height="10" rx="5" fill="#F5C25A" opacity="0.85"/>
+<text x="1165.3333333333335" y="332" class="t2">128 GB / 312 GB</text>
+<rect x="408" y="372" width="1094" height="498" rx="14" fill="rgba(255,255,255,0.03)" stroke="#1D2940" stroke-width="1"/>
+<text x="424" y="404" class="t2">CPU / 内存 使用趋势（最近 30 秒）</text>
+<rect x="424" y="426" width="1062" height="422" rx="10" fill="rgba(0,0,0,0.15)" stroke="#1D2940" stroke-width="1"/>
+<line x1="424" y1="531.5" x2="1486" y2="531.5" stroke="#1D2940" stroke-width="1" opacity="0.45"/>
+<line x1="424" y1="637.0" x2="1486" y2="637.0" stroke="#1D2940" stroke-width="1" opacity="0.45"/>
+<line x1="424" y1="742.5" x2="1486" y2="742.5" stroke="#1D2940" stroke-width="1" opacity="0.45"/>
+<polyline points="424.0,687.6 542.0,658.1 660.0,670.8 778.0,594.8 896.0,611.7 1014.0,577.9 1132.0,603.2 1250.0,556.8 1368.0,569.5 1486.0,544.2" fill="none" stroke="#4DA3FF" stroke-width="2.5" opacity="0.95" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="424.0,586.4 542.0,594.8 660.0,599.0 778.0,603.2 896.0,615.9 1014.0,611.7 1132.0,620.1 1250.0,628.6 1368.0,632.8 1486.0,637.0" fill="none" stroke="#B58CFF" stroke-width="2.5" opacity="0.95" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="424" y="874" class="t2">09:41:30</text>
+<text x="1486" y="874" text-anchor="end" class="t2">09:42:00</text>
+<text x="1356" y="416" class="t2">CPU</text>
+<circle cx="1336" cy="411" r="4" fill="#4DA3FF"/>
+<text x="1426" y="416" class="t2">内存</text>
+<circle cx="1406" cy="411" r="4" fill="#B58CFF"/>
+<text x="78" y="930" class="t2">监控：web-01  •  上次刷新 09:42:00  •  就绪</text>
+<text x="1522" y="930" text-anchor="end" class="t2">分屏 x1</text>
+</svg>

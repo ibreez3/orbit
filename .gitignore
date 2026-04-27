@@ -1,9 +1,18 @@
-node_modules/
-dist/
+# macOS
 .DS_Store
 *.local
 
-src-tauri/target/
-src-tauri/Cargo.lock
+# Rust (orbit-rs native library)
+orbit-rs/target/
 
+# Xcode
+orbit-app/Orbit.xcodeproj/xcuserdata/
+orbit-app/Orbit.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# Database
 *.db
+
+# Node (legacy, keep for safety)
+node_modules/
+dist/

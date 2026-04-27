@@ -1,0 +1,59 @@
+name: Orbit
+options:
+  bundleIdPrefix: com.orbit
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    from: "1.13.0"
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: "5.9"
+    PRODUCT_NAME: "$(TARGET_NAME)"
+
+targets:
+  Orbit:
+    type: application
+    platform: macOS
+    sources:
+      - path: Orbit
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
+        PRODUCT_NAME: Orbit
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/../orbit-rs/include"
+        OTHER_LDFLAGS:
+          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/liborbit_core.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libsqlite3-sys-07df06458df92129/out/libsqlite3.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libssh2-sys-a921a610c67742d7/out/build/libssh2.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libssl.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libcrypto.a"
+          - "-lz"
+          - "-liconv"
+          - "-framework"
+          - "Security"
+          - "-framework"
+          - "SystemConfiguration"
+        OTHER_SWIFT_FLAGS:
+          - "-Xcc"
+          - "-Wno-everything"
+        ENABLE_BITCODE: false
+        SWIFT_OBJC_BRIDGING_HEADER: "Orbit/Orbit-Bridging-Header.h"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
