@@ -36,12 +36,16 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         HEADER_SEARCH_PATHS:
           - "$(PROJECT_DIR)/../orbit-rs/include"
+        ARCHS:
+          - x86_64
+          - arm64
+        ONLY_ACTIVE_ARCH: false
         OTHER_LDFLAGS:
-          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/liborbit_core.a"
-          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libsqlite3-sys-07df06458df92129/out/libsqlite3.a"
-          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libssh2-sys-a921a610c67742d7/out/build/libssh2.a"
-          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libssl.a"
-          - "$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libcrypto.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a"
+          - "$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a"
           - "-lz"
           - "-liconv"
           - "-framework"

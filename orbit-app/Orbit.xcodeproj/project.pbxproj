@@ -214,6 +214,10 @@
 		1C3F5A8A5772DFD0CD0785E5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = (
+					x86_64,
+					arm64,
+				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "-";
@@ -230,12 +234,13 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = (
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/liborbit_core.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libsqlite3-sys-07df06458df92129/out/libsqlite3.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libssh2-sys-a921a610c67742d7/out/build/libssh2.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libssl.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libcrypto.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a",
 					"-lz",
 					"-liconv",
 					"-framework",
@@ -313,6 +318,10 @@
 		73F0DFF75D6E8A438E59D6FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = (
+					x86_64,
+					arm64,
+				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "-";
@@ -329,12 +338,13 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = (
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/liborbit_core.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libsqlite3-sys-07df06458df92129/out/libsqlite3.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/libssh2-sys-a921a610c67742d7/out/build/libssh2.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libssl.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/x86_64-apple-darwin/release/build/openssl-sys-c78f145ea232b6a5/out/openssl-build/install/lib/libcrypto.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a",
 					"-lz",
 					"-liconv",
 					"-framework",
