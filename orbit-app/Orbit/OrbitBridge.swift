@@ -243,6 +243,7 @@ class OrbitBridge {
 
     func sftpListFull(serverId: String, path: String) throws -> [FileEntry] {
         try ensureInitialized()
+        print("[OrbitBridge] sftpListFull serverId=\(serverId) path=\(path)")
         var outJson: UnsafeMutablePointer<CChar>?
         let rc = serverId.withCString { sidPtr in
             path.withCString { pathPtr in
@@ -250,10 +251,13 @@ class OrbitBridge {
             }
         }
         guard rc == 0, let json = outJson else {
+            print("[OrbitBridge] sftpListFull FAILED rc=\(rc)")
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([FileEntry].self, from: String(cString: json).data(using: .utf8)!)
+        let result = try JSONDecoder().decode([FileEntry].self, from: String(cString: json).data(using: .utf8)!)
+        print("[OrbitBridge] sftpListFull OK path=\(path) entries=\(result.count)")
+        return result
     }
 
     func sftpDownload(serverId: String, remotePath: String, localPath: String) throws {
@@ -300,6 +304,59 @@ class OrbitBridge {
             }
         }
         guard rc == 0 else { throw OrbitError.apiError(rc) }
+    }
+
+    func sftpReadTextFile(serverId: String, path: String, maxSize: UInt64 = 2 * 1024 * 1024) throws -> String {
+        try ensureInitialized()
+        print("[OrbitBridge] sftpReadTextFile serverId=\(serverId) path=\(path) maxSize=\(maxSize)")
+        var outContent: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            path.withCString { pathPtr in
+                orbit_sftp_read_text_file(app, sidPtr, pathPtr, maxSize, &outContent)
+            }
+        }
+        guard rc == 0, let content = outContent else {
+            print("[OrbitBridge] sftpReadTextFile FAILED rc=\(rc)")
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(content) }
+        let result = String(cString: content)
+        print("[OrbitBridge] sftpReadTextFile OK path=\(path) contentLen=\(result.count)")
+        return result
+    }
+
+    func sftpWriteTextFile(serverId: String, path: String, content: String) throws {
+        try ensureInitialized()
+        print("[OrbitBridge] sftpWriteTextFile serverId=\(serverId) path=\(path) contentLen=\(content.count)")
+        let rc = serverId.withCString { sidPtr in
+            path.withCString { pathPtr in
+                content.withCString { contentPtr in
+                    orbit_sftp_write_text_file(app, sidPtr, pathPtr, contentPtr)
+                }
+            }
+        }
+        if rc != 0 {
+            print("[OrbitBridge] sftpWriteTextFile FAILED rc=\(rc)")
+            throw OrbitError.apiError(rc)
+        }
+        print("[OrbitBridge] sftpWriteTextFile OK path=\(path)")
+    }
+
+    func sftpRename(serverId: String, oldPath: String, newPath: String) throws {
+        try ensureInitialized()
+        print("[OrbitBridge] sftpRename serverId=\(serverId) old=\(oldPath) new=\(newPath)")
+        let rc = serverId.withCString { sidPtr in
+            oldPath.withCString { oldPtr in
+                newPath.withCString { newPtr in
+                    orbit_sftp_rename(app, sidPtr, oldPtr, newPtr)
+                }
+            }
+        }
+        if rc != 0 {
+            print("[OrbitBridge] sftpRename FAILED rc=\(rc)")
+            throw OrbitError.apiError(rc)
+        }
+        print("[OrbitBridge] sftpRename OK old=\(oldPath)")
     }
 
     // MARK: - Monitor

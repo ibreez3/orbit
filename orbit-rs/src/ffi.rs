@@ -8,6 +8,7 @@ use crate::ssh;
 use crate::sftp;
 use crate::monitor;
 use crate::sftp::SftpManager;
+use tracing::{info, error};
 
 pub type OrbitDataCallback = extern "C" fn(*const c_char, *const u8, usize, *mut c_void);
 pub type OrbitClosedCallback = extern "C" fn(*const c_char, *mut c_void);
@@ -512,6 +513,135 @@ pub extern "C" fn orbit_sftp_disconnect(app: *mut OrbitApp, server_id: *const c_
     };
     app.pool.remove(sid);
     0
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_sftp_read_text_file(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    path: *const c_char,
+    max_size: u64,
+    out_content: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || path.is_null() || out_content.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    match SftpManager::read_text_file(&app.pool, &server, &app.db, path_str, max_size) {
+        Ok(content) => {
+            info!(target: "orbit::ffi", server_id = %sid, path = %path_str, content_len = content.len(), "✅ orbit_sftp_read_text_file 成功");
+            let c_str = CString::new(&content[..]);
+            match c_str {
+                Ok(s) => {
+                    unsafe { *out_content = s.into_raw() };
+                    0
+                }
+                Err(_) => {
+                    error!(target: "orbit::ffi", server_id = %sid, path = %path_str, "CString 转换失败（含 null 字节），已过滤");
+                    let sanitized: String = content.chars().filter(|&c| c != '\0').collect();
+                    let s = CString::new(sanitized).unwrap_or_default();
+                    unsafe { *out_content = s.into_raw() };
+                    0
+                }
+            }
+        }
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, path = %path_str, error = %e, "❌ orbit_sftp_read_text_file 失败");
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_sftp_write_text_file(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    path: *const c_char,
+    content: *const c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || path.is_null() || content.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let content_str = match unsafe { CStr::from_ptr(content) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    info!(target: "orbit::ffi", server_id = %sid, path = %path_str, content_len = content_str.len(), "🔵 orbit_sftp_write_text_file");
+    match SftpManager::write_text_file(&app.pool, &server, &app.db, path_str, content_str) {
+        Ok(_) => {
+            info!(target: "orbit::ffi", server_id = %sid, path = %path_str, "✅ orbit_sftp_write_text_file 成功");
+            0
+        }
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, path = %path_str, error = %e, "❌ orbit_sftp_write_text_file 失败");
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_sftp_rename(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    old_path: *const c_char,
+    new_path: *const c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || old_path.is_null() || new_path.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let old = match unsafe { CStr::from_ptr(old_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let new = match unsafe { CStr::from_ptr(new_path) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    info!(target: "orbit::ffi", server_id = %sid, old = %old, new = %new, "🔵 orbit_sftp_rename");
+    match SftpManager::rename(&app.pool, &server, &app.db, old, new) {
+        Ok(_) => {
+            info!(target: "orbit::ffi", server_id = %sid, old = %old, new = %new, "✅ orbit_sftp_rename 成功");
+            0
+        }
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, old = %old, new = %new, error = %e, "❌ orbit_sftp_rename 失败");
+            -4
+        }
+    }
 }
 
 #[no_mangle]

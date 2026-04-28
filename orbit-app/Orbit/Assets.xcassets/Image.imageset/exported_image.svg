@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 基础定义 -->
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7aa2f7"/>
+      <stop offset="100%" stop-color="#7dcfff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS 圆角背景 -->
+  <rect x="32" y="32" width="960" height="960" rx="180" fill="#1a1b26"/>
+
+  <!-- 主轨道环 -->
+  <circle cx="512" cy="512" r="320" fill="none" stroke="url(#blue)" stroke-width="40" stroke-linecap="round"/>
+
+  <!-- 服务器卫星点 -->
+  <circle cx="720" cy="320" r="28" fill="#7dcfff"/>
+  <circle cx="304" cy="380" r="24" fill="#7dcfff"/>
+  <circle cx="580" cy="730" r="26" fill="#7dcfff"/>
+
+  <!-- 中心终端光标 >_ （下划线在正下方，无复杂变换，全兼容） -->
+  <path d="M480 480 L512 512 L480 544" stroke="url(#blue)" stroke-width="24" fill="none" stroke-linecap="round"/>
+  <line x1="480" y1="560" x2="520" y2="560" stroke="url(#blue)" stroke-width="24" stroke-linecap="round"/>
+</svg>

@@ -13,6 +13,7 @@
 		82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 3E1BDD661D1C0F68B456CE86 /* SwiftTerm */; };
 		882B6CF1F05A970520DB5634 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A671031DC275C23C66F22B8 /* SidebarView.swift */; };
+		9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */; };
 		B94BCE8782A000F9C641CAC6 /* OrbitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */; };
 		C7105A3C1958F5D3A894FEA7 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E9630F023416DA2028BB98 /* MainView.swift */; };
 		C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */; };
@@ -26,6 +27,7 @@
 /* Begin PBXFileReference section */
 		08F1ADE58D311170A9C63C4E /* MonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorView.swift; sourceTree = "<group>"; };
 		0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialGroupDialog.swift; sourceTree = "<group>"; };
+		1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditorView.swift; sourceTree = "<group>"; };
 		20936134E6681D18358932B7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20E9630F023416DA2028BB98 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
@@ -94,6 +96,7 @@
 				49216EECC7DFB1EC893159AF /* SftpView.swift */,
 				6A671031DC275C23C66F22B8 /* SidebarView.swift */,
 				CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */,
+				1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -201,6 +204,7 @@
 				5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */,
 				882B6CF1F05A970520DB5634 /* SidebarView.swift in Sources */,
 				82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */,
+				9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -203,4 +203,63 @@ impl SftpManager {
             Ok(())
         })
     }
+
+    pub fn read_text_file(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str, max_size: u64) -> Result<String> {
+        info!(target: "orbit::sftp", server = %server.name, path, max_size, "🔵 read_text_file 开始");
+        let escaped = path.replace("'", "'\\''");
+        let size_cmd = format!("stat -c%s '{}' 2>/dev/null || echo 0", escaped);
+        let size_output = ssh::SshManager::exec_command(pool, server, db, &size_cmd)
+            .map_err(|e| {
+                error!(target: "orbit::sftp", server = %server.name, path, error = %e, "stat 命令执行失败");
+                e
+            })?;
+        let size: u64 = size_output.trim().parse().unwrap_or(0);
+        info!(target: "orbit::sftp", server = %server.name, path, size, "stat 结果");
+        if size > max_size {
+            error!(target: "orbit::sftp", server = %server.name, path, size, max_size, "文件过大");
+            return Err(anyhow::anyhow!("文件过大 ({} 字节)，超过限制 ({} 字节)", size, max_size));
+        }
+        let read_cmd = format!("head -c {} '{}' 2>/dev/null", max_size, escaped);
+        info!(target: "orbit::sftp", server = %server.name, path, cmd = %read_cmd, "执行 head 命令");
+        let content = ssh::SshManager::exec_command(pool, server, db, &read_cmd)
+            .map_err(|e| {
+                error!(target: "orbit::sftp", server = %server.name, path, error = %e, "head 命令执行失败");
+                e
+            })?;
+        info!(target: "orbit::sftp", server = %server.name, path, size, content_len = content.len(), "✅ read_text_file 完成");
+        Ok(content)
+    }
+
+    pub fn write_text_file(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str, content: &str) -> Result<()> {
+        info!(target: "orbit::sftp", server = %server.name, path, content_len = content.len(), "🔵 write_text_file 开始");
+        let escaped = path.replace("'", "'\\''");
+        let encoded = shell_encode(content);
+        let cmd = format!("printf '%s' '{}' > '{}'", encoded, escaped);
+        ssh::SshManager::exec_command(pool, server, db, &cmd)
+            .map_err(|e| {
+                error!(target: "orbit::sftp", server = %server.name, path, error = %e, "printf 写入失败");
+                e
+            })?;
+        info!(target: "orbit::sftp", server = %server.name, path, "✅ write_text_file 完成");
+        Ok(())
+    }
+
+    pub fn rename(pool: &transport::SessionPool, server: &Server, db: &Database, old_path: &str, new_path: &str) -> Result<()> {
+        info!(target: "orbit::sftp", server = %server.name, old_path, new_path, "🔵 rename 开始");
+        let escaped_old = old_path.replace("'", "'\\''");
+        let escaped_new = new_path.replace("'", "'\\''");
+        let cmd = format!("mv '{}' '{}'", escaped_old, escaped_new);
+        ssh::SshManager::exec_command(pool, server, db, &cmd)
+            .map_err(|e| {
+                error!(target: "orbit::sftp", server = %server.name, old_path, new_path, error = %e, "mv 重命名失败");
+                e
+            })?;
+        info!(target: "orbit::sftp", server = %server.name, old_path, new_path, "✅ rename 完成");
+        Ok(())
+    }
+}
+
+fn shell_encode(s: &str) -> String {
+    s.replace('\'', "'\\''")
+        .replace('%', "%%")
 }

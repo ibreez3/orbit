@@ -17,6 +17,7 @@ class AppState {
     var editingCg: CredentialGroup? = nil
 
     let bridge = OrbitBridge.shared
+    let textEditorWC = TextEditorWindowController()
 
     func loadServers() {
         Task {

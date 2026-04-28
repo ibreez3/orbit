@@ -61,6 +61,12 @@ ORBIT_API int32_t orbit_sftp_remove(struct OrbitApp *app, const char *server_id,
 
 ORBIT_API int32_t orbit_sftp_disconnect(struct OrbitApp *app, const char *server_id);
 
+ORBIT_API int32_t orbit_sftp_read_text_file(struct OrbitApp *app, const char *server_id, const char *path, uint64_t max_size, char **out_content);
+
+ORBIT_API int32_t orbit_sftp_write_text_file(struct OrbitApp *app, const char *server_id, const char *path, const char *content);
+
+ORBIT_API int32_t orbit_sftp_rename(struct OrbitApp *app, const char *server_id, const char *old_path, const char *new_path);
+
 ORBIT_API int32_t orbit_get_server_stats(struct OrbitApp *app, const char *server_id, char **out_json);
 
 ORBIT_API int32_t orbit_get_server_home(struct OrbitApp *app, const char *server_id, char **out_home);

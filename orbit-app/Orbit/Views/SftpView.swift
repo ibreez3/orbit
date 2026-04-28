@@ -13,6 +13,8 @@ struct SftpView: View {
     @State private var transfer: TransferInfo?
     @State private var showMkdirAlert = false
     @State private var mkdirName = ""
+    @State private var showRenameAlert = false
+    @State private var renameName = ""
 
     struct TransferInfo {
         let direction: String
@@ -32,6 +34,20 @@ struct SftpView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { loadHome() }
+        .alert("重命名", isPresented: $showRenameAlert) {
+            TextField("新名称", text: $renameName)
+            Button("确定") { handleRename() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("输入新文件名")
+        }
+        .alert("新建文件夹", isPresented: $showMkdirAlert) {
+            TextField("文件夹名称", text: $mkdirName)
+            Button("确定") { handleMkdir() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("输入文件夹名称")
+        }
     }
 
     private var toolbar: some View {
@@ -152,7 +168,7 @@ struct SftpView: View {
             }
             .buttonStyle(.plain)
 
-            Image(systemName: entry.is_dir ? "folder.fill" : "doc")
+            Image(systemName: entryIcon(entry))
                 .foregroundStyle(entry.is_dir ? .yellow : .secondary)
                 .font(.system(size: 13))
                 .frame(width: 20)
@@ -179,6 +195,72 @@ struct SftpView: View {
         .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         .onTapGesture {
             selectOrNavigate(entry: entry)
+        }
+        .contextMenu { contextMenuItems(for: entry) }
+    }
+
+    private func entryIcon(_ entry: FileEntry) -> String {
+        if entry.is_dir { return "folder.fill" }
+        let ext = (entry.name as NSString).pathExtension.lowercased()
+        let textExts: Set<String> = ["txt", "md", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "log", "csv", "html", "htm", "css", "js", "ts", "py", "rb", "go", "rs", "java", "c", "cpp", "h", "hpp", "sh", "bash", "zsh", "fish", "sql", "env", "gitignore", "dockerignore", "makefile", "cmake", "gradle", "properties", "plist", "lock", "sum"]
+        return textExts.contains(ext) || entry.name.lowercased() == "makefile" || entry.name.lowercased() == "dockerfile" ? "doc.text" : "doc"
+    }
+
+    private func isTextFile(_ entry: FileEntry) -> Bool {
+        guard !entry.is_dir else { return false }
+        let ext = (entry.name as NSString).pathExtension.lowercased()
+        let textExts: Set<String> = [
+            "txt", "md", "json", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf",
+            "log", "csv", "tsv", "html", "htm", "css", "scss", "less", "js", "jsx",
+            "ts", "tsx", "py", "rb", "go", "rs", "java", "c", "cpp", "cc", "h", "hpp",
+            "sh", "bash", "zsh", "fish", "sql", "env", "gitignore", "gitattributes",
+            "gitmodules", "dockerignore", "cmake", "gradle", "properties", "plist",
+            "lock", "sum", "rss", "atom", "svg", "tex", "bib", "rst", "org",
+            "bashrc", "zshrc", "zprofile", "zshenv", "profile", "vimrc", "gvimrc",
+            "gitconfig", "hgrc", "npmrc", "gemrc", "cargo", "editorconfig",
+            "babelrc", "eslintrc", "prettierrc", "stylelintrc", "ember-cli",
+        ]
+        if textExts.contains(ext) { return true }
+        let nameLower = entry.name.lowercased()
+        let knownTextNames: Set<String> = [
+            "makefile", "dockerfile", "vagrantfile", "gemfile", "rakefile",
+            "cmakelists.txt", "changelog", "contributing", "authors", "patents",
+            "license", "copying", "notice", "readme",
+        ]
+        if knownTextNames.contains(nameLower) { return true }
+        if nameLower.hasPrefix("readme") { return true }
+        let startsWithDot = entry.name.hasPrefix(".")
+        return startsWithDot && textExts.contains(ext)
+    }
+
+    @ViewBuilder
+    private func contextMenuItems(for entry: FileEntry) -> some View {
+        if !entry.is_dir {
+            Button("下载") {
+                print("[SftpView] contextMenu 下载: \(entry.path)")
+                selectedEntry = entry
+                downloadFile(entry)
+            }
+            Button("重命名") {
+                print("[SftpView] contextMenu 重命名: \(entry.path)")
+                selectedEntry = entry
+                renameName = entry.name
+                showRenameAlert = true
+            }
+            Divider()
+            if isTextFile(entry) {
+                Button("编辑") {
+                    print("[SftpView] contextMenu 编辑: \(entry.path) isTextFile=true")
+                    selectedEntry = entry
+                    appState.textEditorWC.open(serverId: tab.serverId, filePath: entry.path, fileName: entry.name)
+                }
+            }
+            Divider()
+        }
+        Button("删除") {
+            print("[SftpView] contextMenu 删除: \(entry.path)")
+            selectedEntry = entry
+            handleDelete()
         }
     }
 
@@ -254,6 +336,7 @@ struct SftpView: View {
     }
 
     private func loadDir(_ dirPath: String) {
+        print("[SftpView] loadDir: \(dirPath)")
         path = dirPath
         loading = true
         selectedEntry = nil
@@ -289,6 +372,10 @@ struct SftpView: View {
 
     private func handleDownload() {
         guard let entry = selectedEntry, !entry.is_dir else { return }
+        downloadFile(entry)
+    }
+
+    private func downloadFile(_ entry: FileEntry) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = entry.name
         panel.beginSheetModal(for: NSApp.keyWindow!) { resp in
@@ -387,6 +474,43 @@ struct SftpView: View {
                 } catch {
                     print("删除失败: \(error)")
                 }
+            }
+        }
+    }
+
+    private func handleRename() {
+        guard let entry = selectedEntry, !renameName.isEmpty, renameName != entry.name else { return }
+        let serverId = tab.serverId
+        let oldPath = entry.path
+        let newPath = path == "/" ? "/\(renameName)" : "\(path)/\(renameName)"
+        let bridge = appState.bridge
+        let currentPath = path
+        blockingAsync {
+            do {
+                try bridge.sftpRename(serverId: serverId, oldPath: oldPath, newPath: newPath)
+                DispatchQueue.main.async {
+                    self.loadDir(currentPath)
+                }
+            } catch {
+                print("重命名失败: \(error)")
+            }
+        }
+    }
+
+    private func handleMkdir() {
+        guard !mkdirName.isEmpty else { return }
+        let serverId = tab.serverId
+        let dirPath = path == "/" ? "/\(mkdirName)" : "\(path)/\(mkdirName)"
+        let bridge = appState.bridge
+        let currentPath = path
+        blockingAsync {
+            do {
+                try bridge.sftpMkdir(serverId: serverId, path: dirPath)
+                DispatchQueue.main.async {
+                    self.loadDir(currentPath)
+                }
+            } catch {
+                print("新建文件夹失败: \(error)")
             }
         }
     }

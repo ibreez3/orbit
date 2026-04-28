@@ -173,8 +173,11 @@ impl SshManager {
         let result = pool.with_session_mut(&server.id, |session| {
             let mut channel = session.channel_session()?;
             channel.exec(command)?;
+            session.set_timeout(30_000);
             let mut output = String::new();
-            channel.read_to_string(&mut output)?;
+            let read_result = channel.read_to_string(&mut output);
+            session.set_timeout(0);
+            read_result?;
             Ok(output)
         });
         pool.release(&server.id);
