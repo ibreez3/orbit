@@ -86,13 +86,6 @@ struct FileEntry: Codable, Identifiable {
     var id: String { path }
 }
 
-struct FileEntryStat: Codable {
-    let path: String
-    let size: UInt64
-    let modified: String
-    let permissions: String
-}
-
 enum TabType: String, CaseIterable {
     case terminal
     case sftp

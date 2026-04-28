@@ -241,12 +241,12 @@ class OrbitBridge {
 
     // MARK: - SFTP
 
-    func sftpList(serverId: String, path: String) throws -> [FileEntry] {
+    func sftpListFull(serverId: String, path: String) throws -> [FileEntry] {
         try ensureInitialized()
         var outJson: UnsafeMutablePointer<CChar>?
         let rc = serverId.withCString { sidPtr in
             path.withCString { pathPtr in
-                orbit_sftp_list(app, sidPtr, pathPtr, &outJson)
+                orbit_sftp_list_full(app, sidPtr, pathPtr, &outJson)
             }
         }
         guard rc == 0, let json = outJson else {
@@ -254,36 +254,6 @@ class OrbitBridge {
         }
         defer { orbit_free_string(json) }
         return try JSONDecoder().decode([FileEntry].self, from: String(cString: json).data(using: .utf8)!)
-    }
-
-    func sftpListFast(serverId: String, path: String) throws -> [FileEntry] {
-        try ensureInitialized()
-        var outJson: UnsafeMutablePointer<CChar>?
-        let rc = serverId.withCString { sidPtr in
-            path.withCString { pathPtr in
-                orbit_sftp_list_fast(app, sidPtr, pathPtr, &outJson)
-            }
-        }
-        guard rc == 0, let json = outJson else {
-            throw OrbitError.apiError(rc)
-        }
-        defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([FileEntry].self, from: String(cString: json).data(using: .utf8)!)
-    }
-
-    func sftpStatDirEntries(serverId: String, path: String) throws -> [FileEntryStat] {
-        try ensureInitialized()
-        var outJson: UnsafeMutablePointer<CChar>?
-        let rc = serverId.withCString { sidPtr in
-            path.withCString { pathPtr in
-                orbit_sftp_stat_dir_entries(app, sidPtr, pathPtr, &outJson)
-            }
-        }
-        guard rc == 0, let json = outJson else {
-            throw OrbitError.apiError(rc)
-        }
-        defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([FileEntryStat].self, from: String(cString: json).data(using: .utf8)!)
     }
 
     func sftpDownload(serverId: String, remotePath: String, localPath: String) throws {

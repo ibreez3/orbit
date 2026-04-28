@@ -49,11 +49,7 @@ ORBIT_API int32_t orbit_disconnect_ssh(struct OrbitApp *app, const char *session
 
 ORBIT_API int32_t orbit_get_ssh_traffic(struct OrbitApp *app, const char *session_id, uint64_t *out_read, uint64_t *out_written);
 
-ORBIT_API int32_t orbit_sftp_list(struct OrbitApp *app, const char *server_id, const char *path, char **out_json);
-
-ORBIT_API int32_t orbit_sftp_list_fast(struct OrbitApp *app, const char *server_id, const char *path, char **out_json);
-
-ORBIT_API int32_t orbit_sftp_stat_dir_entries(struct OrbitApp *app, const char *server_id, const char *path, char **out_json);
+ORBIT_API int32_t orbit_sftp_list_full(struct OrbitApp *app, const char *server_id, const char *path, char **out_json);
 
 ORBIT_API int32_t orbit_sftp_download(struct OrbitApp *app, const char *server_id, const char *remote_path, const char *local_path, OrbitProgressCallback progress_cb, void *userdata);
 

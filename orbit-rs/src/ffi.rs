@@ -349,7 +349,7 @@ pub extern "C" fn orbit_get_ssh_traffic(app: *mut OrbitApp, session_id: *const c
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_sftp_list(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_sftp_list_full(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char, out_json: *mut *mut c_char) -> i32 {
     if app.is_null() || server_id.is_null() || path.is_null() || out_json.is_null() {
         return -1;
     }
@@ -366,56 +366,8 @@ pub extern "C" fn orbit_sftp_list(app: *mut OrbitApp, server_id: *const c_char, 
         Ok(s) => s,
         Err(_) => return -3,
     };
-    match sftp::SftpManager::list_dir(&app.pool, &server, &app.db, path_str) {
+    match SftpManager::list_dir_full(&app.pool, &server, &app.db, path_str) {
         Ok(entries) => json_to_out(&entries, out_json),
-        Err(_) => -4,
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn orbit_sftp_list_fast(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char, out_json: *mut *mut c_char) -> i32 {
-    if app.is_null() || server_id.is_null() || path.is_null() || out_json.is_null() {
-        return -1;
-    }
-    let app = unsafe { &*app };
-    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(_) => return -3,
-    };
-    match SftpManager::list_dir_fast(&app.pool, &server, &app.db, path_str) {
-        Ok(entries) => json_to_out(&entries, out_json),
-        Err(_) => -4,
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn orbit_sftp_stat_dir_entries(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char, out_json: *mut *mut c_char) -> i32 {
-    if app.is_null() || server_id.is_null() || path.is_null() || out_json.is_null() {
-        return -1;
-    }
-    let app = unsafe { &*app };
-    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(_) => return -3,
-    };
-    match SftpManager::stat_dir_entries(&app.pool, &server, &app.db, path_str) {
-        Ok(stats) => json_to_out(&stats, out_json),
         Err(_) => -4,
     }
 }

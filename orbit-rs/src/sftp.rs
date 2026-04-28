@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde::Serialize;
 use ssh2::Sftp;
 use tracing::{info, error};
-use crate::models::{FileEntry, FileEntryStat, Server, expand_tilde};
+use crate::models::{FileEntry, Server, expand_tilde};
 use crate::db::Database;
 use crate::transport;
 use crate::ssh;
@@ -46,83 +46,47 @@ impl SftpManager {
         new_pct > old_pct
     }
 
-    pub fn list_dir_fast(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str) -> Result<Vec<FileEntry>> {
+    pub fn list_dir_full(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str) -> Result<Vec<FileEntry>> {
         let escaped = path.replace("'", "'\\''");
-        let cmd = format!("ls -1Ap '{}'", escaped);
+        let cmd = format!(
+            "find '{}' -maxdepth 1 -mindepth 1 -printf '%y\\t%f\\t%s\\t%T@\\t%m\\n' 2>/dev/null",
+            escaped
+        );
         let output = ssh::SshManager::exec_command(pool, server, db, &cmd)?;
         let mut entries = Vec::new();
         for line in output.lines() {
-            if line.is_empty() { continue; }
-            let is_dir = line.ends_with('/');
-            let name = line.trim_end_matches('/').to_string();
-            if name.is_empty() { continue; }
+            let parts: Vec<&str> = line.splitn(5, '\t').collect();
+            if parts.len() < 5 { continue; }
+            let type_char = parts[0];
+            let name = parts[1].to_string();
+            if name.is_empty() || name == "." || name == ".." { continue; }
+            let is_dir = type_char == "d";
+            let size: u64 = parts[2].parse().unwrap_or(0);
+            let mtime_str = parts[3];
+            let mtime_epoch: i64 = mtime_str.split('.')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let permissions = parts[4].to_string();
             let full_path = if path == "/" {
                 format!("/{}", name)
             } else {
                 format!("{}/{}", path, name)
             };
+            let modified = chrono::DateTime::from_timestamp(mtime_epoch, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_default();
             entries.push(FileEntry {
                 name,
                 path: full_path,
                 is_dir,
-                size: 0,
-                modified: String::new(),
-                permissions: String::new(),
-            });
-        }
-        entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-        Ok(entries)
-    }
-
-    pub fn stat_dir_entries(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str) -> Result<Vec<FileEntryStat>> {
-        let escaped = path.replace("'", "'\\''");
-        let cmd = format!(
-            "find '{}' -maxdepth 1 -mindepth 1 -print0 2>/dev/null | xargs -0 stat -c '%n\\t%s\\t%Y\\t%a' 2>/dev/null",
-            escaped
-        );
-        let output = ssh::SshManager::exec_command(pool, server, db, &cmd)?;
-        let mut stats = Vec::new();
-        for line in output.lines() {
-            let parts: Vec<&str> = line.splitn(4, '\t').collect();
-            if parts.len() < 4 { continue; }
-            let file_path = parts[0].to_string();
-            let size: u64 = parts[1].parse().unwrap_or(0);
-            let mtime_epoch: i64 = parts[2].parse().unwrap_or(0);
-            let permissions = parts[3].to_string();
-            let modified = chrono::DateTime::from_timestamp(mtime_epoch, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_default();
-            stats.push(FileEntryStat {
-                path: file_path,
                 size,
                 modified,
                 permissions,
             });
         }
-        Ok(stats)
-    }
-
-    pub fn list_dir(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str) -> Result<Vec<FileEntry>> {
-        Self::with_sftp(pool, server, db, |sftp| {
-            let mut entries = Vec::new();
-            let dir = sftp.readdir(std::path::Path::new(path))?;
-            for (pathbuf, stat) in dir {
-                let name = pathbuf.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if name == "." || name == ".." { continue; }
-                let full_path = pathbuf.to_string_lossy().to_string();
-                let is_dir = stat.is_dir();
-                let size = stat.size.unwrap_or(0);
-                let mtime = stat.mtime.map(|t| {
-                    chrono::DateTime::from_timestamp(t as i64, 0)
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                        .unwrap_or_default()
-                }).unwrap_or_default();
-                let perm = stat.perm.map(|p| format!("{:o}", p)).unwrap_or_default();
-                entries.push(FileEntry { name, path: full_path, is_dir, size, modified: mtime, permissions: perm });
-            }
-            entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-            Ok(entries)
-        })
+        entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
+        Ok(entries)
     }
 
     pub fn download_file(

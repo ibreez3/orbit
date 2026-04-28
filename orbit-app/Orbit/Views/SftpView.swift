@@ -261,8 +261,9 @@ struct SftpView: View {
         let bridge = appState.bridge
         blockingAsync {
             do {
-                let result = try bridge.sftpListFast(serverId: serverId, path: dirPath)
+                let result = try bridge.sftpListFull(serverId: serverId, path: dirPath)
                 DispatchQueue.main.async {
+                    guard self.path == dirPath else { return }
                     self.entries = result
                     self.loading = false
                 }
@@ -271,24 +272,6 @@ struct SftpView: View {
                 DispatchQueue.main.async {
                     self.loading = false
                 }
-                return
-            }
-            do {
-                let stats = try bridge.sftpStatDirEntries(serverId: serverId, path: dirPath)
-                DispatchQueue.main.async {
-                    guard self.path == dirPath else { return }
-                    var statMap = [String: FileEntryStat]()
-                    for s in stats { statMap[s.path] = s }
-                    for i in self.entries.indices {
-                        if let s = statMap[self.entries[i].path] {
-                            self.entries[i].size = s.size
-                            self.entries[i].modified = s.modified
-                            self.entries[i].permissions = s.permissions
-                        }
-                    }
-                }
-            } catch {
-                print("获取文件详情失败: \(error)")
             }
         }
     }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -263,13 +263,13 @@ fn start_local_proxy(tunnel: ssh2::Channel, keep_alive: Session) -> (u16, std::t
 }
 
 struct PooledEntry {
-    guard: SessionGuard,
-    last_used: Instant,
-    ref_count: usize,
+    guard: Mutex<SessionGuard>,
+    last_used: Mutex<Instant>,
+    ref_count: AtomicUsize,
 }
 
 pub struct SessionPool {
-    inner: Mutex<HashMap<String, PooledEntry>>,
+    inner: Mutex<HashMap<String, Arc<PooledEntry>>>,
 }
 
 impl SessionPool {
@@ -280,25 +280,31 @@ impl SessionPool {
     }
 
     pub fn acquire(&self, server: &Server, db: &Database) -> Result<()> {
-        let mut pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
-        if let Some(entry) = pool.get_mut(&server.id) {
-            if entry.guard.session.authenticated() {
-                entry.last_used = Instant::now();
-                entry.ref_count += 1;
-                debug!(server_id = %server.id, ref_count = entry.ref_count, "复用连接池会话");
+        let existing = {
+            let pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
+            pool.get(&server.id).cloned()
+        };
+
+        if let Some(entry) = existing {
+            let g = entry.guard.lock().map_err(|_| anyhow!("会话锁定失败"))?;
+            if g.session.authenticated() {
+                entry.ref_count.fetch_add(1, Ordering::Relaxed);
+                *entry.last_used.lock().map_err(|_| anyhow!("锁定失败"))? = Instant::now();
+                debug!(server_id = %server.id, ref_count = entry.ref_count.load(Ordering::Relaxed), "复用连接池会话");
                 return Ok(());
             }
-            warn!(server_id = %server.id, "连接池会话已失效，重新创建");
-            pool.remove(&server.id);
         }
+
         let guard = create_session(server, db)?;
+
+        let mut pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
         pool.insert(
             server.id.clone(),
-            PooledEntry {
-                guard,
-                last_used: Instant::now(),
-                ref_count: 1,
-            },
+            Arc::new(PooledEntry {
+                guard: Mutex::new(guard),
+                last_used: Mutex::new(Instant::now()),
+                ref_count: AtomicUsize::new(1),
+            }),
         );
         debug!(server_id = %server.id, "新建连接池会话");
         Ok(())
@@ -308,17 +314,22 @@ impl SessionPool {
     where
         F: FnOnce(&mut Session) -> Result<T>,
     {
-        let mut pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
-        let entry = pool.get_mut(server_id).ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
-        f(&mut entry.guard.session)
+        let entry = {
+            let pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
+            pool.get(server_id).cloned()
+        }.ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
+        let mut g = entry.guard.lock().map_err(|_| anyhow!("会话锁定失败"))?;
+        f(&mut g.session)
     }
 
     pub fn release(&self, server_id: &str) {
-        if let Ok(mut pool) = self.inner.lock() {
-            if let Some(entry) = pool.get_mut(server_id) {
-                entry.ref_count = entry.ref_count.saturating_sub(1);
-                debug!(server_id, ref_count = entry.ref_count, "释放连接池引用");
-            }
+        let entry = {
+            let pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"));
+            pool.ok().and_then(|p| p.get(server_id).cloned())
+        };
+        if let Some(entry) = entry {
+            let prev = entry.ref_count.fetch_sub(1, Ordering::Relaxed);
+            debug!(server_id, ref_count = prev - 1, "释放连接池引用");
         }
     }
 
@@ -328,5 +339,4 @@ impl SessionPool {
             info!(server_id, "连接池会话已移除");
         }
     }
-
 }
