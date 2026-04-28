@@ -38,6 +38,14 @@
 
 ## P1（效率增强：把重复操作“一键化”）
 
+- [ ] AI 助手（默认支持 OpenAI / Anthropic 协议）
+  - [ ] Settings：Provider 选择（OpenAI / Anthropic）
+  - [ ] API Key 本地加密存储（沿用 AES-256-GCM），支持一键连通性测试
+  - [ ] Terminal：Ask AI（自然语言 → 命令建议），支持“复制/一键执行”
+  - [ ] Terminal：Review（风险审计）：高危命令二次确认 + 回滚建议
+  - [ ] SQLite 面板：NL → SQL、Explain SQL、Fix Error（基于错误信息建议修正）
+  - [ ] 隐私策略：默认只发送用户选中的文本；禁止自动执行（必须显式确认）
+
 - [ ] 命令片段 Snippets
   - [ ] 按分组管理
   - [ ] 一键插入 / 一键执行
@@ -81,4 +89,3 @@
 - [ ] 自动更新机制（例如 Sparkle）与发布渠道（GitHub Releases）
 - [ ] 快捷键体系完善（Tab/面板切换、执行 SQL、打开 DB/SFTP/监控）
 - [ ] UI 打磨（空状态/加载态/错误态）与可访问性（字体缩放/对比度）
-
