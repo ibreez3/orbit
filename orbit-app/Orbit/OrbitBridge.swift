@@ -30,6 +30,7 @@ class OrbitBridge {
 
     private var app: OpaquePointer?
     private let initLock = NSLock()
+    let handlersLock = NSLock()
     var sshDataHandlers: [String: (Data) -> Void] = [:]
     var sshClosedHandlers: [String: () -> Void] = [:]
     var progressHandlers: [String: (UInt64, UInt64) -> Void] = [:]
@@ -59,15 +60,24 @@ class OrbitBridge {
     }
 
     func handleSSHData(sessionId: String, data: Data) {
-        sshDataHandlers[sessionId]?(data)
+        handlersLock.lock()
+        let handler = sshDataHandlers[sessionId]
+        handlersLock.unlock()
+        handler?(data)
     }
 
     func handleSSHClosed(sessionId: String) {
-        sshClosedHandlers[sessionId]?()
+        handlersLock.lock()
+        let handler = sshClosedHandlers[sessionId]
+        handlersLock.unlock()
+        handler?()
     }
 
     func handleProgress(serverId: String, transferred: UInt64, total: UInt64) {
-        progressHandlers[serverId]?(transferred, total)
+        handlersLock.lock()
+        let handler = progressHandlers[serverId]
+        handlersLock.unlock()
+        handler?(transferred, total)
     }
 
     // MARK: - Server CRUD

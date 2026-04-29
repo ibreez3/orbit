@@ -17,6 +17,20 @@ settings:
     SWIFT_VERSION: "5.9"
     PRODUCT_NAME: "$(TARGET_NAME)"
 
+schemes:
+  Orbit:
+    build:
+      targets:
+        Orbit: all
+    run:
+      config: Release
+    profile:
+      config: Release
+    analyze:
+      config: Release
+    archive:
+      config: Release
+
 targets:
   Orbit:
     type: application

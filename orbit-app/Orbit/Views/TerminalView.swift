@@ -107,8 +107,10 @@ struct TerminalView: NSViewRepresentable {
                     let sid = try OrbitBridge.shared.connectSSH(serverId: tab.serverId)
                     guard alive else { return }
                     sessionId = sid
+                    OrbitBridge.shared.handlersLock.lock()
                     OrbitBridge.shared.sshDataHandlers[sid] = dataHandler
                     OrbitBridge.shared.sshClosedHandlers[sid] = closedHandler
+                    OrbitBridge.shared.handlersLock.unlock()
                     appState.updateTabSessionId(tab.id, sessionId: sid)
                     await MainActor.run {
                         if let tv = terminalView {
@@ -127,8 +129,10 @@ struct TerminalView: NSViewRepresentable {
 
         func registerHandlers() {
             guard let sid = sessionId else { return }
+            OrbitBridge.shared.handlersLock.lock()
             OrbitBridge.shared.sshDataHandlers[sid] = makeDataHandler()
             OrbitBridge.shared.sshClosedHandlers[sid] = makeClosedHandler()
+            OrbitBridge.shared.handlersLock.unlock()
         }
 
         func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {

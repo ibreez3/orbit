@@ -385,6 +385,7 @@ struct SftpView: View {
             let remotePath = entry.path
             let localPath = url.path
             let bridge = appState.bridge
+            OrbitBridge.shared.handlersLock.lock()
             OrbitBridge.shared.progressHandlers[serverId] = { (transferred: UInt64, total: UInt64) in
                 DispatchQueue.main.async {
                     self.transfer?.transferred = transferred
@@ -392,18 +393,23 @@ struct SftpView: View {
                     if transferred >= total { self.transfer = nil }
                 }
             }
+            OrbitBridge.shared.handlersLock.unlock()
             blockingAsync {
                 do {
                     try bridge.sftpDownload(serverId: serverId, remotePath: remotePath, localPath: localPath)
                     DispatchQueue.main.async {
                         self.transfer = nil
+                        OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
+                        OrbitBridge.shared.handlersLock.unlock()
                     }
                 } catch {
                     print("下载失败: \(error)")
                     DispatchQueue.main.async {
                         self.transfer = nil
+                        OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
+                        OrbitBridge.shared.handlersLock.unlock()
                     }
                 }
             }
@@ -423,6 +429,7 @@ struct SftpView: View {
             let localPath = url.path
             let bridge = appState.bridge
             let currentPath = path
+            OrbitBridge.shared.handlersLock.lock()
             OrbitBridge.shared.progressHandlers[serverId] = { (transferred: UInt64, total: UInt64) in
                 DispatchQueue.main.async {
                     self.transfer?.transferred = transferred
@@ -430,19 +437,24 @@ struct SftpView: View {
                     if transferred >= total { self.transfer = nil }
                 }
             }
+            OrbitBridge.shared.handlersLock.unlock()
             blockingAsync {
                 do {
                     try bridge.sftpUpload(serverId: serverId, localPath: localPath, remotePath: remotePath)
                     DispatchQueue.main.async {
                         self.transfer = nil
+                        OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
+                        OrbitBridge.shared.handlersLock.unlock()
                         self.loadDir(currentPath)
                     }
                 } catch {
                     print("上传失败: \(error)")
                     DispatchQueue.main.async {
                         self.transfer = nil
+                        OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
+                        OrbitBridge.shared.handlersLock.unlock()
                     }
                 }
             }
