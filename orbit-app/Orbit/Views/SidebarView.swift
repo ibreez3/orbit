@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SidebarView: View {
-    @Environment(AppState.self) var appState
+    @EnvironmentObject var appState: AppState
     @State private var expandedGroups: Set<String> = ["默认"]
     @State private var showCredGroups: Bool = false
     @State private var contextServer: Server?

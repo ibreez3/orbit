@@ -2,7 +2,7 @@ name: Orbit
 options:
   bundleIdPrefix: com.orbit
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "13.0"
   xcodeVersion: "15.0"
   generateEmptyDirectories: true
 
@@ -13,7 +13,7 @@ packages:
 
 settings:
   base:
-    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
     SWIFT_VERSION: "5.9"
     PRODUCT_NAME: "$(TARGET_NAME)"
 
@@ -74,4 +74,4 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: true
-        MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"

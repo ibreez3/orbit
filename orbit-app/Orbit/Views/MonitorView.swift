@@ -3,7 +3,7 @@ import Charts
 
 struct MonitorView: View {
     let tab: TabItem
-    @Environment(AppState.self) var appState
+    @EnvironmentObject var appState: AppState
     @State private var stats: ServerStats?
     @State private var loading: Bool = false
     @State private var autoRefresh: Bool = false
@@ -31,7 +31,7 @@ struct MonitorView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { refresh() }
         .onDisappear { timer?.invalidate() }
-        .onChange(of: autoRefresh) { _, newVal in
+        .onChange(of: autoRefresh) { newVal in
             timer?.invalidate()
             if newVal {
                 timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in

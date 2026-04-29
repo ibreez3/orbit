@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MainView: View {
-    @State private var appState = AppState()
+    @StateObject private var appState = AppState()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -9,20 +9,20 @@ struct MainView: View {
             mainPanel
         }
         .frame(minWidth: 900, minHeight: 600)
-        .environment(appState)
+        .environmentObject(appState)
         .sheet(isPresented: Binding(
             get: { appState.dialogOpen },
             set: { if !$0 { appState.closeDialog() } }
         )) {
             ServerDialog()
-                .environment(appState)
+                .environmentObject(appState)
         }
         .sheet(isPresented: Binding(
             get: { appState.cgDialogOpen },
             set: { if !$0 { appState.closeCgDialog() } }
         )) {
             CredentialGroupDialog()
-                .environment(appState)
+                .environmentObject(appState)
         }
         .onAppear {
             appState.loadServers()

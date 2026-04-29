@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ServerDialog: View {
-    @Environment(AppState.self) var appState
+    @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
 
     @State private var form = ServerInput(

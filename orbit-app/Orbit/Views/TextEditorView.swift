@@ -1,13 +1,12 @@
 import SwiftUI
 import AppKit
 
-@Observable
-class TextEditorState {
-    var content: String = ""
-    var originalContent: String = ""
-    var loading = true
-    var saving = false
-    var errorMessage: String?
+class TextEditorState: ObservableObject {
+    @Published var content: String = ""
+    @Published var originalContent: String = ""
+    @Published var loading = true
+    @Published var saving = false
+    @Published var errorMessage: String?
 
     let serverId: String
     let filePath: String
@@ -141,11 +140,11 @@ class TextEditorWindowController: NSObject, NSWindowDelegate {
 }
 
 struct TextEditorView: View {
-    @State private var state: TextEditorState
+    @StateObject private var state: TextEditorState
 
     init(serverId: String, filePath: String, fileName: String,
          onClose: @escaping () -> Void, onSaved: @escaping () -> Void) {
-        _state = State(wrappedValue: TextEditorState(
+        _state = StateObject(wrappedValue: TextEditorState(
             serverId: serverId,
             filePath: filePath,
             fileName: fileName,

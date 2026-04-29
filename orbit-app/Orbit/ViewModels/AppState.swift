@@ -1,20 +1,18 @@
 import SwiftUI
-import Observation
 
-@Observable
-class AppState {
-    var servers: [Server] = []
-    var credentialGroups: [CredentialGroup] = []
-    var tabs: [TabItem] = []
-    var activeTabId: String? = nil
-    var sidebarCollapsed: Bool = false
+class AppState: ObservableObject {
+    @Published var servers: [Server] = []
+    @Published var credentialGroups: [CredentialGroup] = []
+    @Published var tabs: [TabItem] = []
+    @Published var activeTabId: String? = nil
+    @Published var sidebarCollapsed: Bool = false
 
-    var dialogOpen: Bool = false
-    var editingServer: Server? = nil
-    var dialogDefaults: ServerInput? = nil
+    @Published var dialogOpen: Bool = false
+    @Published var editingServer: Server? = nil
+    @Published var dialogDefaults: ServerInput? = nil
 
-    var cgDialogOpen: Bool = false
-    var editingCg: CredentialGroup? = nil
+    @Published var cgDialogOpen: Bool = false
+    @Published var editingCg: CredentialGroup? = nil
 
     let bridge = OrbitBridge.shared
     let textEditorWC = TextEditorWindowController()

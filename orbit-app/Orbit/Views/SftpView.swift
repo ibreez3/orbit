@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SftpView: View {
     let tab: TabItem
-    @Environment(AppState.self) var appState
+    @EnvironmentObject var appState: AppState
     @State private var path: String = ""
     @State private var entries: [FileEntry] = []
     @State private var loading: Bool = false

@@ -4,7 +4,7 @@ import AppKit
 
 struct TerminalView: NSViewRepresentable {
     let tab: TabItem
-    @Environment(AppState.self) var appState
+    @EnvironmentObject var appState: AppState
 
     func makeNSView(context: Context) -> SwiftTerm.TerminalView {
         let tv = SwiftTerm.TerminalView()
