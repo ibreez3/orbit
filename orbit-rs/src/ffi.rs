@@ -261,6 +261,57 @@ pub extern "C" fn orbit_connect_ssh(
 }
 
 #[no_mangle]
+pub extern "C" fn orbit_spawn_channel(
+    app: *mut OrbitApp,
+    existing_session_id: *const c_char,
+    data_cb: OrbitDataCallback,
+    closed_cb: OrbitClosedCallback,
+    userdata: *mut std::ffi::c_void,
+    out_channel_id: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || existing_session_id.is_null() || out_channel_id.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let existing_sid = match unsafe { CStr::from_ptr(existing_session_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let channel_id = uuid::Uuid::new_v4().to_string();
+    let cid_for_cb = channel_id.clone();
+    let ud = userdata as usize;
+
+    let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
+        let c_sid = match CString::new(sid) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
+    });
+
+    let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
+        let c_sid = match CString::new(sid) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        closed_cb(c_sid.as_ptr(), ud as *mut c_void);
+    });
+
+    let mut mgr = match app.ssh.lock() {
+        Ok(m) => m,
+        Err(_) => return -3,
+    };
+    match mgr.spawn_channel(existing_sid, &channel_id, data_cb, closed_cb) {
+        Ok(_) => {
+            let c_id = CString::new(cid_for_cb).unwrap_or_default();
+            unsafe { *out_channel_id = c_id.into_raw() };
+            0
+        }
+        Err(_) => -4,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn orbit_write_ssh(app: *mut OrbitApp, session_id: *const c_char, data: *const u8, data_len: usize) -> i32 {
     if app.is_null() || session_id.is_null() || data.is_null() {
         return -1;

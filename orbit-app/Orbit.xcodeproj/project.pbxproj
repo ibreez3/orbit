@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		33335E4F882F977DFA66C647 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20936134E6681D18358932B7 /* Assets.xcassets */; };
+		4E279BC7C85E1D4825D637F6 /* SplitPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */; };
 		5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49216EECC7DFB1EC893159AF /* SftpView.swift */; };
 		82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 3E1BDD661D1C0F68B456CE86 /* SwiftTerm */; };
@@ -31,6 +32,7 @@
 		20936134E6681D18358932B7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20E9630F023416DA2028BB98 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
+		38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneView.swift; sourceTree = "<group>"; };
 		49216EECC7DFB1EC893159AF /* SftpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpView.swift; sourceTree = "<group>"; };
 		5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitBridge.swift; sourceTree = "<group>"; };
 		64825B472441C790427EFF55 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -95,6 +97,7 @@
 				E812A16C099009B7BB010371 /* ServerDialog.swift */,
 				49216EECC7DFB1EC893159AF /* SftpView.swift */,
 				6A671031DC275C23C66F22B8 /* SidebarView.swift */,
+				38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */,
 				CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */,
 				1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */,
 			);
@@ -203,6 +206,7 @@
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
 				5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */,
 				882B6CF1F05A970520DB5634 /* SidebarView.swift in Sources */,
+				4E279BC7C85E1D4825D637F6 /* SplitPaneView.swift in Sources */,
 				82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */,
 				9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */,
 			);

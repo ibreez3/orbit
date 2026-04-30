@@ -41,6 +41,8 @@ ORBIT_API int32_t orbit_test_connection(struct OrbitApp *app, const char *json_i
 
 ORBIT_API int32_t orbit_connect_ssh(struct OrbitApp *app, const char *server_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);
 
+ORBIT_API int32_t orbit_spawn_channel(struct OrbitApp *app, const char *existing_session_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_channel_id);
+
 ORBIT_API int32_t orbit_write_ssh(struct OrbitApp *app, const char *session_id, const uint8_t *data, size_t data_len);
 
 ORBIT_API int32_t orbit_resize_ssh(struct OrbitApp *app, const char *session_id, uint32_t cols, uint32_t rows);

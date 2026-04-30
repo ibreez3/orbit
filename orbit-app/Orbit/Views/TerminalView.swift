@@ -3,10 +3,24 @@ import SwiftTerm
 import AppKit
 
 struct TerminalView: NSViewRepresentable {
-    let tab: TabItem
+    let channelId: String?
+    let serverId: String
+    let tabId: String
     @EnvironmentObject var appState: AppState
 
     func makeNSView(context: Context) -> SwiftTerm.TerminalView {
+        // Reuse cached terminal view if available (preserves buffer on pane tree changes)
+        if let cid = channelId, let cached = OrbitBridge.shared.terminalViewCache[cid] as? SwiftTerm.TerminalView {
+            context.coordinator.sessionId = cid
+            context.coordinator.terminalView = cached
+            cached.terminalDelegate = context.coordinator
+            context.coordinator.registerHandlers()
+            if let term = cached.getTerminal() as? Terminal {
+                try? OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows))
+            }
+            return cached
+        }
+
         let tv = SwiftTerm.TerminalView()
 
         let catppuccin: [SwiftTerm.Color] = [
@@ -34,9 +48,13 @@ struct TerminalView: NSViewRepresentable {
         tv.terminalDelegate = context.coordinator
         context.coordinator.terminalView = tv
 
-        if let sessionId = tab.sessionId {
-            context.coordinator.sessionId = sessionId
+        if let cid = channelId {
+            context.coordinator.sessionId = cid
+            OrbitBridge.shared.terminalViewCache[cid] = tv
             context.coordinator.registerHandlers()
+            if let term = tv.getTerminal() as? Terminal {
+                try? OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows))
+            }
         } else {
             context.coordinator.connect()
         }
@@ -45,29 +63,29 @@ struct TerminalView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: SwiftTerm.TerminalView, context: Context) {
-        if context.coordinator.sessionId == nil, let sid = tab.sessionId {
-            context.coordinator.sessionId = sid
+        if context.coordinator.sessionId == nil, let cid = channelId {
+            context.coordinator.sessionId = cid
             context.coordinator.registerHandlers()
-            if let tv = context.coordinator.terminalView {
-                let term = tv.getTerminal()
-                try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows))
-            }
         }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(tab: tab, appState: appState)
+        Coordinator(channelId: channelId, serverId: serverId, tabId: tabId, appState: appState)
     }
 
     class Coordinator: NSObject, TerminalViewDelegate {
-        let tab: TabItem
+        let channelId: String?
+        let serverId: String
+        let tabId: String
         let appState: AppState
         weak var terminalView: SwiftTerm.TerminalView?
         var sessionId: String?
         private var alive = true
 
-        init(tab: TabItem, appState: AppState) {
-            self.tab = tab
+        init(channelId: String?, serverId: String, tabId: String, appState: AppState) {
+            self.channelId = channelId
+            self.serverId = serverId
+            self.tabId = tabId
             self.appState = appState
         }
 
@@ -92,9 +110,14 @@ struct TerminalView: NSViewRepresentable {
 
         private func makeClosedHandler() -> () -> Void {
             { [weak self] in
-                guard let self = self, self.alive, let tv = self.terminalView else { return }
+                guard let self = self, self.alive else { return }
                 DispatchQueue.main.async {
-                    tv.feed(text: "\r\n\u{1b}[31m--- 连接已关闭 ---\u{1b}[0m\r\n")
+                    if let tv = self.terminalView {
+                        tv.feed(text: "\r\n\u{1b}[31m--- 连接已关闭 ---\u{1b}[0m\r\n")
+                    }
+                    if let sid = self.sessionId {
+                        self.appState.handleChannelClosed(channelId: sid)
+                    }
                 }
             }
         }
@@ -104,14 +127,15 @@ struct TerminalView: NSViewRepresentable {
             let closedHandler = makeClosedHandler()
             Task {
                 do {
-                    let sid = try OrbitBridge.shared.connectSSH(serverId: tab.serverId)
+                    let sid = try OrbitBridge.shared.connectSSH(serverId: serverId)
                     guard alive else { return }
                     sessionId = sid
                     OrbitBridge.shared.handlersLock.lock()
                     OrbitBridge.shared.sshDataHandlers[sid] = dataHandler
                     OrbitBridge.shared.sshClosedHandlers[sid] = closedHandler
+                    OrbitBridge.shared.terminalViewCache[sid] = self.terminalView
                     OrbitBridge.shared.handlersLock.unlock()
-                    appState.updateTabSessionId(tab.id, sessionId: sid)
+                    appState.updateTabSessionId(tabId, sessionId: sid)
                     await MainActor.run {
                         if let tv = terminalView {
                             let term = tv.getTerminal()
@@ -136,18 +160,14 @@ struct TerminalView: NSViewRepresentable {
         }
 
         func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
-            guard let sid = sessionId else { return }
+            guard alive, let sid = sessionId else { return }
             let bytes = Data(data)
-            Task {
-                try? OrbitBridge.shared.writeSSH(sessionId: sid, data: bytes)
-            }
+            try? OrbitBridge.shared.writeSSH(sessionId: sid, data: bytes)
         }
 
         func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
-            guard let sid = sessionId else { return }
-            Task {
-                try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
-            }
+            guard alive, let sid = sessionId, newCols > 0, newRows > 0 else { return }
+            try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
         }
 
         func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}

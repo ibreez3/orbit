@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 @_cdecl("orbitDataCallback")
 private func orbitDataCallback(sessionId: UnsafePointer<CChar>?, data: UnsafePointer<UInt8>?, len: Int, userdata: UnsafeMutableRawPointer?) {
@@ -34,6 +35,7 @@ class OrbitBridge {
     var sshDataHandlers: [String: (Data) -> Void] = [:]
     var sshClosedHandlers: [String: () -> Void] = [:]
     var progressHandlers: [String: (UInt64, UInt64) -> Void] = [:]
+    var terminalViewCache: [String: NSView] = [:]
 
     private init() {}
 
@@ -212,6 +214,20 @@ class OrbitBridge {
         return String(cString: sessionId)
     }
 
+    func spawnChannel(existingSessionId: String) throws -> String {
+        try ensureInitialized()
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        var outChannelId: UnsafeMutablePointer<CChar>?
+        let rc = existingSessionId.withCString { sidPtr in
+            orbit_spawn_channel(app, sidPtr, orbitDataCallback, orbitClosedCallback, selfPtr, &outChannelId)
+        }
+        guard rc == 0, let channelId = outChannelId else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(channelId) }
+        return String(cString: channelId)
+    }
+    
     func writeSSH(sessionId: String, data: Data) throws {
         try ensureInitialized()
         let rc = data.withUnsafeBytes { buf in

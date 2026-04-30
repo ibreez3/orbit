@@ -16,3 +16,9 @@ orbit-app/Orbit.xcodeproj/project.xcworkspace/xcuserdata/
 # Node (legacy, keep for safety)
 node_modules/
 dist/
+Orbit.app/
+release/
+.claude/
+build/
+*.dmg
+*.zip

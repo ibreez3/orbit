@@ -28,6 +28,38 @@ struct MainView: View {
             appState.loadServers()
             appState.loadCredentialGroups()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .newTerminal)) { _ in
+            if let server = appState.servers.first {
+                appState.addTab(server: server, type: .terminal)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .splitHorizontal)) { _ in
+            appState.splitCurrentPane(direction: .horizontal)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .splitVertical)) { _ in
+            appState.splitCurrentPane(direction: .vertical)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .closePane)) { _ in
+            appState.closeCurrentPane()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigatePrevPane)) { _ in
+            appState.navigatePane(forward: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateNextPane)) { _ in
+            appState.navigatePane(forward: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateLeftPane)) { _ in
+            appState.navigatePane(forward: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateRightPane)) { _ in
+            appState.navigatePane(forward: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .growPane)) { _ in
+            appState.resizePane(grow: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .shrinkPane)) { _ in
+            appState.resizePane(grow: false)
+        }
     }
 
     private var sidebarPanel: some View {
@@ -102,18 +134,18 @@ struct MainView: View {
         .onTapGesture { appState.activeTabId = tab.id }
     }
 
+    @ViewBuilder
     private var contentArea: some View {
-        ZStack {
-            ForEach(appState.tabs) { tab in
-                tabContent(tab)
+        if let activeTab = appState.tabs.first(where: { $0.id == appState.activeTabId }) {
+            if let tree = activeTab.paneTree {
+                SplitPaneView(node: tree, serverId: activeTab.serverId, tabId: activeTab.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .opacity(tab.id == appState.activeTabId ? 1 : 0)
-                    .zIndex(tab.id == appState.activeTabId ? 1 : 0)
+            } else {
+                tabContent(activeTab)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if appState.tabs.isEmpty || appState.activeTabId == nil {
-                emptyState
-                    .zIndex(2)
-            }
+        } else if appState.tabs.isEmpty {
+            emptyState
         }
     }
 
@@ -121,7 +153,7 @@ struct MainView: View {
     private func tabContent(_ tab: TabItem) -> some View {
         switch tab.type {
         case .terminal:
-            TerminalView(tab: tab)
+            TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id)
         case .sftp:
             SftpView(tab: tab)
         case .monitor:
@@ -165,6 +197,10 @@ struct MainView: View {
                 HStack(spacing: 16) {
                     shortcut("⌘T", "新建终端")
                     shortcut("⌘N", "添加服务器")
+                }
+                HStack(spacing: 16) {
+                    shortcut("⌘D", "水平分屏")
+                    shortcut("⇧⌘D", "垂直分屏")
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.quaternary)
