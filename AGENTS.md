@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-Orbit 是一款原生 macOS SSH 管理终端，面向需要管理多台 Linux 服务器的开发者与运维人员。支持跳板机（堡垒机）代理连接。
+Orbit 是一款原生 macOS SSH 管理终端，面向需要管理多台 Linux 服务器的开发者与运维人员。支持跳板机（堡垒机）代理连接、本地 Shell、主题系统、资源监控等功能。
 
 GitHub: https://github.com/ibreez3/orbit
 
@@ -15,33 +15,38 @@ GitHub: https://github.com/ibreez3/orbit
 | 桌面框架 | SwiftUI + AppKit | 原生 macOS 应用 |
 | 终端 | SwiftTerm | xterm-256color PTY，Metal GPU 渲染 |
 | 图表 | Swift Charts | 资源监控趋势图 |
-| 状态管理 | @Observable (SwiftUI) | 原生 Observation 框架 |
-| 后端 | Rust (orbit-core) | ssh2 crate 实现 SSH/SFTP，编译为静态库 |
+| 状态管理 | ObservableObject | SwiftUI 状态管理 |
+| 后端 | Rust (orbit-core) | ssh2 crate 实现 SSH/SFTP，编译为 universal 静态库 |
 | FFI | C ABI (cbindgen) | Rust 通过 C 接口暴露给 Swift |
 | 数据库 | SQLite (rusqlite) | bundled 模式，无需系统安装 |
 | 加密 | aes-gcm | AES-256-GCM 凭据加密 |
+| 项目生成 | XcodeGen | project.yml → .xcodeproj |
 
 ## 环境要求
 
-- macOS 14.0+
+- macOS 13.0+
 - Xcode 15+
 - Rust >= 1.77（通过 rustup 安装）
+- rustup targets: `aarch64-apple-darwin` + `x86_64-apple-darwin`
 - xcodegen（`brew install xcodegen`）
 
 ## 常用命令
 
 ```bash
-# 构建 Rust 静态库（首次或修改 Rust 代码后）
+# 构建 Rust universal 静态库（首次或修改 Rust 代码后）
 ./scripts/build-rust.sh
 
-# 重新生成 Xcode 工程（添加/删除源文件后）
+# 重新生成 Xcode 工程（添加/删除源文件后、修改 project.yml 后）
 cd orbit-app && xcodegen generate && cd ..
 
 # 开发模式 — 在 Xcode 中 Cmd+R 运行
 open orbit-app/Orbit.xcodeproj
 
-# 仅构建（命令行）
-xcodebuild -project orbit-app/Orbit.xcodeproj -scheme Orbit -configuration Debug build
+# 命令行构建 Release
+cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release build
+
+# 命令行构建 arm64
+cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -arch arm64 build
 ```
 
 ## 项目结构
@@ -51,36 +56,57 @@ orbit/
 ├── AGENTS.md                          # 本文件
 ├── TODO.md                            # 待办事项
 ├── .gitignore
-├── LICENSE
-├── app-icon.png                       # 应用图标
+├── Makefile                           # build-rs / build-app 快捷命令
 │
 ├── orbit-app/                         # ===== 前端 (Swift/SwiftUI) =====
-│   ├── project.yml                    # xcodegen 项目配置
+│   ├── project.yml                    # xcodegen 项目配置（源码级）
 │   ├── Orbit.xcodeproj/              # Xcode 工程（由 xcodegen 生成）
 │   └── Orbit/
 │       ├── OrbitApp.swift            # @main 入口 + 菜单命令
 │       ├── AppDelegate.swift         # 应用生命周期
 │       ├── OrbitBridge.swift         # FFI 桥接层（所有 C API 调用）
 │       ├── Orbit-Bridging-Header.h   # Swift/C 桥接头文件
+│       ├── Orbit.entitlements        # 代码签名权限
 │       ├── Models/
-│       │   └── Models.swift          # 所有数据模型
+│       │   ├── Models.swift          # 核心数据模型
+│       │   ├── LocalShell.swift      # 本地 Shell 进程管理
+│       │   └── OrbitConfig.swift     # 持久化应用配置
 │       ├── ViewModels/
-│       │   └── AppState.swift        # 全局状态管理
-│       └── Views/
-│           ├── MainView.swift        # 根布局：侧栏 + Tab 栏 + 内容区
-│           ├── SidebarView.swift     # 服务器列表 + 凭据分组 + 右键菜单
-│           ├── TerminalView.swift    # SwiftTerm SSH 终端
-│           ├── SftpView.swift        # SFTP 文件浏览器
-│           ├── MonitorView.swift     # 资源监控面板 + 趋势图
-│           ├── ServerDialog.swift    # 服务器添加/编辑弹窗
-│           └── CredentialGroupDialog.swift  # 凭据分组弹窗
+│       │   └── AppState.swift        # 全局状态管理 (ObservableObject)
+│       ├── Views/
+│       │   ├── MainView.swift        # 根布局：侧栏 + Tab 栏 + 内容区
+│       │   ├── HomeView.swift        # 首页欢迎视图
+│       │   ├── TerminalView.swift    # SSH 终端（SwiftTerm）
+│       │   ├── OrbitTerminalView.swift  # 终端封装视图
+│       │   ├── QuickTerminal.swift   # 快速终端浮层
+│       │   ├── MonitorView.swift     # 资源监控面板 + 趋势图
+│       │   ├── SftpView.swift        # SFTP 文件浏览器
+│       │   ├── SftpDrawerView.swift  # SFTP 侧栏抽屉
+│       │   ├── DatabaseView.swift    # 数据库管理面板
+│       │   ├── SettingsView.swift    # 设置面板（含主题选择）
+│       │   ├── SplitPaneView.swift   # 分栏布局容器
+│       │   ├── SpotlightView.swift   # 命令面板/快速导航
+│       │   ├── TabBarView.swift      # Tab 标签栏
+│       │   ├── StatusBarView.swift   # 状态栏视图
+│       │   ├── ServerDialog.swift    # 服务器添加/编辑弹窗
+│       │   ├── CredentialGroupDialog.swift  # 凭据分组弹窗
+│       │   └── TextEditorView.swift  # 文本编辑器视图
+│       └── Themes/                   # 主题配色文件
+│           ├── dark.orbit-theme
+│           ├── light.orbit-theme
+│           ├── nord.orbit-theme
+│           ├── dracula.orbit-theme
+│           ├── gruvbox-dark.orbit-theme
+│           ├── catppuccin-mocha.orbit-theme
+│           ├── solarized-dark.orbit-theme
+│           └── tokyo-night.orbit-theme
 │
 ├── orbit-rs/                          # ===== 后端 (Rust) =====
 │   ├── Cargo.toml                    # Rust 依赖
 │   ├── build.rs                      # cbindgen 构建脚本
 │   ├── cbindgen.toml                 # C 头文件生成配置
 │   ├── include/
-│   │   └── orbit.h                   # 自动生成的 C 头文件（27 个 FFI 函数）
+│   │   └── orbit.h                   # 自动生成的 C 头文件
 │   └── src/
 │       ├── lib.rs                    # OrbitApp 状态结构 + 日志初始化
 │       ├── ffi.rs                    # 所有 #[no_mangle] extern "C" 导出函数
@@ -93,9 +119,9 @@ orbit/
 │       └── monitor.rs                # 资源监控脚本 + 输出解析
 │
 ├── scripts/
-│   └── build-rust.sh                 # Rust 静态库构建脚本
+│   └── build-rust.sh                 # Rust universal 静态库构建脚本
 │
-└── docs/                             # 博客/文档
+└── docs/                             # 文档/设计稿
 ```
 
 ## 架构设计
@@ -113,6 +139,28 @@ Swift invoke OrbitBridge.connectSSH(serverId)
 ← 返回 session_id（C 字符串）
 ```
 
+### 静态库构建与链接
+
+Rust 编译为 universal 静态库（x86_64 + arm64），由 Xcode 直接链接：
+
+```
+build-rust.sh 流程:
+  1. cargo build --release --target aarch64-apple-darwin  (arm64)
+  2. cargo build --release --target x86_64-apple-darwin    (x86_64)
+  3. find 查找 C 依赖的 .a 文件 (sqlite3, ssh2, ssl, crypto)
+  4. lipo -create 合并为 universal .a 放入 target/universal-apple-darwin/release/
+
+project.yml 通过 OTHER_LDFLAGS 绝对路径链接:
+  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a
+  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a
+  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a
+  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a
+  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a
+  - -lz -liconv -framework Security -framework SystemConfiguration
+```
+
+**注意**: 如果 `cargo clean` 清理了 build 缓存，`build-rust.sh` 中的 `find` 命令会找不到依赖库的 .a 文件（sqlite3、ssh2、ssl、crypto），因为这些文件在 `target/<arch>/release/build/` 下。此时需要重新 `cargo build` 生成它们。
+
 ### 连接层（transport.rs）
 
 所有 SSH 连接通过 `transport::create_session()` 统一创建：
@@ -126,7 +174,7 @@ create_session(server, db)
   ← 返回 SessionGuard { session, _proxy }
 ```
 
-### 终端组件生命周期（TerminalView.swift）
+### 终端组件生命周期
 
 ```
 NSViewRepresentable 创建 SwiftTerm.TerminalView
@@ -147,6 +195,10 @@ NSViewRepresentable 创建 SwiftTerm.TerminalView
 密钥：SHA256(salt + hostname)，绑定本机
 ```
 
+### 主题系统
+
+主题文件位于 `orbit-app/Orbit/Themes/`，格式为 `.orbit-theme`，包含终端配色、UI 颜色等。用户在 SettingsView 中选择主题，AppState 负责加载和应用。
+
 ### 数据库
 
 位置：`~/Library/Application Support/orbit/orbit.db`（macOS）
@@ -160,21 +212,22 @@ NSViewRepresentable 创建 SwiftTerm.TerminalView
 ### 分支策略
 
 - `main` 分支受保护（需要 PR + 1 个审批）
-- 开发在 `develop` 分支进行
-- 功能分支从 `develop` 创建
+- 功能分支从 `main` 创建
 
 ### 代码风格
 
-- **Rust**: `cargo check` 无 error
+- **Rust**: `cargo build` 无 error
 - **Swift**: Xcode build 无 error
 - **不添加注释**，除非用户要求
 - 使用已有的库，不引入新依赖除非必要
+- `project.yml` 是 Xcode 工程配置的源码，不要手动编辑 `.pbxproj`
+- 不要提交编译产物（`.dylib`、`.a`、`DerivedData` 等）
 
 ### 添加新 FFI 函数的步骤
 
 1. `orbit-rs/src/ffi.rs` — 添加 `#[no_mangle] pub extern "C" fn orbit_xxx()`
 2. `orbit-rs/src/lib.rs` — 如需新方法，添加到 `OrbitApp`
-3. `orbit-rs/include/orbit.h` — 由 `cargo build` 自动重新生成
+3. `orbit-rs/include/orbit.h` — `cargo build` 后由 cbindgen 自动重新生成
 4. `orbit-app/Orbit/OrbitBridge.swift` — 添加对应的 Swift 包装方法
 5. 如有新数据类型，在 `Orbit/Models/Models.swift` 添加 Codable 结构体
 
@@ -182,12 +235,32 @@ NSViewRepresentable 创建 SwiftTerm.TerminalView
 
 1. `orbit-app/Orbit/Views/` — 创建组件文件
 2. 在 `MainView.swift` 或父组件中引入
-3. 运行 `xcodegen generate` 重新生成工程
+3. 添加新的源文件后运行 `xcodegen generate` 重新生成工程
 4. 如需全局状态，在 `AppState.swift` 添加
 
-### 主题配色（Catppuccin Mocha）
+### 添加新文件的步骤
 
-终端配色硬编码在 `TerminalView.swift` 的 `catppuccin` 数组中。
+1. 创建源文件
+2. 运行 `cd orbit-app && xcodegen generate` 重新生成 `.pbxproj`
+3. 验证 `xcodebuild` 编译通过
+
+## 常见问题
+
+### 静态库架构不完整
+
+`lipo -info orbit-rs/target/universal-apple-darwin/release/*.a` 检查所有 .a 是否都包含 x86_64 + arm64。如果某个库缺少一个架构，重新运行 `./scripts/build-rust.sh`。
+
+### cargo clean 后构建失败
+
+`cargo clean` 会删除 `target/<arch>/release/build/` 下的 C 依赖编译产物（sqlite3、ssh2、ssl、crypto），导致 `build-rust.sh` 的 find 找不到这些文件。解决方案：直接运行 `./scripts/build-rust.sh`（它会在步骤 1/2 重新编译 Rust，从而重新生成这些依赖库）。
+
+### project.pbxproj 手动修改被覆盖
+
+不要手动编辑 `.pbxproj`。所有工程配置在 `project.yml` 中，通过 `xcodegen generate` 生成。
+
+### ld warning: object file was built for newer 'macOS' version
+
+这是正常的。OpenSSL 等 C 依赖用当前 SDK 编译，版本号高于 deployment target (13.0)，不影响运行。
 
 ## 已知限制
 
