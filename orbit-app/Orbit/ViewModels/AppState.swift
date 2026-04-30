@@ -5,7 +5,11 @@ class AppState: ObservableObject {
     @Published var credentialGroups: [CredentialGroup] = []
     @Published var tabs: [TabItem] = []
     @Published var activeTabId: String? = nil
-    @Published var sidebarCollapsed: Bool = false
+    @Published var spotlightOpen: Bool = false
+    @Published var spotlightQuery: String = ""
+    @Published var sftpDrawerTabId: String? = nil
+    @Published var sftpDrawerHeight: CGFloat = 280
+    @Published var theme: AppTheme = .catppuccinMocha
 
     @Published var dialogOpen: Bool = false
     @Published var editingServer: Server? = nil
@@ -346,7 +350,25 @@ class AppState: ObservableObject {
         }
     }
 
-    func toggleSidebar() {
-        sidebarCollapsed.toggle()
+    func openSpotlight() {
+        spotlightQuery = ""
+        spotlightOpen = true
+    }
+
+    func closeSpotlight() {
+        spotlightOpen = false
+        spotlightQuery = ""
+    }
+
+    func toggleSftpDrawer(for tabId: String) {
+        if sftpDrawerTabId == tabId {
+            sftpDrawerTabId = nil
+        } else {
+            sftpDrawerTabId = tabId
+        }
+    }
+
+    func setTheme(_ newTheme: AppTheme) {
+        theme = newTheme
     }
 }

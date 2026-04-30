@@ -9,40 +9,50 @@
 /* Begin PBXBuildFile section */
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		33335E4F882F977DFA66C647 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20936134E6681D18358932B7 /* Assets.xcassets */; };
+		3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86934760741D5FA928C8E48 /* TabBarView.swift */; };
+		3F4D5B977572BFF569200D8B /* SftpDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */; };
 		4E279BC7C85E1D4825D637F6 /* SplitPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */; };
 		5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49216EECC7DFB1EC893159AF /* SftpView.swift */; };
 		82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 3E1BDD661D1C0F68B456CE86 /* SwiftTerm */; };
-		882B6CF1F05A970520DB5634 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A671031DC275C23C66F22B8 /* SidebarView.swift */; };
 		9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */; };
+		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		B94BCE8782A000F9C641CAC6 /* OrbitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */; };
 		C7105A3C1958F5D3A894FEA7 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E9630F023416DA2028BB98 /* MainView.swift */; };
 		C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */; };
+		CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3983C4735026A30426864D /* DatabaseView.swift */; };
 		CC6551206571FF3F046080C5 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24FD058B7D00E7C9D29DA78 /* Models.swift */; };
+		CD6B6211AA058507413B987F /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0773DA574B3B4BD620488CE0 /* StatusBarView.swift */; };
 		D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */; };
+		D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452C79E5111500BF24C41C53 /* SpotlightView.swift */; };
 		DAE7F6E609EA79B75390ABD6 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64825B472441C790427EFF55 /* AppState.swift */; };
 		E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E812A16C099009B7BB010371 /* ServerDialog.swift */; };
 		FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EB023126B42D85C78E726C /* OrbitApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0773DA574B3B4BD620488CE0 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		08F1ADE58D311170A9C63C4E /* MonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorView.swift; sourceTree = "<group>"; };
 		0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialGroupDialog.swift; sourceTree = "<group>"; };
 		1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditorView.swift; sourceTree = "<group>"; };
+		1E3983C4735026A30426864D /* DatabaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseView.swift; sourceTree = "<group>"; };
 		20936134E6681D18358932B7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20E9630F023416DA2028BB98 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
 		38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneView.swift; sourceTree = "<group>"; };
+		452C79E5111500BF24C41C53 /* SpotlightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightView.swift; sourceTree = "<group>"; };
 		49216EECC7DFB1EC893159AF /* SftpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpView.swift; sourceTree = "<group>"; };
+		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitBridge.swift; sourceTree = "<group>"; };
 		64825B472441C790427EFF55 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		6A671031DC275C23C66F22B8 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		750B458B02EF6C413A15C484 /* Orbit-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Orbit-Bridging-Header.h"; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B24FD058B7D00E7C9D29DA78 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E812A16C099009B7BB010371 /* ServerDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDialog.swift; sourceTree = "<group>"; };
+		F86934760741D5FA928C8E48 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,12 +102,17 @@
 			isa = PBXGroup;
 			children = (
 				0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */,
+				1E3983C4735026A30426864D /* DatabaseView.swift */,
 				20E9630F023416DA2028BB98 /* MainView.swift */,
 				08F1ADE58D311170A9C63C4E /* MonitorView.swift */,
 				E812A16C099009B7BB010371 /* ServerDialog.swift */,
+				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
+				D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */,
 				49216EECC7DFB1EC893159AF /* SftpView.swift */,
-				6A671031DC275C23C66F22B8 /* SidebarView.swift */,
 				38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */,
+				452C79E5111500BF24C41C53 /* SpotlightView.swift */,
+				0773DA574B3B4BD620488CE0 /* StatusBarView.swift */,
+				F86934760741D5FA928C8E48 /* TabBarView.swift */,
 				CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */,
 				1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */,
 			);
@@ -198,15 +213,20 @@
 				D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */,
 				DAE7F6E609EA79B75390ABD6 /* AppState.swift in Sources */,
 				C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */,
+				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
 				C7105A3C1958F5D3A894FEA7 /* MainView.swift in Sources */,
 				CC6551206571FF3F046080C5 /* Models.swift in Sources */,
 				1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */,
 				FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */,
 				B94BCE8782A000F9C641CAC6 /* OrbitBridge.swift in Sources */,
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
+				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
+				3F4D5B977572BFF569200D8B /* SftpDrawerView.swift in Sources */,
 				5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */,
-				882B6CF1F05A970520DB5634 /* SidebarView.swift in Sources */,
 				4E279BC7C85E1D4825D637F6 /* SplitPaneView.swift in Sources */,
+				D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */,
+				CD6B6211AA058507413B987F /* StatusBarView.swift in Sources */,
+				3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */,
 				82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */,
 				9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */,
 			);

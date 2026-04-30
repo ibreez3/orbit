@@ -90,6 +90,21 @@ enum TabType: String, CaseIterable {
     case terminal
     case sftp
     case monitor
+    case database
+    case settings
+}
+
+enum AppTheme: String, CaseIterable {
+    case light
+    case dark
+    case catppuccinMocha
+}
+
+enum SpotlightSection: String, CaseIterable {
+    case servers
+    case databases
+    case credentials
+    case actions
 }
 
 struct TabItem: Identifiable {
@@ -222,4 +237,14 @@ func formatSize(_ bytes: UInt64) -> String {
         i += 1
     }
     return String(format: "%.1f %@", size, units[i])
+}
+
+extension Server {
+    static let placeholder = Server(
+        id: "", name: "", host: "", port: 0, group_name: "",
+        auth_type: "", username: "", password: "", private_key: "",
+        key_source: "", key_file_path: "", key_passphrase: "",
+        credential_group_id: "", jump_server_id: "",
+        created_at: "", updated_at: ""
+    )
 }
