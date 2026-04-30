@@ -1,0 +1,29 @@
+# Gruvbox Dark theme for Orbit
+
+name = Gruvbox Dark
+
+[palette]
+background = #282828
+foreground = #d5c4a1
+ansi-0 = #1d2021
+ansi-1 = #cc241d
+ansi-2 = #98971a
+ansi-3 = #d79921
+ansi-4 = #458588
+ansi-5 = #b162d8
+ansi-6 = #689d6a
+ansi-7 = #a89984
+ansi-8 = #504945
+ansi-9 = #fb4934
+ansi-10 = #b8bb26
+ansi-11 = #fabd2f
+ansi-12 = #83a598
+ansi-13 = #d3869b
+ansi-14 = #8ec07c
+ansi-15 = #ebdbb2
+
+[window]
+background = #1d2021
+
+[cursor]
+color = #d5c4a1

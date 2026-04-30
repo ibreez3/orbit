@@ -1,0 +1,29 @@
+# Dark theme for Orbit (Apple-inspired)
+
+name = Dark
+
+[palette]
+background = #1c1c1e
+foreground = #f5f5f7
+ansi-0 = #1c1c1e
+ansi-1 = #ff453a
+ansi-2 = #30d158
+ansi-3 = #ff9f0a
+ansi-4 = #0a84ff
+ansi-5 = #bf5af2
+ansi-6 = #64d2ff
+ansi-7 = #98989d
+ansi-8 = #39393b
+ansi-9 = #ff453a
+ansi-10 = #30d158
+ansi-11 = #ff9f0a
+ansi-12 = #0a84ff
+ansi-13 = #bf5af2
+ansi-14 = #64d2ff
+ansi-15 = #f5f5f7
+
+[window]
+background = #000000
+
+[cursor]
+color = #f5f5f7

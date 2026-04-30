@@ -1,0 +1,32 @@
+[package]
+name = "orbit-core"
+version = "0.1.0"
+description = "Orbit - Core library for SSH management terminal"
+edition = "2021"
+
+[lib]
+name = "orbit_core"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+cbindgen = "0.29"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+ssh2 = "0.9"
+openssl-sys = { version = "0.9", features = ["vendored"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+aes-gcm = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+gethostname = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
+tracing-appender = "0.2"
+libc = "0.2"

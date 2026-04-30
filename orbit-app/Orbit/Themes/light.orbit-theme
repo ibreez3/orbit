@@ -1,0 +1,29 @@
+# Light theme for Orbit (Apple-inspired)
+
+name = Light
+
+[palette]
+background = #ffffff
+foreground = #1d1d1f
+ansi-0 = #000000
+ansi-1 = #ff3b30
+ansi-2 = #34c759
+ansi-3 = #ff9500
+ansi-4 = #007aff
+ansi-5 = #af52de
+ansi-6 = #5ac8fa
+ansi-7 = #8e8e93
+ansi-8 = #636366
+ansi-9 = #ff453a
+ansi-10 = #30d158
+ansi-11 = #ff9f0a
+ansi-12 = #0a84ff
+ansi-13 = #bf5af2
+ansi-14 = #64d2ff
+ansi-15 = #1d1d1f
+
+[window]
+background = #f5f5f7
+
+[cursor]
+color = #1d1d1f
