@@ -25,6 +25,7 @@ struct MainView: View {
             CredentialGroupDialog()
                 .environmentObject(appState)
         }
+        .modifier(AlertModifier(appState: appState))
         .onAppear {
             // Ensure bridge is initialized and data loaded
             if appState.servers.isEmpty {
@@ -238,6 +239,21 @@ struct MainView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
             }
+        }
+    }
+}
+
+private struct AlertModifier: ViewModifier {
+    let appState: AppState
+
+    func body(content: Content) -> some View {
+        content.alert(appState.alertTitle, isPresented: Binding(
+            get: { appState.alertMessage != nil },
+            set: { if !$0 { appState.alertMessage = nil } }
+        )) {
+            Button("确定") { appState.alertMessage = nil }
+        } message: {
+            Text(appState.alertMessage ?? "")
         }
     }
 }

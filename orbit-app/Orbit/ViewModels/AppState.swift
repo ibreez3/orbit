@@ -21,6 +21,13 @@ class AppState: ObservableObject {
     @Published var showQuitConfirmation: Bool = false
     private var pendingQuitTabId: String? = nil
 
+    @Published var alertMessage: String? = nil
+    @Published var alertTitle: String = ""
+
+    var showAlert: Binding<Bool> {
+        Binding(get: { self.alertMessage != nil }, set: { if !$0 { self.alertMessage = nil } })
+    }
+
     let bridge = OrbitBridge.shared
     let textEditorWC = TextEditorWindowController()
 
@@ -43,7 +50,8 @@ class AppState: ObservableObject {
                 let result = try bridge.listServers()
                 await MainActor.run { self.servers = result }
             } catch {
-                print("加载服务器列表失败: \(error)")
+                alertTitle = "加载失败"
+                alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
             }
         }
     }
@@ -54,7 +62,8 @@ class AppState: ObservableObject {
                 let result = try bridge.listCredentialGroups()
                 await MainActor.run { self.credentialGroups = result }
             } catch {
-                print("加载凭据分组失败: \(error)")
+                alertTitle = "加载失败"
+                alertMessage = "无法加载凭据分组: \(error.localizedDescription)"
             }
         }
     }
@@ -65,7 +74,8 @@ class AppState: ObservableObject {
                 let server = try bridge.addServer(input: input)
                 servers.append(server)
             } catch {
-                print("添加服务器失败: \(error)")
+                alertTitle = "添加失败"
+                alertMessage = "无法添加服务器: \(error.localizedDescription)"
             }
         }
     }
@@ -76,7 +86,8 @@ class AppState: ObservableObject {
                 let server = try bridge.updateServer(id: id, input: input)
                 servers = servers.map { $0.id == id ? server : $0 }
             } catch {
-                print("更新服务器失败: \(error)")
+                alertTitle = "更新失败"
+                alertMessage = "无法更新服务器: \(error.localizedDescription)"
             }
         }
     }
@@ -95,7 +106,8 @@ class AppState: ObservableObject {
                     activeTabId = tabs.last?.id
                 }
             } catch {
-                print("删除服务器失败: \(error)")
+                alertTitle = "删除失败"
+                alertMessage = "无法删除服务器: \(error.localizedDescription)"
             }
         }
     }
@@ -106,7 +118,8 @@ class AppState: ObservableObject {
                 let cg = try bridge.addCredentialGroup(input: input)
                 credentialGroups.append(cg)
             } catch {
-                print("添加凭据分组失败: \(error)")
+                alertTitle = "添加失败"
+                alertMessage = "无法添加凭据分组: \(error.localizedDescription)"
             }
         }
     }
@@ -117,7 +130,8 @@ class AppState: ObservableObject {
                 let cg = try bridge.updateCredentialGroup(id: id, input: input)
                 credentialGroups = credentialGroups.map { $0.id == id ? cg : $0 }
             } catch {
-                print("更新凭据分组失败: \(error)")
+                alertTitle = "更新失败"
+                alertMessage = "无法更新凭据分组: \(error.localizedDescription)"
             }
         }
     }
@@ -128,7 +142,8 @@ class AppState: ObservableObject {
                 try bridge.deleteCredentialGroup(id: id)
                 credentialGroups.removeAll { $0.id == id }
             } catch {
-                print("删除凭据分组失败: \(error)")
+                alertTitle = "删除失败"
+                alertMessage = "无法删除凭据分组: \(error.localizedDescription)"
             }
         }
     }
@@ -183,7 +198,8 @@ class AppState: ObservableObject {
             do {
                 newChannelId = try bridge.spawnChannel(existingSessionId: existingChannelId)
             } catch {
-                print("[Split] spawnChannel failed: \(error)")
+                alertTitle = "分屏失败"
+                alertMessage = "无法创建新通道: \(error.localizedDescription)"
                 return
             }
 
@@ -334,7 +350,8 @@ class AppState: ObservableObject {
                 let sessionId = try bridge.connectSSH(serverId: serverId)
                 updateTabSessionId(tabId, sessionId: sessionId)
             } catch {
-                print("连接失败: \(error)")
+                alertTitle = "连接失败"
+                alertMessage = "\(error.localizedDescription)"
             }
         }
     }

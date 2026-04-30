@@ -77,7 +77,7 @@ struct TerminalView: NSViewRepresentable {
             Self.applySettings(cached, theme: appState.theme)
             cached.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
             if let term = cached.getTerminal() as? Terminal {
-                try? OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows))
+                do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
             }
             return cached
         }
@@ -97,7 +97,7 @@ struct TerminalView: NSViewRepresentable {
             OrbitBridge.shared.terminalViewCache[cid] = tv
             context.coordinator.registerHandlers()
             if let term = tv.getTerminal() as? Terminal {
-                try? OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows))
+                do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
             }
         } else {
             context.coordinator.connect()
@@ -252,7 +252,7 @@ struct TerminalView: NSViewRepresentable {
                     await MainActor.run {
                         if let tv = terminalView {
                             let term = tv.getTerminal()
-                            try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows))
+                            do { try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(connect) failed: \(error)") }
                         }
                     }
                 } catch {
@@ -279,7 +279,11 @@ struct TerminalView: NSViewRepresentable {
             if isLocal {
                 localShell?.write(bytes)
             } else if let sid = sessionId {
-                try? OrbitBridge.shared.writeSSH(sessionId: sid, data: bytes)
+                do {
+                    try OrbitBridge.shared.writeSSH(sessionId: sid, data: bytes)
+                } catch {
+                    print("[Orbit] writeSSH failed for session \(sid): \(error)")
+                }
             }
         }
 
@@ -288,7 +292,11 @@ struct TerminalView: NSViewRepresentable {
             if isLocal {
                 localShell?.resize(cols: UInt16(newCols), rows: UInt16(newRows))
             } else if let sid = sessionId {
-                try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
+                do {
+                    try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
+                } catch {
+                    print("[Orbit] resizeSSH failed for session \(sid): \(error)")
+                }
             }
         }
 

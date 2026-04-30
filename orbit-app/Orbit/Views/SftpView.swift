@@ -15,6 +15,8 @@ struct SftpView: View {
     @State private var mkdirName = ""
     @State private var showRenameAlert = false
     @State private var renameName = ""
+    @State private var errorTitle = ""
+    @State private var errorMessage: String?
 
     struct TransferInfo {
         let direction: String
@@ -47,6 +49,14 @@ struct SftpView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("输入文件夹名称")
+        }
+        .alert(errorTitle, isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("确定") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 
@@ -351,8 +361,9 @@ struct SftpView: View {
                     self.loading = false
                 }
             } catch {
-                print("加载目录失败: \(error)")
                 DispatchQueue.main.async {
+                    self.errorTitle = "加载目录失败"
+                    self.errorMessage = error.localizedDescription
                     self.loading = false
                 }
             }
@@ -404,8 +415,9 @@ struct SftpView: View {
                         OrbitBridge.shared.handlersLock.unlock()
                     }
                 } catch {
-                    print("下载失败: \(error)")
                     DispatchQueue.main.async {
+                        self.errorTitle = "下载失败"
+                        self.errorMessage = error.localizedDescription
                         self.transfer = nil
                         OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
@@ -449,8 +461,9 @@ struct SftpView: View {
                         self.loadDir(currentPath)
                     }
                 } catch {
-                    print("上传失败: \(error)")
                     DispatchQueue.main.async {
+                        self.errorTitle = "上传失败"
+                        self.errorMessage = error.localizedDescription
                         self.transfer = nil
                         OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
@@ -484,7 +497,10 @@ struct SftpView: View {
                         self.loadDir(currentPath)
                     }
                 } catch {
-                    print("删除失败: \(error)")
+                    DispatchQueue.main.async {
+                        self.errorTitle = "删除失败"
+                        self.errorMessage = error.localizedDescription
+                    }
                 }
             }
         }
@@ -504,7 +520,10 @@ struct SftpView: View {
                     self.loadDir(currentPath)
                 }
             } catch {
-                print("重命名失败: \(error)")
+                DispatchQueue.main.async {
+                    self.errorTitle = "重命名失败"
+                    self.errorMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -522,7 +541,10 @@ struct SftpView: View {
                     self.loadDir(currentPath)
                 }
             } catch {
-                print("新建文件夹失败: \(error)")
+                DispatchQueue.main.async {
+                    self.errorTitle = "新建文件夹失败"
+                    self.errorMessage = error.localizedDescription
+                }
             }
         }
     }
