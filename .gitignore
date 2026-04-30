@@ -10,6 +10,9 @@ orbit-app/Orbit.xcodeproj/xcuserdata/
 orbit-app/Orbit.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
 
+# Build artifacts
+*.dylib
+
 # Database
 *.db
 

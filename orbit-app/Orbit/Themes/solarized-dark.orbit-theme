@@ -1,0 +1,29 @@
+# Solarized Dark theme for Orbit
+
+name = Solarized Dark
+
+[palette]
+background = #002b36
+foreground = #839496
+ansi-0 = #073642
+ansi-1 = #dc322f
+ansi-2 = #859900
+ansi-3 = #b58900
+ansi-4 = #268bd2
+ansi-5 = #6c71c4
+ansi-6 = #2aa198
+ansi-7 = #eee8d5
+ansi-8 = #002b36
+ansi-9 = #cb4b16
+ansi-10 = #586e75
+ansi-11 = #657b83
+ansi-12 = #839496
+ansi-13 = #6c71c4
+ansi-14 = #93a1a1
+ansi-15 = #fdf6e3
+
+[window]
+background = #001e26
+
+[cursor]
+color = #839496

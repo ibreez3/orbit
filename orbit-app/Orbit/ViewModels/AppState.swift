@@ -18,13 +18,30 @@ class AppState: ObservableObject {
     @Published var cgDialogOpen: Bool = false
     @Published var editingCg: CredentialGroup? = nil
 
+    @Published var showQuitConfirmation: Bool = false
+    private var pendingQuitTabId: String? = nil
+
     let bridge = OrbitBridge.shared
     let textEditorWC = TextEditorWindowController()
+
+    init() {
+        // Load persisted theme
+        let savedTheme = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
+        if let t = AppTheme(rawValue: savedTheme) {
+            _theme = Published(initialValue: t)
+        }
+        // Load themes from files
+        ThemeManager.shared.loadThemes()
+        // Load servers immediately on init
+        loadServers()
+        loadCredentialGroups()
+    }
 
     func loadServers() {
         Task {
             do {
-                servers = try bridge.listServers()
+                let result = try bridge.listServers()
+                await MainActor.run { self.servers = result }
             } catch {
                 print("加载服务器列表失败: \(error)")
             }
@@ -34,7 +51,8 @@ class AppState: ObservableObject {
     func loadCredentialGroups() {
         Task {
             do {
-                credentialGroups = try bridge.listCredentialGroups()
+                let result = try bridge.listCredentialGroups()
+                await MainActor.run { self.credentialGroups = result }
             } catch {
                 print("加载凭据分组失败: \(error)")
             }
@@ -115,6 +133,13 @@ class AppState: ObservableObject {
         }
     }
 
+    func addLocalTerminalTab() {
+        let id = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let tab = TabItem(id: id, type: .terminal, serverId: "local", serverName: "本地", title: "本地终端")
+        tabs.append(tab)
+        activeTabId = id
+    }
+
     func addTab(server: Server, type: TabType) {
         if type == .monitor {
             if let existing = tabs.first(where: { $0.type == .monitor && $0.serverId == server.id }) {
@@ -127,6 +152,7 @@ class AppState: ObservableObject {
             .terminal: "SSH: \(server.name)",
             .sftp: "SFTP: \(server.name)",
             .monitor: "Monitor: \(server.name)",
+            .settings: "设置",
         ]
         var tab = TabItem(id: id, type: type, serverId: server.id, serverName: server.name, title: titles[type] ?? "")
         if type == .terminal {
@@ -174,6 +200,14 @@ class AppState: ObservableObject {
                                              first: .leaf(channelId: existingChannelId), second: newLeaf)
             }
             tabs[idx].focusedChannelId = newChannelId
+
+            // Focus the new terminal after SwiftUI creates it
+            let cid = newChannelId
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                if let tv = OrbitBridge.shared.terminalViewCache[cid] as? OrbitTerminalView {
+                    tv.window?.makeFirstResponder(tv)
+                }
+            }
         }
     }
 
@@ -219,6 +253,9 @@ class AppState: ObservableObject {
               let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
               let next = tree.findAdjacent(channelId: focused, forward: forward) else { return }
         tabs[tabIdx].focusedChannelId = next
+        if let tv = OrbitBridge.shared.terminalViewCache[next] as? OrbitTerminalView {
+            tv.window?.makeFirstResponder(tv)
+        }
     }
 
     func resizePane(grow: Bool) {
@@ -254,6 +291,24 @@ class AppState: ObservableObject {
     }
 
     func removeTab(_ id: String) {
+        performRemoveTab(id)
+    }
+
+    func confirmQuit() {
+        if let tabId = pendingQuitTabId {
+            performRemoveTab(tabId)
+        }
+        pendingQuitTabId = nil
+        showQuitConfirmation = false
+        NSApp.terminate(nil)
+    }
+
+    func cancelQuit() {
+        pendingQuitTabId = nil
+        showQuitConfirmation = false
+    }
+
+    private func performRemoveTab(_ id: String) {
         if let tab = tabs.first(where: { $0.id == id }) {
             disconnectAllChannels(tab: tab)
         }
@@ -370,5 +425,25 @@ class AppState: ObservableObject {
 
     func setTheme(_ newTheme: AppTheme) {
         theme = newTheme
+        UserDefaults.standard.set(newTheme.rawValue, forKey: "theme")
+    }
+
+    func reconnectTab(_ tabId: String) {
+        guard let tabIdx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        let tab = tabs[tabIdx]
+        guard tab.type == .terminal else { return }
+
+        // Clear old session state
+        if let oldSid = tab.sessionId {
+            bridge.sshDataHandlers.removeValue(forKey: oldSid)
+            bridge.sshClosedHandlers.removeValue(forKey: oldSid)
+            bridge.terminalViewCache.removeValue(forKey: oldSid)
+        }
+        tabs[tabIdx].sessionId = nil
+        tabs[tabIdx].focusedChannelId = nil
+        tabs[tabIdx].paneTree = nil
+
+        // Reconnect
+        connectSSH(tabId: tabId, serverId: tab.serverId)
     }
 }

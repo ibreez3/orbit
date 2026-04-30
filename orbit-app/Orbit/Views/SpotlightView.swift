@@ -1,8 +1,29 @@
 import SwiftUI
+import AppKit
+
+// MARK: - Selectable item types
+
+enum SpotlightItem: Identifiable {
+    case server(Server)
+    case credential(CredentialGroup)
+    case action(String, String, () -> Void)
+
+    var id: String {
+        switch self {
+        case .server(let s): return "s-\(s.id)"
+        case .credential(let c): return "c-\(c.id)"
+        case .action(let title, _, _): return "a-\(title)"
+        }
+    }
+}
+
+// MARK: - SpotlightView
 
 struct SpotlightView: View {
     @EnvironmentObject var appState: AppState
     @FocusState private var isSearchFocused: Bool
+    @State private var selectedIndex: Int = 0
+    @State private var keyMonitor: Any? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,8 +38,86 @@ struct SpotlightView: View {
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
-        .onAppear { isSearchFocused = true }
+        .onAppear {
+            isSearchFocused = true
+            selectedIndex = 0
+            installKeyMonitor()
+        }
+        .onDisappear {
+            removeKeyMonitor()
+        }
+        .onChange(of: appState.spotlightQuery) { _ in
+            selectedIndex = 0
+        }
     }
+
+    // MARK: - Keyboard monitor (macOS 13 compatible)
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Only intercept when spotlight is open
+            guard appState.spotlightOpen else { return event }
+            switch event.keyCode {
+            case 126: // up arrow
+                moveSelection(-1)
+                return nil
+            case 125: // down arrow
+                moveSelection(1)
+                return nil
+            case 36: // return
+                confirmSelection()
+                return nil
+            case 53: // escape
+                appState.closeSpotlight()
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    // MARK: - Flattened items
+
+    private var allItems: [SpotlightItem] {
+        var items: [SpotlightItem] = []
+        for s in filteredServers {
+            items.append(.server(s))
+        }
+        if !appState.credentialGroups.isEmpty {
+            for c in filteredCredentials {
+                items.append(.credential(c))
+            }
+        }
+        items.append(.action("添加服务器", "plus.circle") {
+            appState.closeSpotlight()
+            appState.openDialog()
+        })
+        items.append(.action("添加数据库连接", "cylinder") {
+            appState.closeSpotlight()
+        })
+        items.append(.action("新建凭证", "key.badge.plus") {
+            appState.closeSpotlight()
+            appState.openCgDialog()
+        })
+        items.append(.action("切换主题", "circle.lefthalf.filled") {
+            let allCases = AppTheme.allCases
+            if let idx = allCases.firstIndex(of: appState.theme) {
+                appState.setTheme(allCases[(idx + 1) % allCases.count])
+            }
+            appState.closeSpotlight()
+        })
+        return items
+    }
+
+    // MARK: - Search field
 
     private var searchField: some View {
         HStack(spacing: 8) {
@@ -44,14 +143,25 @@ struct SpotlightView: View {
         .padding(.vertical, 12)
     }
 
+    // MARK: - Results list with sections
+
     private var resultsList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                serversSection
-                if !appState.credentialGroups.isEmpty {
-                    credentialsSection
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    serversSection
+                    if !appState.credentialGroups.isEmpty || !filteredCredentials.isEmpty {
+                        credentialsSection
+                    }
+                    quickActionsSection
                 }
-                quickActionsSection
+            }
+            .onChange(of: selectedIndex) { idx in
+                let items = allItems
+                guard idx >= 0, idx < items.count else { return }
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    proxy.scrollTo(items[idx].id, anchor: .center)
+                }
             }
         }
     }
@@ -64,7 +174,9 @@ struct SpotlightView: View {
                 if let servers = groups[groupName] {
                     groupRow(name: groupName, count: servers.count)
                     ForEach(servers) { server in
-                        serverRow(server)
+                        let idx = allItems.firstIndex(where: { if case .server(let s) = $0 { return s.id == server.id } else { return false } })
+                        serverRow(server, isSelected: idx == selectedIndex)
+                            .id(SpotlightItem.server(server).id)
                     }
                 }
             }
@@ -75,7 +187,9 @@ struct SpotlightView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("凭证", icon: "key.round")
             ForEach(filteredCredentials) { cg in
-                credentialRow(cg)
+                let idx = allItems.firstIndex(where: { if case .credential(let c) = $0 { return c.id == cg.id } else { return false } })
+                credentialRow(cg, isSelected: idx == selectedIndex)
+                    .id(SpotlightItem.credential(cg).id)
             }
         }
     }
@@ -83,22 +197,27 @@ struct SpotlightView: View {
     private var quickActionsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("快捷操作", icon: "bolt")
-            actionRow("添加服务器", icon: "plus.circle") {
-                appState.closeSpotlight()
-                appState.openDialog()
-            }
-            actionRow("添加数据库连接", icon: "cylinder") {
-                appState.closeSpotlight()
-            }
-            actionRow("新建凭证", icon: "key.badge.plus") {
-                appState.closeSpotlight()
-                appState.openCgDialog()
-            }
-            actionRow("切换主题", icon: "circle.lefthalf.filled") {
-                appState.closeSpotlight()
+            let actions: [(String, String, () -> Void)] = [
+                ("添加服务器", "plus.circle", { appState.closeSpotlight(); appState.openDialog() }),
+                ("添加数据库连接", "cylinder", { appState.closeSpotlight() }),
+                ("新建凭证", "key.badge.plus", { appState.closeSpotlight(); appState.openCgDialog() }),
+                ("切换主题", "circle.lefthalf.filled", {
+                    let allCases = AppTheme.allCases
+                    if let idx = allCases.firstIndex(of: appState.theme) {
+                        appState.setTheme(allCases[(idx + 1) % allCases.count])
+                    }
+                    appState.closeSpotlight()
+                }),
+            ]
+            ForEach(actions, id: \.0) { title, icon, action in
+                let idx = allItems.firstIndex(where: { if case .action(let t, _, _) = $0 { return t == title } else { return false } })
+                actionRow(title, icon: icon, isSelected: idx == selectedIndex, action: action)
+                    .id(SpotlightItem.action(title, icon, {}).id)
             }
         }
     }
+
+    // MARK: - Footer
 
     private var footer: some View {
         HStack(spacing: 12) {
@@ -106,13 +225,15 @@ struct SpotlightView: View {
             Text("↵ 确认")
             Text("⌘N 新建服务器")
             Spacer()
-            Text("双击 → SSH")
+            Text("单击 → SSH  |  文件夹按钮 → SFTP 抽屉")
         }
         .font(.system(size: 11))
         .foregroundStyle(.tertiary)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
+
+    // MARK: - Section headers
 
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 6) {
@@ -141,7 +262,9 @@ struct SpotlightView: View {
         .foregroundStyle(.secondary)
     }
 
-    private func serverRow(_ server: Server) -> some View {
+    // MARK: - Row views with selection highlight
+
+    private func serverRow(_ server: Server, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: server.isJumpConfigured ? "arrow.triangle.branch" : "server.rack")
                 .foregroundStyle(server.isJumpConfigured ? .cyan : .green)
@@ -154,18 +277,19 @@ struct SpotlightView: View {
                 .foregroundStyle(.tertiary)
             Spacer()
             Button(action: {
-                appState.addTab(server: server, type: .sftp)
-                appState.closeSpotlight()
+                openSftpDrawer(for: server)
             }) {
                 Image(systemName: "folder")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("打开 SFTP")
+            .help("打开 SFTP 抽屉")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
         .contentShape(Rectangle())
         .onTapGesture {
             appState.addTab(server: server, type: .terminal)
@@ -173,7 +297,7 @@ struct SpotlightView: View {
         }
     }
 
-    private func credentialRow(_ cg: CredentialGroup) -> some View {
+    private func credentialRow(_ cg: CredentialGroup, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "key.round")
                 .foregroundStyle(.purple)
@@ -188,6 +312,8 @@ struct SpotlightView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
         .contentShape(Rectangle())
         .onTapGesture {
             appState.openCgDialog(cg)
@@ -195,23 +321,64 @@ struct SpotlightView: View {
         }
     }
 
-    private func actionRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                    .frame(width: 16)
-                Text(title)
-                    .font(.system(size: 13))
-                Spacer()
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+    private func actionRow(_ title: String, icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .frame(width: 16)
+            Text(title)
+                .font(.system(size: 13))
+            Spacer()
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .contentShape(Rectangle())
+        .onTapGesture { action() }
     }
+
+    // MARK: - Keyboard navigation
+
+    private func moveSelection(_ delta: Int) {
+        let count = allItems.count
+        guard count > 0 else { return }
+        selectedIndex = max(0, min(count - 1, selectedIndex + delta))
+    }
+
+    private func confirmSelection() {
+        let items = allItems
+        guard selectedIndex >= 0, selectedIndex < items.count else { return }
+        let item = items[selectedIndex]
+        switch item {
+        case .server(let server):
+            appState.addTab(server: server, type: .terminal)
+            appState.closeSpotlight()
+        case .credential(let cg):
+            appState.openCgDialog(cg)
+            appState.closeSpotlight()
+        case .action(_, _, let action):
+            action()
+        }
+    }
+
+    // MARK: - SFTP drawer connection (P0-3)
+
+    private func openSftpDrawer(for server: Server) {
+        if let existingTab = appState.tabs.first(where: { $0.type == .terminal && $0.serverId == server.id }) {
+            appState.activeTabId = existingTab.id
+            appState.toggleSftpDrawer(for: existingTab.id)
+        } else {
+            appState.addTab(server: server, type: .terminal)
+            if let newTab = appState.tabs.last {
+                appState.toggleSftpDrawer(for: newTab.id)
+            }
+        }
+        appState.closeSpotlight()
+    }
+
+    // MARK: - Filtering
 
     private var filteredServers: [Server] {
         let q = appState.spotlightQuery.lowercased()

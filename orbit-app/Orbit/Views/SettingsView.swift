@@ -3,8 +3,14 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("fontSize") private var fontSize: Double = 14
-    @AppStorage("lineHeight") private var lineHeight: Double = 1.55
+    @AppStorage("fontFamily") private var fontFamily: String = "Menlo"
     @AppStorage("cursorStyle") private var cursorStyle: String = "bar"
+    @AppStorage("useMetalRenderer") private var useMetalRenderer: Bool = true
+    @AppStorage("backgroundBlur") private var backgroundBlur: Bool = false
+    @AppStorage("fontLigatures") private var fontLigatures: Bool = false
+    @AppStorage("selectToCopy") private var selectToCopy: Bool = true
+
+    private let monoFonts = Self.loadMonoFonts()
 
     var body: some View {
         ScrollView {
@@ -23,17 +29,49 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("外观")
 
-            HStack(spacing: 12) {
-                themeCard(.light, name: "Light", colors: [Color.white, Color(red: 0.96, green: 0.96, blue: 0.97)])
-                themeCard(.dark, name: "Dark", colors: [Color(red: 0.11, green: 0.11, blue: 0.12), Color.black])
-                themeCard(.catppuccinMocha, name: "Catppuccin Mocha", colors: [Color(red: 0.12, green: 0.12, blue: 0.18), Color(red: 0.07, green: 0.07, blue: 0.11)])
+            ScrollView {
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 12)
+                ], spacing: 12) {
+                    ForEach(displayThemes) { theme in
+                        themeCard(theme)
+                    }
+                }
             }
+            .frame(maxHeight: 280)
+
+            Button(action: openThemesFolder) {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                    Text("打开主题文件夹")
+                }
+                .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
+    }
+
+    private var displayThemes: [OrbitTheme] {
+        let loaded = ThemeManager.shared.themes
+        return loaded.isEmpty ? OrbitTheme.allBuiltIn : loaded
     }
 
     private var terminalSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionTitle("终端")
+
+            HStack {
+                Text("字体")
+                Spacer()
+                Picker("", selection: $fontFamily) {
+                    ForEach(monoFonts, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .buttonStyle(.plain)
+                .frame(width: 200)
+            }
 
             HStack {
                 Text("字体大小")
@@ -42,16 +80,37 @@ struct SettingsView: View {
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Slider(value: $fontSize, in: 12...20, step: 1)
+            Slider(value: $fontSize, in: 10...24, step: 1)
+
+            Divider()
 
             HStack {
-                Text("行高")
+                Text("字体连字")
                 Spacer()
-                Text(String(format: "%.2f", lineHeight))
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                Toggle("", isOn: $fontLigatures)
+                    .toggleStyle(.switch)
             }
-            Slider(value: $lineHeight, in: 1.2...1.8, step: 0.05)
+
+            HStack {
+                Text("Metal GPU 渲染")
+                Spacer()
+                Toggle("", isOn: $useMetalRenderer)
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text("背景模糊")
+                Spacer()
+                Toggle("", isOn: $backgroundBlur)
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text("选中即复制")
+                Spacer()
+                Toggle("", isOn: $selectToCopy)
+                    .toggleStyle(.switch)
+            }
 
             HStack {
                 Text("光标样式")
@@ -64,6 +123,23 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 200)
             }
+
+            Divider()
+
+            HStack {
+                Text("快速终端")
+                Spacer()
+                Text("^` (Ctrl + `)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            // Font preview
+            Text("ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789")
+                .font(.custom(fontFamily, size: fontSize))
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 6)
         }
     }
 
@@ -91,14 +167,43 @@ struct SettingsView: View {
             .font(.system(size: 13, weight: .semibold))
     }
 
-    private func themeCard(_ theme: AppTheme, name: String, colors: [Color]) -> some View {
-        let isSelected = appState.theme == theme
-        return Button(action: { appState.setTheme(theme) }) {
+    private func themeCard(_ theme: OrbitTheme) -> some View {
+        let isSelected = appState.theme.rawValue == theme.id
+        let colors = theme.colors
+
+        return Button(action: {
+            if let t = AppTheme(rawValue: theme.id) {
+                appState.setTheme(t)
+            }
+        }) {
             VStack(spacing: 8) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom))
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: colors.background.red, green: colors.background.green, blue: colors.background.blue),
+                                    Color(red: colors.windowBg.red, green: colors.windowBg.green, blue: colors.windowBg.blue),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                         .frame(height: 60)
+                        .overlay(
+                            HStack(spacing: 3) {
+                                ForEach(0..<8, id: \.self) { i in
+                                    Circle()
+                                        .fill(Color(
+                                            red: Double(colors.ansi[i].red) / 65535.0,
+                                            green: Double(colors.ansi[i].green) / 65535.0,
+                                            blue: Double(colors.ansi[i].blue) / 65535.0
+                                        ))
+                                        .frame(width: 8, height: 8)
+                                }
+                            }
+                            .padding(.top, 30)
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(isSelected ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: isSelected ? 2 : 1)
@@ -110,11 +215,34 @@ struct SettingsView: View {
                             .background(Circle().fill(.white).padding(-2))
                     }
                 }
-                Text(name)
+                Text(theme.name)
                     .font(.system(size: 12))
                     .foregroundStyle(isSelected ? .primary : .secondary)
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func openThemesFolder() {
+        let path = ThemeManager.shared.userThemesPath
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+
+    private static func loadMonoFonts() -> [String] {
+        var names = Set<String>()
+        for family in NSFontManager.shared.availableFontFamilies {
+            let members = NSFontManager.shared.availableMembers(ofFontFamily: family) as? [[Any]]
+            for member in (members ?? []) {
+                guard member.count >= 1, let name = member[0] as? String else { continue }
+                let font = NSFont(name: name, size: 14)
+                if font?.isFixedPitch == true {
+                    names.insert(family)
+                    break
+                }
+            }
+        }
+        let sorted = names.sorted()
+        return sorted.contains("Menlo") ? sorted : ["Menlo"] + sorted
     }
 }

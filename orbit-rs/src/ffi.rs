@@ -744,6 +744,29 @@ pub extern "C" fn orbit_get_server_home(app: *mut OrbitApp, server_id: *const c_
 }
 
 #[no_mangle]
+pub extern "C" fn orbit_get_server_processes(app: *mut OrbitApp, server_id: *const c_char, out_json: *mut *mut c_char) -> i32 {
+    if app.is_null() || server_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    match ssh::SshManager::exec_command(&app.pool, &server, &app.db, monitor::get_process_script()) {
+        Ok(output) => {
+            let processes = monitor::parse_processes(&output);
+            json_to_out(&processes, out_json)
+        }
+        Err(_) => -4,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn orbit_free_string(s: *mut c_char) {
     if !s.is_null() {
         unsafe { drop(CString::from_raw(s)) };

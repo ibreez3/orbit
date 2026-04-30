@@ -1,0 +1,29 @@
+# Nord theme for Orbit
+
+name = Nord
+
+[palette]
+background = #2e3440
+foreground = #d8dee9
+ansi-0 = #3b4252
+ansi-1 = #bf616a
+ansi-2 = #a3be8c
+ansi-3 = #ebcb8b
+ansi-4 = #81a1c1
+ansi-5 = #b48ead
+ansi-6 = #8fbcbb
+ansi-7 = #c0ccd8
+ansi-8 = #4c566a
+ansi-9 = #bf616a
+ansi-10 = #a3be8c
+ansi-11 = #ebcb8b
+ansi-12 = #81a1c1
+ansi-13 = #b48ead
+ansi-14 = #8fbcbb
+ansi-15 = #eceff4
+
+[window]
+background = #191e28
+
+[cursor]
+color = #d8dee9

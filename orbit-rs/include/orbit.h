@@ -73,6 +73,8 @@ ORBIT_API int32_t orbit_get_server_stats(struct OrbitApp *app, const char *serve
 
 ORBIT_API int32_t orbit_get_server_home(struct OrbitApp *app, const char *server_id, char **out_home);
 
+ORBIT_API int32_t orbit_get_server_processes(struct OrbitApp *app, const char *server_id, char **out_json);
+
 ORBIT_API void orbit_free_string(char *s);
 
 #endif  /* ORBIT_H */

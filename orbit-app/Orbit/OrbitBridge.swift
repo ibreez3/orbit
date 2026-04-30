@@ -412,6 +412,19 @@ class OrbitBridge {
         defer { orbit_free_string(home) }
         return String(cString: home)
     }
+
+    func getServerProcesses(serverId: String) throws -> [ServerProcess] {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            orbit_get_server_processes(app, sidPtr, &outJson)
+        }
+        guard rc == 0, let json = outJson else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(json) }
+        return try JSONDecoder().decode([ServerProcess].self, from: String(cString: json).data(using: .utf8)!)
+    }
 }
 
 enum OrbitError: LocalizedError {

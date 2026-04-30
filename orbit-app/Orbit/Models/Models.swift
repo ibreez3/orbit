@@ -98,6 +98,32 @@ enum AppTheme: String, CaseIterable {
     case light
     case dark
     case catppuccinMocha
+    case dracula
+    case tokyoNight
+    case nord
+    case solarizedDark
+    case gruvboxDark
+}
+
+struct ThemeColors {
+    let background: (red: CGFloat, green: CGFloat, blue: CGFloat)
+    let foreground: (red: CGFloat, green: CGFloat, blue: CGFloat)
+    let windowBg: (red: CGFloat, green: CGFloat, blue: CGFloat)
+    let cursor: (red: CGFloat, green: CGFloat, blue: CGFloat)
+    let ansi: [(red: UInt16, green: UInt16, blue: UInt16)]
+
+    static func colors(for theme: AppTheme) -> ThemeColors {
+        // Try loading from ThemeManager (supports file-based themes)
+        if let orbitTheme = ThemeManager.shared.theme(withId: theme.rawValue) {
+            return orbitTheme.colors
+        }
+        // Fallback: match built-in themes
+        let builtIn = OrbitTheme.allBuiltIn
+        if let match = builtIn.first(where: { $0.id == theme.rawValue }) {
+            return match.colors
+        }
+        return OrbitTheme.builtInCatppuccinMocha.colors
+    }
 }
 
 enum SpotlightSection: String, CaseIterable {
@@ -222,9 +248,22 @@ indirect enum PaneNode: Identifiable {
 
 struct HistoryPoint: Identifiable {
     let id = UUID()
-    let time: String
+    let date: Date
     let cpu: Double
     let mem: Double
+}
+
+struct ServerProcess: Codable, Identifiable {
+    let pid: UInt32
+    let user: String
+    let cpu: Double
+    let mem: Double
+    let vsz: UInt64
+    let rss: UInt64
+    let stat: String
+    let command: String
+
+    var id: UInt32 { pid }
 }
 
 func formatSize(_ bytes: UInt64) -> String {

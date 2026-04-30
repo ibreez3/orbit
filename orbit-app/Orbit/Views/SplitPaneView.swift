@@ -19,6 +19,10 @@ struct SplitPaneView: View {
                     if let idx = appState.tabs.firstIndex(where: { $0.id == tabId }) {
                         appState.tabs[idx].focusedChannelId = channelId
                     }
+                    // Make the terminal NSView first responder for keyboard input
+                    if let tv = OrbitBridge.shared.terminalViewCache[channelId] as? OrbitTerminalView {
+                        tv.window?.makeFirstResponder(tv)
+                    }
                 }
         case .split(let splitId, let direction, let ratio, let first, let second):
             SplitContainer(direction: direction, ratio: ratio, splitId: splitId) { newRatio in

@@ -88,6 +88,18 @@ pub struct FileEntry {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub user: String,
+    pub cpu: f64,
+    pub mem: f64,
+    pub vsz: u64,
+    pub rss: u64,
+    pub stat: String,
+    pub command: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileEntryStat {
     pub path: String,
     pub size: u64,

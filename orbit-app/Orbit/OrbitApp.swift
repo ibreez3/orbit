@@ -25,6 +25,31 @@ struct OrbitCommands: Commands {
                 NotificationCenter.default.post(name: .openSpotlight, object: nil)
             }
             .keyboardShortcut("k", modifiers: .command)
+
+            Button("Toggle SFTP Drawer") {
+                NotificationCenter.default.post(name: .toggleSftpDrawer, object: nil)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+
+            Button("Clear Screen") {
+                NotificationCenter.default.post(name: .clearScreen, object: nil)
+            }
+            .keyboardShortcut("l", modifiers: .command)
+
+            Button("Find in Terminal") {
+                NotificationCenter.default.post(name: .findInTerminal, object: nil)
+            }
+            .keyboardShortcut("f", modifiers: .command)
+
+            Button("Open Settings") {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            }
+            .keyboardShortcut(",", modifiers: .command)
+
+            Button("Reconnect Session") {
+                NotificationCenter.default.post(name: .reconnectSession, object: nil)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .newItem) {
             Button("新建终端连接") {
@@ -99,4 +124,9 @@ extension Notification.Name {
     static let navigateRightPane = Notification.Name("navigateRightPane")
     static let growPane = Notification.Name("growPane")
     static let shrinkPane = Notification.Name("shrinkPane")
+    static let toggleSftpDrawer = Notification.Name("toggleSftpDrawer")
+    static let clearScreen = Notification.Name("clearScreen")
+    static let findInTerminal = Notification.Name("findInTerminal")
+    static let openSettings = Notification.Name("openSettings")
+    static let reconnectSession = Notification.Name("reconnectSession")
 }

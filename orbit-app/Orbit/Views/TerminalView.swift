@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftTerm
 import AppKit
+import CoreText
 
 struct TerminalView: NSViewRepresentable {
     let channelId: String?
@@ -8,45 +9,82 @@ struct TerminalView: NSViewRepresentable {
     let tabId: String
     @EnvironmentObject var appState: AppState
 
-    func makeNSView(context: Context) -> SwiftTerm.TerminalView {
+    private static func applySettings(_ tv: OrbitTerminalView, theme: AppTheme) {
+        let tc = ThemeColors.colors(for: theme)
+        let colors = tc.ansi.map { SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue) }
+        tv.installColors(colors)
+
+        let bgColor = NSColor(red: tc.background.red, green: tc.background.green, blue: tc.background.blue, alpha: 1)
+        tv.nativeBackgroundColor = bgColor
+        tv.nativeForegroundColor = NSColor(red: tc.foreground.red, green: tc.foreground.green, blue: tc.foreground.blue, alpha: 1)
+
+        // Font with ligatures
+        let fontSize = UserDefaults.standard.double(forKey: "fontSize")
+        let fontFamily = UserDefaults.standard.string(forKey: "fontFamily") ?? "Menlo"
+        let useLigatures = UserDefaults.standard.bool(forKey: "fontLigatures")
+        let size = fontSize > 0 ? fontSize : 14
+        var font = NSFont(name: fontFamily, size: size) ?? NSFont(name: "Menlo", size: size)!
+
+        if useLigatures {
+            // Enable ligatures via font descriptor
+            let descriptor = font.fontDescriptor.addingAttributes([
+                .featureSettings: [
+                    [kCTFontFeatureTypeIdentifierKey: 1,  // kLigaturesType
+                     kCTFontFeatureSelectorIdentifierKey: 2]  // kCommonLigaturesOnSelector
+                ]
+            ])
+            if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
+                font = ligatureFont
+            }
+        }
+        tv.font = font
+
+        // Cursor style
+        let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "bar"
+        if let term = tv.getTerminal() as? Terminal {
+            switch cursorStyle {
+            case "block":
+                term.setCursorStyle(.steadyBlock)
+            case "underline":
+                term.setCursorStyle(.steadyUnderline)
+            default:
+                term.setCursorStyle(.steadyBar)
+            }
+        }
+
+        // URL hover highlighting — always show underline on hover (no modifier needed)
+        tv.linkReporting = .implicit
+        tv.linkHighlightMode = .hover
+    }
+
+    func makeNSView(context: Context) -> OrbitTerminalView {
         // Reuse cached terminal view if available (preserves buffer on pane tree changes)
-        if let cid = channelId, let cached = OrbitBridge.shared.terminalViewCache[cid] as? SwiftTerm.TerminalView {
+        if let cid = channelId, let cached = OrbitBridge.shared.terminalViewCache[cid] as? OrbitTerminalView {
             context.coordinator.sessionId = cid
             context.coordinator.terminalView = cached
             cached.terminalDelegate = context.coordinator
             context.coordinator.registerHandlers()
+            Self.applySettings(cached, theme: appState.theme)
+            cached.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
             if let term = cached.getTerminal() as? Terminal {
                 try? OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows))
             }
             return cached
         }
 
-        let tv = SwiftTerm.TerminalView()
-
-        let catppuccin: [SwiftTerm.Color] = [
-            SwiftTerm.Color(red: 0x4547, green: 0x475a, blue: 0x4547),
-            SwiftTerm.Color(red: 0xf38b, green: 0x8ba8, blue: 0xf38b),
-            SwiftTerm.Color(red: 0xa6e3, green: 0xa1a6, blue: 0xa6e3),
-            SwiftTerm.Color(red: 0xf9e2, green: 0xaff9, blue: 0xf9e2),
-            SwiftTerm.Color(red: 0x89b4, green: 0xfa89, blue: 0x89b4),
-            SwiftTerm.Color(red: 0xf5c2, green: 0xe7f5, blue: 0xf5c2),
-            SwiftTerm.Color(red: 0x94e2, green: 0xd594, blue: 0x94e2),
-            SwiftTerm.Color(red: 0xbac2, green: 0xdeba, blue: 0xbac2),
-            SwiftTerm.Color(red: 0x585b, green: 0x7058, blue: 0x585b),
-            SwiftTerm.Color(red: 0xf38b, green: 0xa8f3, blue: 0xf38b),
-            SwiftTerm.Color(red: 0xa6e3, green: 0xa1a6, blue: 0xa6e3),
-            SwiftTerm.Color(red: 0xf9e2, green: 0xaff9, blue: 0xf9e2),
-            SwiftTerm.Color(red: 0x89b4, green: 0xfa89, blue: 0x89b4),
-            SwiftTerm.Color(red: 0xf5c2, green: 0xe7f5, blue: 0xf5c2),
-            SwiftTerm.Color(red: 0x94e2, green: 0xd594, blue: 0x94e2),
-            SwiftTerm.Color(red: 0xa6ad, green: 0xc8a6, blue: 0xa6ad),
-        ]
-        tv.installColors(catppuccin)
-        tv.nativeBackgroundColor = NSColor(red: 0.118, green: 0.118, blue: 0.180, alpha: 1)
-        tv.nativeForegroundColor = NSColor(red: 0.804, green: 0.827, blue: 0.957, alpha: 1)
-        tv.font = NSFont(name: "Menlo", size: 14)!
+        let tv = OrbitTerminalView()
+        tv.tabId = tabId
+        tv.appState = appState
+        // Enable Metal GPU rendering on Mac
+        if UserDefaults.standard.bool(forKey: "useMetalRenderer") {
+            try? tv.setUseMetal(true)
+        }
+        Self.applySettings(tv, theme: appState.theme)
         tv.terminalDelegate = context.coordinator
         context.coordinator.terminalView = tv
+
+        // Background blur
+        tv.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
 
         if let cid = channelId {
             context.coordinator.sessionId = cid
@@ -62,11 +100,14 @@ struct TerminalView: NSViewRepresentable {
         return tv
     }
 
-    func updateNSView(_ nsView: SwiftTerm.TerminalView, context: Context) {
+    func updateNSView(_ nsView: OrbitTerminalView, context: Context) {
         if context.coordinator.sessionId == nil, let cid = channelId {
             context.coordinator.sessionId = cid
             context.coordinator.registerHandlers()
         }
+        nsView.tabId = tabId
+        nsView.appState = appState
+        Self.applySettings(nsView, theme: appState.theme)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -81,6 +122,9 @@ struct TerminalView: NSViewRepresentable {
         weak var terminalView: SwiftTerm.TerminalView?
         var sessionId: String?
         private var alive = true
+        private var localShell: LocalShell?
+
+        var isLocal: Bool { serverId == "local" }
 
         init(channelId: String?, serverId: String, tabId: String, appState: AppState) {
             self.channelId = channelId
@@ -91,6 +135,7 @@ struct TerminalView: NSViewRepresentable {
 
         deinit {
             alive = false
+            localShell = nil
         }
 
         private func makeDataHandler() -> (Data) -> Void {
@@ -112,17 +157,54 @@ struct TerminalView: NSViewRepresentable {
             { [weak self] in
                 guard let self = self, self.alive else { return }
                 DispatchQueue.main.async {
-                    if let tv = self.terminalView {
-                        tv.feed(text: "\r\n\u{1b}[31m--- 连接已关闭 ---\u{1b}[0m\r\n")
-                    }
-                    if let sid = self.sessionId {
-                        self.appState.handleChannelClosed(channelId: sid)
+                    if self.isLocal {
+                        if let tv = self.terminalView {
+                            tv.feed(text: "\r\n\u{1b}[33m--- 本地终端已退出 ---\u{1b}[0m\r\n")
+                        }
+                        if let tabIdx = self.appState.tabs.firstIndex(where: { $0.id == self.tabId }) {
+                            self.appState.tabs[tabIdx].sessionId = nil
+                        }
+                    } else {
+                        if let tv = self.terminalView {
+                            tv.feed(text: "\r\n\u{1b}[33m--- 连接已关闭 · 输入 ⌘⇧R 或右键「重新连接」恢复 ---\u{1b}[0m\r\n")
+                        }
+                        if let sid = self.sessionId {
+                            self.appState.handleChannelClosed(channelId: sid)
+                        }
                     }
                 }
             }
         }
 
         func connect() {
+            if isLocal {
+                connectLocal()
+            } else {
+                connectSSH()
+            }
+        }
+
+        private func connectLocal() {
+            let shell = LocalShell()
+            localShell = shell
+            shell.onData = makeDataHandler()
+            shell.onClosed = makeClosedHandler()
+
+            let fakeSid = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
+            sessionId = fakeSid
+
+            DispatchQueue.main.async {
+                self.appState.updateTabSessionId(self.tabId, sessionId: fakeSid)
+                if let tv = self.terminalView {
+                    let term = tv.getTerminal()
+                    shell.start(cols: UInt16(term.cols), rows: UInt16(term.rows))
+                } else {
+                    shell.start()
+                }
+            }
+        }
+
+        private func connectSSH() {
             let dataHandler = makeDataHandler()
             let closedHandler = makeClosedHandler()
             Task {
@@ -152,6 +234,7 @@ struct TerminalView: NSViewRepresentable {
         }
 
         func registerHandlers() {
+            if isLocal { return }
             guard let sid = sessionId else { return }
             OrbitBridge.shared.handlersLock.lock()
             OrbitBridge.shared.sshDataHandlers[sid] = makeDataHandler()
@@ -160,14 +243,22 @@ struct TerminalView: NSViewRepresentable {
         }
 
         func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
-            guard alive, let sid = sessionId else { return }
+            guard alive else { return }
             let bytes = Data(data)
-            try? OrbitBridge.shared.writeSSH(sessionId: sid, data: bytes)
+            if isLocal {
+                localShell?.write(bytes)
+            } else if let sid = sessionId {
+                try? OrbitBridge.shared.writeSSH(sessionId: sid, data: bytes)
+            }
         }
 
         func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
-            guard alive, let sid = sessionId, newCols > 0, newRows > 0 else { return }
-            try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
+            guard alive, newCols > 0, newRows > 0 else { return }
+            if isLocal {
+                localShell?.resize(cols: UInt16(newCols), rows: UInt16(newRows))
+            } else if let sid = sessionId {
+                try? OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
+            }
         }
 
         func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}
@@ -176,14 +267,24 @@ struct TerminalView: NSViewRepresentable {
         func requestOpenLink(source: SwiftTerm.TerminalView, link: String, params: [String: String]) {
             if let url = URL(string: link) { NSWorkspace.shared.open(url) }
         }
+
         func bell(source: SwiftTerm.TerminalView) { NSSound.beep() }
+
         func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
             NSPasteboard.general.clearContents()
             if let str = String(data: content, encoding: .utf8) {
                 NSPasteboard.general.setString(str, forType: .string)
             }
         }
+
+        func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {
+            // Auto-copy selected text to clipboard when selectToCopy is enabled
+            guard UserDefaults.standard.bool(forKey: "selectToCopy") else { return }
+            if let tv = terminalView, tv.selectionActive {
+                tv.copy(tv)
+            }
+        }
+
         func iTermContent(source: SwiftTerm.TerminalView, content: ArraySlice<UInt8>) {}
-        func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {}
     }
 }
