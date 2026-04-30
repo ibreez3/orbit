@@ -26,6 +26,7 @@
 		82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 3E1BDD661D1C0F68B456CE86 /* SwiftTerm */; };
 		958A8F09DD43B7722C3A83E5 /* OrbitConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07692D9E82A9DF921C55B64F /* OrbitConfig.swift */; };
+		9864F6FA7399046CFED1A7AB /* KeyBindings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */; };
 		9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		B94BCE8782A000F9C641CAC6 /* OrbitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */; };
@@ -70,6 +71,7 @@
 		64825B472441C790427EFF55 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		656A7AF90C1152A972478A80 /* liborbit_core.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = liborbit_core.dylib; sourceTree = "<group>"; };
 		750B458B02EF6C413A15C484 /* Orbit-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Orbit-Bridging-Header.h"; sourceTree = "<group>"; };
+		8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindings.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		94DB15AA26D20B36334209E7 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		AA0E97AE18D6AF113D5ECCC8 /* Orbit.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Orbit.entitlements; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 		67396201ACDD149AA1629C59 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */,
 				D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */,
 				B24FD058B7D00E7C9D29DA78 /* Models.swift */,
 				07692D9E82A9DF921C55B64F /* OrbitConfig.swift */,
@@ -280,6 +283,7 @@
 				C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */,
 				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
 				0B108A04325E375330215A8F /* HomeView.swift in Sources */,
+				9864F6FA7399046CFED1A7AB /* KeyBindings.swift in Sources */,
 				060FE66BA0E797B7B1ECFA6E /* LocalShell.swift in Sources */,
 				C7105A3C1958F5D3A894FEA7 /* MainView.swift in Sources */,
 				CC6551206571FF3F046080C5 /* Models.swift in Sources */,

@@ -5,10 +5,11 @@ struct SettingsView: View {
     @AppStorage("fontSize") private var fontSize: Double = 14
     @AppStorage("fontFamily") private var fontFamily: String = "Menlo"
     @AppStorage("cursorStyle") private var cursorStyle: String = "bar"
-    @AppStorage("useMetalRenderer") private var useMetalRenderer: Bool = true
+    @AppStorage("useMetalRenderer") private var useMetalRenderer: Bool = false
     @AppStorage("backgroundBlur") private var backgroundBlur: Bool = false
     @AppStorage("fontLigatures") private var fontLigatures: Bool = false
     @AppStorage("selectToCopy") private var selectToCopy: Bool = true
+    @AppStorage("scrollbackLines") private var scrollbackLines: Int = 10000
 
     private let monoFonts = Self.loadMonoFonts()
 
@@ -17,6 +18,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 24) {
                 appearanceSection
                 terminalSection
+                keybindingsSection
                 connectionSection
             }
             .padding(24)
@@ -124,6 +126,17 @@ struct SettingsView: View {
                 .frame(width: 200)
             }
 
+            HStack {
+                Text("滚动缓冲")
+                Spacer()
+                Text("\(scrollbackLines) 行")
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(get: {
+                Double(scrollbackLines)
+            }, set: { scrollbackLines = Int($0) }), in: 1000...50000, step: 1000)
+
             Divider()
 
             HStack {
@@ -140,6 +153,28 @@ struct SettingsView: View {
                 .lineLimit(1)
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 6)
+        }
+    }
+
+    private var keybindingsSection: some View {
+        let actions = KeyBindings.shared.allActions()
+        return VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("快捷键")
+            ForEach(actions, id: \.action) { item in
+                HStack {
+                    Text(actionLabel(for: item.action))
+                        .font(.system(size: 13))
+                    Spacer()
+                    Text(item.binding.displayString)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            Button("恢复默认快捷键") {
+                KeyBindings.shared.resetToDefaults()
+            }
+            .font(.system(size: 12))
         }
     }
 
@@ -165,6 +200,28 @@ struct SettingsView: View {
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .semibold))
+    }
+
+    private func actionLabel(for action: String) -> String {
+        switch action {
+        case "spotlight":      return "Spotlight 搜索"
+        case "settings":       return "打开设置"
+        case "newTerminal":    return "新建终端"
+        case "toggleSftp":     return "SFTP 侧栏"
+        case "findInTerminal": return "查找"
+        case "clearScreen":    return "清屏"
+        case "reconnect":      return "重新连接"
+        case "splitHorizontal": return "水平分屏"
+        case "splitVertical":  return "垂直分屏"
+        case "closePane":      return "关闭窗格"
+        case "navPrevPane":    return "上一个窗格"
+        case "navNextPane":    return "下一个窗格"
+        case "navLeftPane":    return "左侧窗格"
+        case "navRightPane":   return "右侧窗格"
+        case "growPane":       return "扩大窗格"
+        case "shrinkPane":     return "缩小窗格"
+        default:               return action
+        }
     }
 
     private func themeCard(_ theme: OrbitTheme) -> some View {

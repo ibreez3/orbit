@@ -26,11 +26,17 @@ struct TerminalView: NSViewRepresentable {
         var font = NSFont(name: fontFamily, size: size) ?? NSFont(name: "Menlo", size: size)!
 
         if useLigatures {
-            // Enable ligatures via font descriptor
             let descriptor = font.fontDescriptor.addingAttributes([
                 .featureSettings: [
-                    [kCTFontFeatureTypeIdentifierKey: 1,  // kLigaturesType
-                     kCTFontFeatureSelectorIdentifierKey: 2]  // kCommonLigaturesOnSelector
+                    // Common ligatures (liga): fi, fl, ff, ffi, ffl
+                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
+                     kCTFontFeatureSelectorIdentifierKey: 2], // kCommonLigaturesOnSelector
+                    // Discretionary ligatures (dlig): font-specific decorative ligatures
+                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
+                     kCTFontFeatureSelectorIdentifierKey: 3], // kRareLigaturesOnSelector
+                    // Contextual alternates (calt): -> => != === etc.
+                    [kCTFontFeatureTypeIdentifierKey: 35,  // kContextualAlternatesType
+                     kCTFontFeatureSelectorIdentifierKey: 2], // kContextualAlternatesOnSelector
                 ]
             ])
             if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
@@ -51,6 +57,10 @@ struct TerminalView: NSViewRepresentable {
                 term.setCursorStyle(.steadyBar)
             }
         }
+
+        // Scrollback buffer limit (default 10000 lines, configurable)
+        let scrollback = UserDefaults.standard.object(forKey: "scrollbackLines") as? Int ?? 10000
+        tv.changeScrollback(scrollback)
 
         // URL hover highlighting — always show underline on hover (no modifier needed)
         tv.linkReporting = .implicit
@@ -75,10 +85,6 @@ struct TerminalView: NSViewRepresentable {
         let tv = OrbitTerminalView()
         tv.tabId = tabId
         tv.appState = appState
-        // Enable Metal GPU rendering on Mac
-        if UserDefaults.standard.bool(forKey: "useMetalRenderer") {
-            try? tv.setUseMetal(true)
-        }
         Self.applySettings(tv, theme: appState.theme)
         tv.terminalDelegate = context.coordinator
         context.coordinator.terminalView = tv
@@ -124,6 +130,11 @@ struct TerminalView: NSViewRepresentable {
         private var alive = true
         private var localShell: LocalShell?
 
+        // Frame-batched feed: coalesce multiple data chunks into one feed() per run loop
+        private var _batchLock = os_unfair_lock()
+        private var _pending = Data()
+        private var _pendingCount = 0
+
         var isLocal: Bool { serverId == "local" }
 
         init(channelId: String?, serverId: String, tabId: String, appState: AppState) {
@@ -138,18 +149,38 @@ struct TerminalView: NSViewRepresentable {
             localShell = nil
         }
 
-        private func makeDataHandler() -> (Data) -> Void {
-            { [weak self] data in
-                guard let self = self, self.alive, let tv = self.terminalView else { return }
-                DispatchQueue.main.async {
-                    var copy = data
+        private func enqueueData(_ data: Data) {
+            let first: Bool
+            os_unfair_lock_lock(&_batchLock)
+            _pending.append(data)
+            _pendingCount += 1
+            first = (_pendingCount == 1)
+            os_unfair_lock_unlock(&_batchLock)
+            if first {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.alive, let tv = self.terminalView else { return }
+                    os_unfair_lock_lock(&self._batchLock)
+                    let batch = self._pending
+                    self._pending = Data()
+                    self._pendingCount = 0
+                    os_unfair_lock_unlock(&self._batchLock)
+                    if batch.isEmpty { return }
+                    let len = batch.count
+                    var copy = batch
                     copy.withUnsafeMutableBytes { buf in
                         if let base = buf.baseAddress {
-                            let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: data.count))
+                            let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
                             tv.feed(byteArray: slice)
                         }
                     }
                 }
+            }
+        }
+
+        private func makeDataHandler() -> (Data) -> Void {
+            { [weak self] data in
+                guard let self = self, self.alive else { return }
+                self.enqueueData(data)
             }
         }
 

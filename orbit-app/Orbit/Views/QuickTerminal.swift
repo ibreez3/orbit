@@ -11,6 +11,11 @@ class QuickTerminalController: NSObject {
     private var localShell: LocalShell?
     private var isVisible = false
 
+    // Frame-batched feed
+    private var _batchLock = os_unfair_lock()
+    private var _pending = Data()
+    private var _pendingCount = 0
+
     private let hotkeyIdentifier = "quickTerminal"
 
     override init() {
@@ -82,20 +87,37 @@ class QuickTerminalController: NSObject {
         tv.nativeBackgroundColor = NSColor(red: tc.background.red, green: tc.background.green, blue: tc.background.blue, alpha: 0.95)
         tv.nativeForegroundColor = NSColor(red: tc.foreground.red, green: tc.foreground.green, blue: tc.foreground.blue, alpha: 1)
 
-        // Font
+        // Font with ligatures
         let fontSize = UserDefaults.standard.double(forKey: "fontSize")
         let fontFamily = UserDefaults.standard.string(forKey: "fontFamily") ?? "Menlo"
+        let useLigatures = UserDefaults.standard.bool(forKey: "fontLigatures")
         let size = fontSize > 0 ? fontSize : 14
-        tv.font = NSFont(name: fontFamily, size: size) ?? NSFont(name: "Menlo", size: size)!
+        var font = NSFont(name: fontFamily, size: size) ?? NSFont(name: "Menlo", size: size)!
+
+        if useLigatures {
+            let descriptor = font.fontDescriptor.addingAttributes([
+                .featureSettings: [
+                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
+                     kCTFontFeatureSelectorIdentifierKey: 2], // kCommonLigaturesOnSelector
+                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
+                     kCTFontFeatureSelectorIdentifierKey: 3], // kRareLigaturesOnSelector
+                    [kCTFontFeatureTypeIdentifierKey: 35,  // kContextualAlternatesType
+                     kCTFontFeatureSelectorIdentifierKey: 2], // kContextualAlternatesOnSelector
+                ]
+            ])
+            if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
+                font = ligatureFont
+            }
+        }
+        tv.font = font
+
+        // Scrollback buffer
+        let scrollback = UserDefaults.standard.object(forKey: "scrollbackLines") as? Int ?? 10000
+        tv.changeScrollback(scrollback)
 
         // URL highlighting
         tv.linkReporting = .implicit
         tv.linkHighlightMode = .hover
-
-        // Metal
-        if UserDefaults.standard.bool(forKey: "useMetalRenderer") {
-            try? tv.setUseMetal(true)
-        }
 
         // Background blur behind panel
         let blur = NSVisualEffectView()
@@ -113,13 +135,29 @@ class QuickTerminalController: NSObject {
         // Start local shell
         let shell = LocalShell()
         localShell = shell
-        shell.onData = { data in
-            DispatchQueue.main.async {
-                var copy = data
-                copy.withUnsafeMutableBytes { buf in
-                    if let base = buf.baseAddress {
-                        let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: data.count))
-                        tv.feed(byteArray: slice)
+        shell.onData = { [weak self] data in
+            guard let self = self else { return }
+            os_unfair_lock_lock(&self._batchLock)
+            self._pending.append(data)
+            self._pendingCount += 1
+            let first = (self._pendingCount == 1)
+            os_unfair_lock_unlock(&self._batchLock)
+            if first {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, let tv = self.terminalView else { return }
+                    os_unfair_lock_lock(&self._batchLock)
+                    let batch = self._pending
+                    self._pending = Data()
+                    self._pendingCount = 0
+                    os_unfair_lock_unlock(&self._batchLock)
+                    if batch.isEmpty { return }
+                    let len = batch.count
+                    var copy = batch
+                    copy.withUnsafeMutableBytes { buf in
+                        if let base = buf.baseAddress {
+                            let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
+                            tv.feed(byteArray: slice)
+                        }
                     }
                 }
             }
