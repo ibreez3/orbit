@@ -55,6 +55,7 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         menu.addItem(withTitle: "清屏", action: #selector(clearScreen(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "搜索", action: #selector(searchTerminal(_:)), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "插入命令片段...", action: #selector(openSnippetPicker(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "打开 SFTP", action: #selector(openSftpDrawer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "重新连接", action: #selector(reconnectSession(_:)), keyEquivalent: "")
 
@@ -121,5 +122,9 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     @objc private func reconnectSession(_ sender: Any) {
         guard let tid = tabId, let state = appState else { return }
         state.reconnectTab(tid)
+    }
+
+    @objc private func openSnippetPicker(_ sender: Any) {
+        NotificationCenter.default.post(name: .openSnippetPicker, object: nil)
     }
 }

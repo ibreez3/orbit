@@ -24,6 +24,20 @@ class AppState: ObservableObject {
     @Published var alertMessage: String? = nil
     @Published var alertTitle: String = ""
 
+    // Command snippets
+    @Published var snippets: [CommandSnippet] = []
+    @Published var snippetEditorOpen: Bool = false
+    @Published var editingSnippet: CommandSnippet? = nil
+
+    // Keyword highlighting
+    @Published var keywordHighlights: [KeywordHighlight] = KeywordHighlight.defaults
+
+    // AI Assistant
+    @Published var aiConfig: AIConfig = .defaults
+    @Published var aiMessages: [AIChatMessage] = []
+    @Published var aiPanelOpen: Bool = false
+    @Published var aiLoading: Bool = false
+
     var showAlert: Binding<Bool> {
         Binding(get: { self.alertMessage != nil }, set: { if !$0 { self.alertMessage = nil } })
     }
@@ -32,16 +46,16 @@ class AppState: ObservableObject {
     let textEditorWC = TextEditorWindowController()
 
     init() {
-        // Load persisted theme
         let savedTheme = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
         if let t = AppTheme(rawValue: savedTheme) {
             _theme = Published(initialValue: t)
         }
-        // Load themes from files
         ThemeManager.shared.loadThemes()
-        // Load servers immediately on init
         loadServers()
         loadCredentialGroups()
+        loadSnippets()
+        loadKeywords()
+        loadAIConfig()
     }
 
     func loadServers() {
@@ -167,7 +181,6 @@ class AppState: ObservableObject {
             .terminal: "SSH: \(server.name)",
             .sftp: "SFTP: \(server.name)",
             .monitor: "Monitor: \(server.name)",
-            .settings: "设置",
         ]
         var tab = TabItem(id: id, type: type, serverId: server.id, serverName: server.name, title: titles[type] ?? "")
         if type == .terminal {
@@ -462,5 +475,157 @@ class AppState: ObservableObject {
 
         // Reconnect
         connectSSH(tabId: tabId, serverId: tab.serverId)
+    }
+
+    // MARK: - Command Snippets
+
+    func loadSnippets() {
+        guard let data = UserDefaults.standard.data(forKey: "commandSnippets") else { return }
+        do {
+            snippets = try JSONDecoder().decode([CommandSnippet].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load snippets: \(error)")
+        }
+    }
+
+    func saveSnippets() {
+        do {
+            let data = try JSONEncoder().encode(snippets)
+            UserDefaults.standard.set(data, forKey: "commandSnippets")
+        } catch {
+            print("[Orbit] Failed to save snippets: \(error)")
+        }
+    }
+
+    func addSnippet(_ input: CommandSnippetInput) {
+        let id = "snip-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let now = Date()
+        let snippet = CommandSnippet(
+            id: id, name: input.name, command: input.command,
+            description: input.description, tags: input.tags,
+            serverId: input.serverId, createdAt: now, updatedAt: now
+        )
+        snippets.append(snippet)
+        saveSnippets()
+    }
+
+    func updateSnippet(id: String, input: CommandSnippetInput) {
+        if let idx = snippets.firstIndex(where: { $0.id == id }) {
+            let now = Date()
+            let updated = CommandSnippet(
+                id: id, name: input.name, command: input.command,
+                description: input.description, tags: input.tags,
+                serverId: input.serverId, createdAt: snippets[idx].createdAt, updatedAt: now
+            )
+            snippets[idx] = updated
+            saveSnippets()
+        }
+    }
+
+    func deleteSnippet(_ id: String) {
+        snippets.removeAll { $0.id == id }
+        saveSnippets()
+    }
+
+    func openSnippetEditor(snippet: CommandSnippet? = nil) {
+        editingSnippet = snippet
+        snippetEditorOpen = true
+    }
+
+    func closeSnippetEditor() {
+        snippetEditorOpen = false
+        editingSnippet = nil
+    }
+
+    func insertSnippetCommand(_ command: String, into terminalView: OrbitTerminalView?) {
+        guard let tv = terminalView else { return }
+        var arr = Array(command.utf8)
+        tv.feed(byteArray: ArraySlice(arr))
+    }
+
+    // MARK: - Keyword Highlighting
+
+    func loadKeywords() {
+        guard let data = UserDefaults.standard.data(forKey: "keywordHighlights") else { return }
+        do {
+            keywordHighlights = try JSONDecoder().decode([KeywordHighlight].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load keywords: \(error)")
+        }
+    }
+
+    func saveKeywords() {
+        do {
+            let data = try JSONEncoder().encode(keywordHighlights)
+            UserDefaults.standard.set(data, forKey: "keywordHighlights")
+        } catch {
+            print("[Orbit] Failed to save keywords: \(error)")
+        }
+    }
+
+    func addKeyword(pattern: String, colorHex: String) {
+        let id = "kw-\(Int(Date().timeIntervalSince1970 * 1000))"
+        keywordHighlights.append(KeywordHighlight(id: id, pattern: pattern, colorHex: colorHex, enabled: true))
+        saveKeywords()
+    }
+
+    func updateKeyword(id: String, pattern: String, colorHex: String, enabled: Bool) {
+        if let idx = keywordHighlights.firstIndex(where: { $0.id == id }) {
+            keywordHighlights[idx] = KeywordHighlight(id: id, pattern: pattern, colorHex: colorHex, enabled: enabled)
+            saveKeywords()
+        }
+    }
+
+    func deleteKeyword(_ id: String) {
+        keywordHighlights.removeAll { $0.id == id }
+        saveKeywords()
+    }
+
+    // MARK: - AI Configuration
+
+    func loadAIConfig() {
+        guard let data = UserDefaults.standard.data(forKey: "aiConfig") else { return }
+        do {
+            aiConfig = try JSONDecoder().decode(AIConfig.self, from: data)
+        } catch {
+            print("[Orbit] Failed to load AI config: \(error)")
+        }
+    }
+
+    func saveAIConfig() {
+        do {
+            let data = try JSONEncoder().encode(aiConfig)
+            UserDefaults.standard.set(data, forKey: "aiConfig")
+        } catch {
+            print("[Orbit] Failed to save AI config: \(error)")
+        }
+    }
+
+    func addAIMessage(_ message: AIChatMessage) {
+        aiMessages.append(message)
+    }
+
+    func clearAIMessages() {
+        aiMessages.removeAll()
+    }
+
+    func toggleAIPanel() {
+        aiPanelOpen.toggle()
+        if !aiPanelOpen { aiMessages.removeAll() }
+    }
+
+    // MARK: - Batch Execution
+
+    func sendToMultipleServers(command: String, serverIds: [String]) {
+        for serverId in serverIds {
+            Task {
+                do {
+                    let sessionId = try bridge.connectSSH(serverId: serverId)
+                    try bridge.writeSSH(sessionId: sessionId, data: Data((command + "\r").utf8))
+                } catch {
+                    print("[Orbit] Batch exec to \(serverId) failed: \(error)")
+                }
+            }
+        }
     }
 }

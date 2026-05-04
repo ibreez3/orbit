@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct Server: Codable, Identifiable {
     let id: String
@@ -91,7 +92,6 @@ enum TabType: String, CaseIterable {
     case sftp
     case monitor
     case database
-    case settings
 }
 
 enum AppTheme: String, CaseIterable {
@@ -246,6 +246,76 @@ indirect enum PaneNode: Identifiable {
     }
 }
 
+// MARK: - Command Snippets
+
+struct CommandSnippet: Codable, Identifiable, Equatable {
+    let id: String
+    var name: String
+    var command: String
+    var description: String
+    var tags: [String]
+    var serverId: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    static func == (lhs: CommandSnippet, rhs: CommandSnippet) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+struct CommandSnippetInput: Codable {
+    var name: String
+    var command: String
+    var description: String
+    var tags: [String]
+    var serverId: String?
+}
+
+// MARK: - Keyword Highlighting
+
+struct KeywordHighlight: Codable, Identifiable, Equatable {
+    let id: String
+    var pattern: String
+    var colorHex: String
+    var enabled: Bool
+
+    static func == (lhs: KeywordHighlight, rhs: KeywordHighlight) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    static let defaults: [KeywordHighlight] = [
+        KeywordHighlight(id: "err", pattern: "ERROR", colorHex: "#FF4444", enabled: true),
+        KeywordHighlight(id: "warn", pattern: "WARN(ING)?", colorHex: "#FFAA00", enabled: true),
+        KeywordHighlight(id: "fail", pattern: "fail(ed|ure)?", colorHex: "#FF6644", enabled: true),
+        KeywordHighlight(id: "success", pattern: "success(ful(ly)?)?", colorHex: "#44DD44", enabled: true),
+        KeywordHighlight(id: "fatal", pattern: "FATAL", colorHex: "#FF0044", enabled: true),
+        KeywordHighlight(id: "panic", pattern: "panic", colorHex: "#FF0044", enabled: true),
+    ]
+}
+
+// MARK: - AI Configuration
+
+struct AIConfig: Codable {
+    var endpoint: String
+    var apiKey: String
+    var model: String
+    var enabled: Bool
+
+    static let defaults = AIConfig(
+        endpoint: "https://api.openai.com/v1",
+        apiKey: "",
+        model: "gpt-4o",
+        enabled: false
+    )
+}
+
+struct AIChatMessage: Identifiable, Codable {
+    let id: String
+    let role: String
+    var content: String
+    var timestamp: Date
+}
+
 struct HistoryPoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -286,4 +356,23 @@ extension Server {
         credential_group_id: "", jump_server_id: "",
         created_at: "", updated_at: ""
     )
+}
+
+extension Color {
+    init?(hex: String) {
+        var hexStr = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        if hexStr.count == 3 {
+            hexStr = hexStr.map { "\($0)\($0)" }.joined()
+        }
+        if hexStr.count == 6 {
+            hexStr = "FF" + hexStr
+        }
+        guard hexStr.count == 8, let rgb = UInt64(hexStr, radix: 16) else { return nil }
+        self.init(
+            red: Double((rgb >> 16) & 0xFF) / 255.0,
+            green: Double((rgb >> 8) & 0xFF) / 255.0,
+            blue: Double(rgb & 0xFF) / 255.0,
+            opacity: Double((rgb >> 24) & 0xFF) / 255.0
+        )
+    }
 }

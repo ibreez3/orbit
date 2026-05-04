@@ -29,7 +29,7 @@ struct TabBarView: View {
 
             networkIndicator
 
-            Button(action: { appState.addTab(server: Server.placeholder, type: .settings) }) {
+            Button(action: { SettingsWindowController.shared.open(with: appState) }) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)

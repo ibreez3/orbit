@@ -3,6 +3,42 @@ import SwiftTerm
 import AppKit
 import CoreText
 
+// MARK: - Keyword Injection
+
+enum KeywordInjector {
+    static func highlight(_ data: Data, keywords: [KeywordHighlight]) -> Data {
+        let enabled = keywords.filter { $0.enabled }
+        guard !enabled.isEmpty else { return data }
+        guard let str = String(data: data, encoding: .utf8) else { return data }
+
+        var result = str
+        for kw in enabled {
+            guard let regex = try? NSRegularExpression(pattern: kw.pattern, options: [.caseInsensitive]) else { continue }
+            let matches = regex.matches(in: result, options: [], range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let range = Range(match.range, in: result) else { continue }
+                let ansiCode = hexToAnsi(kw.colorHex)
+                let replacement = "\u{1b}[\(ansiCode)m\(result[range])\u{1b}[0m"
+                result.replaceSubrange(range, with: replacement)
+            }
+        }
+        return Data(result.utf8)
+    }
+
+    private static func hexToAnsi(_ hex: String) -> String {
+        var hexStr = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard hexStr.count == 6,
+              let r = Int(hexStr.prefix(2), radix: 16),
+              let g = Int(hexStr.dropFirst(2).prefix(2), radix: 16),
+              let b = Int(hexStr.suffix(2), radix: 16) else { return "33" }
+        let rc = r * 5 / 255
+        let gc = g * 5 / 255
+        let bc = b * 5 / 255
+        let colorIdx = 16 + 36 * rc + 6 * gc + bc
+        return "38;5;\(colorIdx)"
+    }
+}
+
 struct TerminalView: NSViewRepresentable {
     let channelId: String?
     let serverId: String
@@ -165,8 +201,10 @@ struct TerminalView: NSViewRepresentable {
                     self._pendingCount = 0
                     os_unfair_lock_unlock(&self._batchLock)
                     if batch.isEmpty { return }
-                    let len = batch.count
-                    var copy = batch
+                    // Apply keyword highlighting — inject ANSI color codes
+                    let highlighted = KeywordInjector.highlight(batch, keywords: self.appState.keywordHighlights)
+                    let len = highlighted.count
+                    var copy = highlighted
                     copy.withUnsafeMutableBytes { buf in
                         if let base = buf.baseAddress {
                             let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
