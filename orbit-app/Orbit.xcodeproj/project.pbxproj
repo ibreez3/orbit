@@ -29,6 +29,7 @@
 		82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 3E1BDD661D1C0F68B456CE86 /* SwiftTerm */; };
 		89A6C1418D76248F48E469F3 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */; };
+		8CC5BD2F7028843A2B71958E /* SftpDrawerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F98C58264A158A314F01DAC /* SftpDrawerState.swift */; };
 		958A8F09DD43B7722C3A83E5 /* OrbitConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07692D9E82A9DF921C55B64F /* OrbitConfig.swift */; };
 		9864F6FA7399046CFED1A7AB /* KeyBindings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */; };
 		9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */; };
@@ -59,6 +60,7 @@
 		1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditorView.swift; sourceTree = "<group>"; };
 		1E3983C4735026A30426864D /* DatabaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseView.swift; sourceTree = "<group>"; };
 		1E6CC1F2F6074726A3E3D401 /* gruvbox-dark.orbit-theme */ = {isa = PBXFileReference; path = "gruvbox-dark.orbit-theme"; sourceTree = "<group>"; };
+		1F98C58264A158A314F01DAC /* SftpDrawerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerState.swift; sourceTree = "<group>"; };
 		20936134E6681D18358932B7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20E9630F023416DA2028BB98 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchExecutionView.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 			isa = PBXGroup;
 			children = (
 				64825B472441C790427EFF55 /* AppState.swift */,
+				1F98C58264A158A314F01DAC /* SftpDrawerState.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -313,6 +316,7 @@
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
 				89A6C1418D76248F48E469F3 /* SettingsWindowController.swift in Sources */,
+				8CC5BD2F7028843A2B71958E /* SftpDrawerState.swift in Sources */,
 				3F4D5B977572BFF569200D8B /* SftpDrawerView.swift in Sources */,
 				5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */,
 				277D07614AF08EA716071858 /* SnippetEditorView.swift in Sources */,

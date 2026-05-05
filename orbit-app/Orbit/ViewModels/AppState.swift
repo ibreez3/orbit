@@ -7,9 +7,8 @@ class AppState: ObservableObject {
     @Published var activeTabId: String? = nil
     @Published var spotlightOpen: Bool = false
     @Published var spotlightQuery: String = ""
-    @Published var sftpDrawerTabId: String? = nil
-    @Published var sftpDrawerHeight: CGFloat = 280
     @Published var theme: AppTheme = .catppuccinMocha
+    let sftpDrawer = SftpDrawerState()
 
     @Published var dialogOpen: Bool = false
     @Published var editingServer: Server? = nil
@@ -64,8 +63,10 @@ class AppState: ObservableObject {
                 let result = try bridge.listServers()
                 await MainActor.run { self.servers = result }
             } catch {
-                alertTitle = "加载失败"
-                alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -76,8 +77,10 @@ class AppState: ObservableObject {
                 let result = try bridge.listCredentialGroups()
                 await MainActor.run { self.credentialGroups = result }
             } catch {
-                alertTitle = "加载失败"
-                alertMessage = "无法加载凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -86,10 +89,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let server = try bridge.addServer(input: input)
-                servers.append(server)
+                await MainActor.run { servers.append(server) }
             } catch {
-                alertTitle = "添加失败"
-                alertMessage = "无法添加服务器: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "添加失败"
+                    alertMessage = "无法添加服务器: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -98,10 +103,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let server = try bridge.updateServer(id: id, input: input)
-                servers = servers.map { $0.id == id ? server : $0 }
+                await MainActor.run { servers = servers.map { $0.id == id ? server : $0 } }
             } catch {
-                alertTitle = "更新失败"
-                alertMessage = "无法更新服务器: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新服务器: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -110,18 +117,22 @@ class AppState: ObservableObject {
         Task {
             do {
                 try bridge.deleteServer(id: id)
-                let tabsToRemove = tabs.filter { $0.serverId == id }
-                for tab in tabsToRemove {
-                    disconnectAllChannels(tab: tab)
-                }
-                servers.removeAll { $0.id == id }
-                tabs.removeAll { $0.serverId == id }
-                if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
-                    activeTabId = tabs.last?.id
+                await MainActor.run {
+                    let tabsToRemove = tabs.filter { $0.serverId == id }
+                    for tab in tabsToRemove {
+                        disconnectAllChannels(tab: tab)
+                    }
+                    servers.removeAll { $0.id == id }
+                    tabs.removeAll { $0.serverId == id }
+                    if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
+                        activeTabId = tabs.last?.id
+                    }
                 }
             } catch {
-                alertTitle = "删除失败"
-                alertMessage = "无法删除服务器: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "删除失败"
+                    alertMessage = "无法删除服务器: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -130,10 +141,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let cg = try bridge.addCredentialGroup(input: input)
-                credentialGroups.append(cg)
+                await MainActor.run { credentialGroups.append(cg) }
             } catch {
-                alertTitle = "添加失败"
-                alertMessage = "无法添加凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "添加失败"
+                    alertMessage = "无法添加凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -142,10 +155,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let cg = try bridge.updateCredentialGroup(id: id, input: input)
-                credentialGroups = credentialGroups.map { $0.id == id ? cg : $0 }
+                await MainActor.run { credentialGroups = credentialGroups.map { $0.id == id ? cg : $0 } }
             } catch {
-                alertTitle = "更新失败"
-                alertMessage = "无法更新凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -154,10 +169,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 try bridge.deleteCredentialGroup(id: id)
-                credentialGroups.removeAll { $0.id == id }
+                await MainActor.run { credentialGroups.removeAll { $0.id == id } }
             } catch {
-                alertTitle = "删除失败"
-                alertMessage = "无法删除凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "删除失败"
+                    alertMessage = "无法删除凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -211,24 +228,28 @@ class AppState: ObservableObject {
             do {
                 newChannelId = try bridge.spawnChannel(existingSessionId: existingChannelId)
             } catch {
-                alertTitle = "分屏失败"
-                alertMessage = "无法创建新通道: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "分屏失败"
+                    alertMessage = "无法创建新通道: \(error.localizedDescription)"
+                }
                 return
             }
 
-            guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-            let newSplitId = UUID().uuidString
-            let newLeaf = PaneNode.leaf(channelId: newChannelId)
+            await MainActor.run {
+                guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+                let newSplitId = UUID().uuidString
+                let newLeaf = PaneNode.leaf(channelId: newChannelId)
 
-            if let tree = tabs[idx].paneTree {
-                tabs[idx].paneTree = tree.replacingLeaf(channelId: existingChannelId, with:
-                    .split(id: newSplitId, direction: direction, ratio: 0.5,
-                           first: .leaf(channelId: existingChannelId), second: newLeaf))
-            } else {
-                tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
-                                             first: .leaf(channelId: existingChannelId), second: newLeaf)
+                if let tree = tabs[idx].paneTree {
+                    tabs[idx].paneTree = tree.replacingLeaf(channelId: existingChannelId, with:
+                        .split(id: newSplitId, direction: direction, ratio: 0.5,
+                               first: .leaf(channelId: existingChannelId), second: newLeaf))
+                } else {
+                    tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
+                                                 first: .leaf(channelId: existingChannelId), second: newLeaf)
+                }
+                tabs[idx].focusedChannelId = newChannelId
             }
-            tabs[idx].focusedChannelId = newChannelId
 
             // Focus the new terminal after SwiftUI creates it
             let cid = newChannelId
@@ -361,10 +382,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let sessionId = try bridge.connectSSH(serverId: serverId)
-                updateTabSessionId(tabId, sessionId: sessionId)
+                await MainActor.run { updateTabSessionId(tabId, sessionId: sessionId) }
             } catch {
-                alertTitle = "连接失败"
-                alertMessage = "\(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "连接失败"
+                    alertMessage = "\(error.localizedDescription)"
+                }
             }
         }
     }
@@ -446,11 +469,7 @@ class AppState: ObservableObject {
     }
 
     func toggleSftpDrawer(for tabId: String) {
-        if sftpDrawerTabId == tabId {
-            sftpDrawerTabId = nil
-        } else {
-            sftpDrawerTabId = tabId
-        }
+        sftpDrawer.toggle(for: tabId)
     }
 
     func setTheme(_ newTheme: AppTheme) {

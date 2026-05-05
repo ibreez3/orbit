@@ -138,7 +138,8 @@ private struct TerminalPane: View {
     @AppStorage("selectToCopy") private var selectToCopy: Bool = true
     @AppStorage("scrollbackLines") private var scrollbackLines: Int = 10000
 
-    private let monoFonts = Self.loadMonoFonts()
+    private static let cachedMonoFonts: [String] = loadMonoFonts()
+    private var monoFonts: [String] { Self.cachedMonoFonts }
 
     var body: some View {
         ScrollView {
@@ -345,7 +346,7 @@ private struct AIPane: View {
                     LabeledRow("启用 AI 面板") {
                         Toggle("", isOn: Binding(
                             get: { appState.aiConfig.enabled },
-                            set: { appState.aiConfig.enabled = $0; appState.saveAIConfig() }
+                            set: { appState.aiConfig.enabled = $0 }
                         ))
                         .toggleStyle(.switch)
                     }
@@ -356,7 +357,7 @@ private struct AIPane: View {
                         LabeledRow("API 地址") {
                             TextField("https://api.openai.com/v1", text: Binding(
                                 get: { appState.aiConfig.endpoint },
-                                set: { appState.aiConfig.endpoint = $0; appState.saveAIConfig() }
+                                set: { appState.aiConfig.endpoint = $0 }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -365,7 +366,7 @@ private struct AIPane: View {
                         LabeledRow("API Key") {
                             SecureField("sk-...", text: Binding(
                                 get: { appState.aiConfig.apiKey },
-                                set: { appState.aiConfig.apiKey = $0; appState.saveAIConfig() }
+                                set: { appState.aiConfig.apiKey = $0 }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -374,7 +375,7 @@ private struct AIPane: View {
                         LabeledRow("模型") {
                             TextField("gpt-4o", text: Binding(
                                 get: { appState.aiConfig.model },
-                                set: { appState.aiConfig.model = $0; appState.saveAIConfig() }
+                                set: { appState.aiConfig.model = $0 }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))

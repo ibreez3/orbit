@@ -6,6 +6,8 @@ import CoreText
 // MARK: - Keyword Injection
 
 enum KeywordInjector {
+    private static let regexCache = NSCache<NSString, NSRegularExpression>()
+
     static func highlight(_ data: Data, keywords: [KeywordHighlight]) -> Data {
         let enabled = keywords.filter { $0.enabled }
         guard !enabled.isEmpty else { return data }
@@ -13,7 +15,17 @@ enum KeywordInjector {
 
         var result = str
         for kw in enabled {
-            guard let regex = try? NSRegularExpression(pattern: kw.pattern, options: [.caseInsensitive]) else { continue }
+            let nsPattern = kw.pattern as NSString
+            let regex: NSRegularExpression
+            if let cached = regexCache.object(forKey: nsPattern) {
+                regex = cached
+            } else if let compiled = try? NSRegularExpression(pattern: kw.pattern, options: [.caseInsensitive]) {
+                regexCache.setObject(compiled, forKey: nsPattern)
+                regex = compiled
+            } else {
+                continue
+            }
+
             let matches = regex.matches(in: result, options: [], range: NSRange(result.startIndex..., in: result))
             for match in matches.reversed() {
                 guard let range = Range(match.range, in: result) else { continue }
@@ -23,6 +35,10 @@ enum KeywordInjector {
             }
         }
         return Data(result.utf8)
+    }
+
+    static func clearRegexCache() {
+        regexCache.removeAllObjects()
     }
 
     private static func hexToAnsi(_ hex: String) -> String {

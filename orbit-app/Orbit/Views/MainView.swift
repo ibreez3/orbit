@@ -13,6 +13,7 @@ struct MainView: View {
         }
         .frame(minWidth: 900, minHeight: 600)
         .environmentObject(appState)
+        .environmentObject(appState.sftpDrawer)
         .sheet(isPresented: Binding(
             get: { appState.dialogOpen },
             set: { if !$0 { appState.closeDialog() } }
@@ -139,7 +140,7 @@ struct MainView: View {
 
     @ViewBuilder
     private var sftpDrawer: some View {
-        if let drawerTabId = appState.sftpDrawerTabId,
+        if let drawerTabId = appState.sftpDrawer.tabId,
            let tab = appState.tabs.first(where: { $0.id == drawerTabId }) {
             SftpDrawerView(tab: tab)
         }
@@ -221,7 +222,7 @@ private struct SftpDrawerModifier: ViewModifier {
             if let activeId = appState.activeTabId,
                let tab = appState.tabs.first(where: { $0.id == activeId }),
                tab.type == .terminal {
-                appState.toggleSftpDrawer(for: activeId)
+                appState.sftpDrawer.toggle(for: activeId)
             }
         }
     }
