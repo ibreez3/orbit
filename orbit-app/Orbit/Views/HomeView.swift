@@ -150,6 +150,25 @@ struct HomeView: View {
         .onTapGesture(count: 2) {
             appState.addTab(server: server, type: .terminal)
         }
+        .contextMenu {
+            Button(action: { appState.addTab(server: server, type: .terminal) }) {
+                Label("打开终端", systemImage: "terminal")
+            }
+            Button(action: { appState.addTab(server: server, type: .sftp) }) {
+                Label("打开 SFTP", systemImage: "folder")
+            }
+            Button(action: { appState.addTab(server: server, type: .monitor) }) {
+                Label("打开监控", systemImage: "chart.bar")
+            }
+            Divider()
+            Button(action: { appState.openDialog(server: server) }) {
+                Label("编辑", systemImage: "pencil")
+            }
+            Divider()
+            Button(role: .destructive, action: { appState.deleteServer(server.id) }) {
+                Label("删除", systemImage: "trash")
+            }
+        }
         .contentShape(Rectangle())
     }
 

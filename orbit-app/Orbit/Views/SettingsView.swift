@@ -346,7 +346,7 @@ private struct AIPane: View {
                     LabeledRow("启用 AI 面板") {
                         Toggle("", isOn: Binding(
                             get: { appState.aiConfig.enabled },
-                            set: { appState.aiConfig.enabled = $0 }
+                            set: { appState.aiConfig.enabled = $0; appState.saveAIConfig() }
                         ))
                         .toggleStyle(.switch)
                     }
@@ -357,7 +357,7 @@ private struct AIPane: View {
                         LabeledRow("API 地址") {
                             TextField("https://api.openai.com/v1", text: Binding(
                                 get: { appState.aiConfig.endpoint },
-                                set: { appState.aiConfig.endpoint = $0 }
+                                set: { appState.aiConfig.endpoint = $0; appState.saveAIConfig() }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -366,7 +366,7 @@ private struct AIPane: View {
                         LabeledRow("API Key") {
                             SecureField("sk-...", text: Binding(
                                 get: { appState.aiConfig.apiKey },
-                                set: { appState.aiConfig.apiKey = $0 }
+                                set: { appState.aiConfig.apiKey = $0; appState.saveAIConfig() }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -375,7 +375,7 @@ private struct AIPane: View {
                         LabeledRow("模型") {
                             TextField("gpt-4o", text: Binding(
                                 get: { appState.aiConfig.model },
-                                set: { appState.aiConfig.model = $0 }
+                                set: { appState.aiConfig.model = $0; appState.saveAIConfig() }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
