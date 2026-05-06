@@ -144,4 +144,5 @@ extension Notification.Name {
     static let openSnippetPicker = Notification.Name("openSnippetPicker")
     static let toggleAIPanel = Notification.Name("toggleAIPanel")
     static let openBatchExecution = Notification.Name("openBatchExecution")
+    static let askAI = Notification.Name("askAI")
 }

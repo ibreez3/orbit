@@ -124,8 +124,15 @@ struct MainView: View {
     private func tabContent(_ tab: TabItem) -> some View {
         switch tab.type {
         case .terminal:
-            TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id)
-                .id(tab.id)
+            ZStack(alignment: .bottomTrailing) {
+                TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id)
+                    .id(tab.id)
+                if appState.activeTabError != nil, tab.id == appState.activeTabId {
+                    AIErrorBanner(errorText: appState.activeTabError!)
+                        .environmentObject(appState)
+                        .padding(12)
+                }
+            }
         case .sftp:
             SftpView(tab: tab)
                 .id(tab.id)

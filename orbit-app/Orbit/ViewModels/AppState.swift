@@ -36,6 +36,7 @@ class AppState: ObservableObject {
     @Published var aiMessages: [AIChatMessage] = []
     @Published var aiPanelOpen: Bool = false
     @Published var aiLoading: Bool = false
+    @Published var activeTabError: String? = nil
 
     var showAlert: Binding<Bool> {
         Binding(get: { self.alertMessage != nil }, set: { if !$0 { self.alertMessage = nil } })
@@ -55,6 +56,7 @@ class AppState: ObservableObject {
         loadSnippets()
         loadKeywords()
         loadAIConfig()
+        loadAIMessages()
     }
 
     func loadServers() {
@@ -620,17 +622,60 @@ class AppState: ObservableObject {
         }
     }
 
+    func saveAIMessages() {
+        let toSave = Array(aiMessages.suffix(50))
+        do {
+            let data = try JSONEncoder().encode(toSave)
+            UserDefaults.standard.set(data, forKey: "aiMessages")
+        } catch {
+            print("[Orbit] Failed to save AI messages: \(error)")
+        }
+    }
+
+    func loadAIMessages() {
+        guard let data = UserDefaults.standard.data(forKey: "aiMessages") else { return }
+        do {
+            aiMessages = try JSONDecoder().decode([AIChatMessage].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load AI messages: \(error)")
+        }
+    }
+
     func addAIMessage(_ message: AIChatMessage) {
         aiMessages.append(message)
+        saveAIMessages()
+    }
+
+    func appendToLastAssistantMessage(text: String) {
+        guard var last = aiMessages.last, last.role == "assistant" else {
+            let msg = AIChatMessage(id: UUID().uuidString, role: "assistant", content: text, timestamp: Date())
+            aiMessages.append(msg)
+            return
+        }
+        last.content += text
+        aiMessages[aiMessages.count - 1] = last
     }
 
     func clearAIMessages() {
         aiMessages.removeAll()
+        saveAIMessages()
     }
 
     func toggleAIPanel() {
         aiPanelOpen.toggle()
-        if !aiPanelOpen { aiMessages.removeAll() }
+    }
+
+    func submitAIQuestion(_ question: String) {
+        let userMsg = AIChatMessage(
+            id: UUID().uuidString,
+            role: "user",
+            content: question,
+            timestamp: Date()
+        )
+        aiMessages.append(userMsg)
+        if !aiPanelOpen {
+            aiPanelOpen = true
+        }
     }
 
     // MARK: - Batch Execution

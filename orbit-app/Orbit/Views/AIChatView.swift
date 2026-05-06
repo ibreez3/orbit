@@ -18,6 +18,14 @@ struct AIChatView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button(action: { appState.clearAIMessages() }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .disabled(appState.aiMessages.isEmpty)
+                .help("清除对话历史")
                 Button(action: { appState.toggleAIPanel() }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .medium))
@@ -102,10 +110,11 @@ struct AIChatView: View {
                         .font(.system(size: 12))
                         .onSubmit { sendMessage() }
 
-                    Button(action: sendMessage) {
+                    Button(action: { sendMessage() }) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 18))
                     }
+                    
                     .buttonStyle(.plain)
                     .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || service.isLoading)
                 }
@@ -115,70 +124,100 @@ struct AIChatView: View {
         }
         .frame(width: 280)
         .background(Color(NSColor.controlBackgroundColor))
+        .onReceive(NotificationCenter.default.publisher(for: .askAI)) { notification in
+            guard let question = notification.userInfo?["question"] as? String,
+                  !question.isEmpty else { return }
+            sendMessage(text: question)
+        }
     }
 
-    private func sendMessage() {
-        let text = inputText.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
+    private func sendMessage(text: String? = nil) {
+        let questionText: String
+        if let text = text {
+            questionText = text
+        } else {
+            let trimmed = inputText.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return }
+            questionText = trimmed
+            inputText = ""
+        }
 
         let userMsg = AIChatMessage(
             id: UUID().uuidString,
             role: "user",
-            content: text,
+            content: questionText,
             timestamp: Date()
         )
         appState.addAIMessage(userMsg)
-        inputText = ""
 
-        // Collect terminal output as context
         let context = collectTerminalContext()
         let systemPrompt = buildSystemPrompt(context: context)
 
-        service.sendMessage(
+        service.streamMessage(
             messages: appState.aiMessages,
             systemPrompt: systemPrompt,
-            config: appState.aiConfig
-        ) { result in
-            switch result {
-            case .success(let content):
-                let assistantMsg = AIChatMessage(
-                    id: UUID().uuidString,
-                    role: "assistant",
-                    content: content,
-                    timestamp: Date()
-                )
-                appState.addAIMessage(assistantMsg)
+            config: appState.aiConfig,
+            onToken: { token in
+                self.appState.appendToLastAssistantMessage(text: token)
+            },
+            onComplete: { result in
+                switch result {
+                case .success(let content):
+                    // Content already accumulated via onToken; extract command suggestion
+                    if !content.isEmpty, let cmd = self.extractCommand(from: content) {
+                        let cmdMsg = AIChatMessage(
+                            id: UUID().uuidString,
+                            role: "system",
+                            content: "💡 建议命令: `\(cmd)` — 点击执行或复制到终端",
+                            timestamp: Date()
+                        )
+                        self.appState.addAIMessage(cmdMsg)
+                    }
 
-                // Try to extract a command suggestion
-                if let cmd = extractCommand(from: content) {
-                    let cmdMsg = AIChatMessage(
+                case .failure(let error):
+                    let errorMsg = AIChatMessage(
                         id: UUID().uuidString,
                         role: "system",
-                        content: "💡 建议命令: `\(cmd)` — 点击执行或复制到终端",
+                        content: "错误: \(error.localizedDescription)",
                         timestamp: Date()
                     )
-                    appState.addAIMessage(cmdMsg)
+                    self.appState.addAIMessage(errorMsg)
                 }
-
-            case .failure(let error):
-                let errorMsg = AIChatMessage(
-                    id: UUID().uuidString,
-                    role: "system",
-                    content: "错误: \(error.localizedDescription)",
-                    timestamp: Date()
-                )
-                appState.addAIMessage(errorMsg)
             }
-        }
+        )
     }
 
     private func collectTerminalContext() -> String {
         guard let activeId = appState.activeTabId,
               let tab = appState.tabs.first(where: { $0.id == activeId }),
-              (tab.sessionId ?? tab.focusedChannelId) != nil else {
+              let sid = tab.sessionId ?? tab.focusedChannelId else {
             return "（无活跃终端会话）"
         }
-        return "（终端会话已连接）"
+
+        guard let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView else {
+            return "（终端会话已连接，暂无输出）"
+        }
+        let term = tv.getTerminal()
+
+        let visibleRows = term.rows
+        let contextLines = min(visibleRows * 2, 100)
+        let startRow = max(0, visibleRows - contextLines)
+
+        var lines: [String] = []
+        for row in startRow..<visibleRows {
+            if let line = term.getLine(row: row) {
+                let text = line.translateToString(trimRight: true)
+                lines.append(text)
+            }
+        }
+
+        let result = lines.joined(separator: "\n")
+        if result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "（终端暂无输出）"
+        }
+
+
+        return result
     }
 
     private func buildSystemPrompt(context: String) -> String {
@@ -311,5 +350,47 @@ private struct MessageBubble: View {
             return String(content[range])
         }
         return nil
+    }
+}
+
+// MARK: - Error Banner
+
+struct AIErrorBanner: View {
+    let errorText: String
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        Button(action: {
+            appState.activeTabError = nil
+            appState.submitAIQuestion("请分析这个错误:\n\(errorText)")
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.blue)
+                Text("AI 分析此错误")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                Button(action: {
+                    appState.activeTabError = nil
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
