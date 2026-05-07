@@ -172,7 +172,8 @@ struct AIChatView: View {
         .frame(width: appState.aiPanelWidth)
         .background(Color(NSColor.controlBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: .askAI)) { notification in
-            guard let question = notification.userInfo?["question"] as? String,
+            guard !service.isLoading,
+                  let question = notification.userInfo?["question"] as? String,
                   !question.isEmpty else { return }
             sendMessage(text: question)
         }
@@ -218,9 +219,7 @@ struct AIChatView: View {
                     showSessionPicker = true
                 }
             case .switchSession:
-                // Switching session handled directly by AppState
-                // Just close picker if open
-                break
+                showSessionPicker = false
             case .ignore:
                 sendToAI(questionText)
             }
@@ -254,7 +253,6 @@ struct AIChatView: View {
 
         let context = collectTerminalContext()
         let systemPrompt = buildSystemPrompt(context: context)
-        let sid = getActiveSSHSessionId() ?? ""
 
         service.runAgent(
             messages: appState.currentMessages,
