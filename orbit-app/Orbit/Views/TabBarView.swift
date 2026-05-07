@@ -3,6 +3,7 @@ import SwiftUI
 struct TabBarView: View {
     @EnvironmentObject var appState: AppState
     @State private var hoveredTabId: String? = nil
+    @State private var pendingCloseTab: TabItem? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -41,6 +42,43 @@ struct TabBarView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(.ultraThinMaterial)
+        .popover(item: $pendingCloseTab, arrowEdge: .top) { tab in
+            VStack(spacing: 16) {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.orange)
+
+                Text("关闭终端")
+                    .font(.system(size: 14, weight: .semibold))
+
+                Text("\"\(tab.title)\" 的连接将被断开。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 12) {
+                    Button("取消") { pendingCloseTab = nil }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                    Button("关闭") {
+                        appState.removeTab(tab.id)
+                        pendingCloseTab = nil
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.orange.opacity(0.85))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
+            .padding(20)
+            .frame(width: 260)
+        }
     }
 
     // MARK: - Network status indicator
@@ -94,7 +132,6 @@ struct TabBarView: View {
                 .font(.system(size: 12))
                 .lineLimit(1)
 
-            // SFTP icon on hover for terminal tabs
             if showSftp {
                 Button(action: { appState.toggleSftpDrawer(for: tab.id) }) {
                     Image(systemName: "folder")
@@ -142,25 +179,18 @@ struct TabBarView: View {
     }
 
     private func closeTab(_ tab: TabItem) {
-        // For connected terminals, show inline confirmation
         if tab.type == .terminal, tab.sessionId != nil {
-            let alert = NSAlert()
-            alert.messageText = "确定关闭终端 \"\(tab.title)\" 吗？"
-            alert.informativeText = "连接将被断开。"
-            alert.addButton(withTitle: "关闭")
-            alert.addButton(withTitle: "取消")
-            alert.alertStyle = .warning
-            guard let window = NSApp.keyWindow else {
-                appState.removeTab(tab.id)
-                return
-            }
-            alert.beginSheetModal(for: window) { resp in
-                if resp == .alertFirstButtonReturn {
-                    appState.removeTab(tab.id)
-                }
-            }
+            pendingCloseTab = tab
         } else {
             appState.removeTab(tab.id)
         }
+    }
+}
+
+// MARK: - TabItem Identifiable for popover
+
+extension TabItem: Equatable {
+    static func == (lhs: TabItem, rhs: TabItem) -> Bool {
+        lhs.id == rhs.id
     }
 }
