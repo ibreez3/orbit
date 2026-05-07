@@ -37,20 +37,9 @@ class OpenAIService: ObservableObject {
             guard let self = self else { return }
             defer { self.isLoading = false }
 
-            // Build API messages with agent mode instruction
-            var agentPrompt = systemPrompt + """
-
-            ## 自动执行模式
-            你可以在回复中使用 ```execute 代码块直接执行命令并获取输出。
-            格式：
-            ```execute
-            command_here
-            ```
-            一次最多一个 execute 块。
-            """
-
+            // Build API messages
             var apiMessages: [[String: String]] = []
-            apiMessages.append(["role": "system", "content": agentPrompt])
+            apiMessages.append(["role": "system", "content": systemPrompt])
             let recent = Array(messages.suffix(30))
             for msg in recent {
                 apiMessages.append(["role": msg.role, "content": msg.content])
@@ -97,6 +86,7 @@ class OpenAIService: ObservableObject {
         let error: Error?
     }
 
+    @MainActor
     private func callAndCollect(
         messages: [[String: String]],
         config: AIConfig,

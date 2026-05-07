@@ -252,7 +252,8 @@ struct AIChatView: View {
         }
 
         let context = collectTerminalContext()
-        let systemPrompt = buildSystemPrompt(context: context)
+        let hasActiveSSH = getActiveSSHSessionId() != nil
+        let systemPrompt = buildSystemPrompt(context: context, agentMode: hasActiveSSH)
 
         service.runAgent(
             messages: appState.currentMessages,
@@ -405,8 +406,8 @@ struct AIChatView: View {
         return result
     }
 
-    private func buildSystemPrompt(context: String) -> String {
-        """
+    private func buildSystemPrompt(context: String, agentMode: Bool) -> String {
+        var prompt = """
         你是一个 SSH 终端助手，帮助用户排查服务器问题。你可以看到用户的终端输出。
 
         ## 当前终端输出（最近内容）
@@ -423,6 +424,19 @@ struct AIChatView: View {
         - 如果必须使用危险命令，明确警告用户
         - 回答简洁，优先给出可执行的命令
         """
+        if agentMode {
+            prompt += """
+
+        ## 自动执行模式
+        你已连接到终端，可以使用 ```execute 代码块让命令在终端中自动执行并获取输出。
+        格式：
+        ```execute
+        command_here
+        ```
+        每条回复最多一个 execute 块。只在需要获取系统信息时使用。
+        """
+        }
+        return prompt
     }
 
     private func extractCommand(from content: String) -> String? {
