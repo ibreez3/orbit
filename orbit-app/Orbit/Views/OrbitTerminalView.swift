@@ -43,15 +43,49 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         }
     }
 
+    // MARK: - Keyboard shortcuts (Cmd+C / Cmd+A)
+
+    private var localEventMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self = self,
+                      self.window?.firstResponder == self else { return event }
+                if event.modifierFlags.contains(.command) {
+                    let chars = event.charactersIgnoringModifiers
+                    if chars == "c", self.selectionActive {
+                        self.copy(self)
+                        return nil
+                    }
+                    if chars == "a" {
+                        self.perform(#selector(NSResponder.selectAll(_:)), with: nil)
+                        return nil
+                    }
+                }
+                return event
+            }
+        } else {
+            if let monitor = localEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                localEventMonitor = nil
+            }
+        }
+    }
+
     // MARK: - Right-click context menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
 
-        menu.addItem(withTitle: "复制", action: #selector(copy(_:)), keyEquivalent: "c")
+        let copyItem = NSMenuItem(title: "复制", action: #selector(copy(_:)), keyEquivalent: "c")
+        copyItem.isEnabled = selectionActive
+        menu.addItem(copyItem)
+
         menu.addItem(withTitle: "粘贴", action: #selector(paste(_:)), keyEquivalent: "v")
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "全选", action: #selector(selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(withTitle: "全选", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(withTitle: "清屏", action: #selector(clearScreen(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "搜索", action: #selector(searchTerminal(_:)), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
