@@ -738,7 +738,7 @@ class AppState: ObservableObject {
 
     func ensureSession(tabId: String, serverId: String) -> AISession {
         if let sessionId = activeAISessionId[tabId],
-           var sessions = aiSessions[serverId],
+           let sessions = aiSessions[serverId],
            let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
             return sessions[idx]
         }
@@ -891,7 +891,7 @@ class AppState: ObservableObject {
 
     struct CommandSafety {
         static let safePrefixes: [String] = [
-            "ls", "cat ", "head ", "tail ", "less ", "file ", "stat ", "du ",
+            "ls ", "cat ", "head ", "tail ", "less ", "file ", "stat ", "du ",
             "grep ", "awk ", "sed -n", "wc ", "sort ", "uniq ", "cut ", "tr ",
             "ps ", "top -bn", "htop -n", "free ", "df ", "uptime", "uname", "hostname", "whoami", "id ",
             "ping -c", "curl -I", "wget --spider", "ss -tlnp", "ss -tuln",
