@@ -193,6 +193,13 @@ struct AssetTreeView: View {
                     Text("凭据组")
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
+                    Button(action: { appState.openCgDialog() }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("新建凭据组")
                     Text("\(items.count)")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -258,6 +265,13 @@ struct AssetTreeView: View {
                     Text("命令片段")
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
+                    Button(action: { appState.openSnippetEditor() }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("新建片段")
                     Text("\(items.count)")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
