@@ -663,7 +663,7 @@ class AppState: ObservableObject {
         session.updatedAt = Date()
         sessions[idx] = session
         aiSessions[serverId] = sessions
-        saveAISessions(serverId: serverId)
+        // Persistence deferred — saved on next user message or explicit flush
     }
 
     func clearCurrentSessionMessages() {

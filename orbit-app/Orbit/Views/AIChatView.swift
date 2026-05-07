@@ -275,6 +275,10 @@ struct AIChatView: View {
                             timestamp: Date())
                         self.appState.addMessageToCurrentSession(cmdMsg)
                     }
+                    // Persist accumulated assistant message tokens
+                    if let serverId = self.appState.currentServerId {
+                        self.appState.saveAISessions(serverId: serverId)
+                    }
                 case .failure(let error):
                     let errorMsg = AIChatMessage(
                         id: UUID().uuidString, role: "system",
@@ -331,7 +335,13 @@ struct AIChatView: View {
             return
         }
         // Wait for output to accumulate in terminal
+        let capturedTabId = appState.activeTabId
+        let capturedSessionId = capturedTabId.flatMap { appState.activeAISessionId[$0] }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            guard appState.activeAISessionId[capturedTabId ?? ""] == capturedSessionId else {
+                onDone()
+                return
+            }
             let output = self.collectTerminalContext()
             let exitCode: Int32 = output.contains("command not found") ? 127 : 0
             let resultMsg = AIChatMessage(
