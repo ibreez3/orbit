@@ -39,6 +39,9 @@ class AppState: ObservableObject {
     @Published var aiLoading: Bool = false
     @Published var aiPanelWidth: CGFloat = 280
     @Published var aiPendingConfirmation: (command: String, sessionId: String, tabId: String)? = nil
+    @Published var assetTreeWidth: CGFloat = 220
+    @Published var recentServers: [String] = []     // 最多 6 个 serverId
+    @Published var assetTreeSearchQuery: String = ""
     @Published var activeTabError: String? = nil
 
     var showAlert: Binding<Bool> {
@@ -60,6 +63,8 @@ class AppState: ObservableObject {
         loadKeywords()
         loadAIConfig()
         loadAIPanelWidth()
+        loadAssetTreeWidth()
+        loadRecentServers()
     }
 
     func loadServers() {
@@ -209,6 +214,7 @@ class AppState: ObservableObject {
             tab.paneTree = nil
         }
         tabs.append(tab)
+        trackRecentServer(server.id)
         activeTabId = id
     }
 
@@ -937,5 +943,41 @@ class AppState: ObservableObject {
 
             return false
         }
+    }
+
+    // MARK: - Asset Tree & Recent Servers
+
+    func loadAssetTreeWidth() {
+        let w = UserDefaults.standard.double(forKey: "assetTreeWidth")
+        if w >= 160 && w <= 350 { assetTreeWidth = w }
+    }
+
+    func saveAssetTreeWidth(_ width: CGFloat) {
+        UserDefaults.standard.set(Double(width), forKey: "assetTreeWidth")
+    }
+
+    func loadRecentServers() {
+        guard let data = UserDefaults.standard.data(forKey: "recentServers") else { return }
+        do {
+            recentServers = try JSONDecoder().decode([String].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load recent servers: \(error)")
+        }
+    }
+
+    func saveRecentServers() {
+        do {
+            let data = try JSONEncoder().encode(recentServers)
+            UserDefaults.standard.set(data, forKey: "recentServers")
+        } catch {
+            print("[Orbit] Failed to save recent servers: \(error)")
+        }
+    }
+
+    func trackRecentServer(_ serverId: String) {
+        recentServers.removeAll { $0 == serverId }
+        recentServers.insert(serverId, at: 0)
+        if recentServers.count > 6 { recentServers = Array(recentServers.prefix(6)) }
+        saveRecentServers()
     }
 }
