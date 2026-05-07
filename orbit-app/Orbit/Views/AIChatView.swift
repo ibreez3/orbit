@@ -6,6 +6,8 @@ struct AIChatView: View {
     @StateObject private var service = OpenAIService()
     @State private var inputText: String = ""
     @State private var scrollProxy: ScrollViewProxy? = nil
+    @State private var showSessionPicker: Bool = false
+    @State private var agentIteration: Int = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +19,12 @@ struct AIChatView: View {
                 Text("AI 助手")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
+                if !appState.currentSessionTitle().isEmpty {
+                    Text("— \(appState.currentSessionTitle())")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Button(action: { appState.clearCurrentSessionMessages() }) {
                     Image(systemName: "trash")
@@ -25,7 +33,7 @@ struct AIChatView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.tertiary)
                 .disabled(appState.currentMessages.isEmpty)
-                .help("清除对话历史")
+                .help("清除当前会话")
                 Button(action: { appState.toggleAIPanel() }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .medium))
@@ -63,6 +71,16 @@ struct AIChatView: View {
                 }
                 .padding(.vertical, 40)
             } else {
+                // Session picker banner
+                if showSessionPicker {
+                    SessionPickerView(onSelect: { session in
+                        guard let tabId = appState.activeTabId else { return }
+                        appState.activeAISessionId[tabId] = session.id
+                        showSessionPicker = false
+                    }, onDismiss: { showSessionPicker = false })
+                    Divider()
+                }
+
                 // Messages
                 ScrollViewReader { scrollView in
                     ScrollView {
@@ -75,6 +93,9 @@ struct AIChatView: View {
                                     Text("我会分析终端输出来帮助你排查")
                                         .font(.system(size: 12))
                                         .foregroundStyle(.secondary)
+                                    Text("支持命令: /new /sessions /compact")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.tertiary)
                                 }
                                 .padding(.vertical, 20)
                                 .frame(maxWidth: .infinity)
@@ -82,6 +103,26 @@ struct AIChatView: View {
 
                             ForEach(appState.currentMessages) { message in
                                 MessageBubble(message: message)
+                            }
+
+                            // Pending command confirmation
+                            if let pending = appState.aiPendingConfirmation {
+                                PendingCommandView(
+                                    command: pending.command,
+                                    onConfirm: {
+                                        executeConfirmedCommand()
+                                    },
+                                    onReject: {
+                                        appState.aiPendingConfirmation = nil
+                                        let rejectMsg = AIChatMessage(
+                                            id: UUID().uuidString,
+                                            role: "system",
+                                            content: "用户拒绝了命令: `\(pending.command)`",
+                                            timestamp: Date()
+                                        )
+                                        appState.addMessageToCurrentSession(rejectMsg)
+                                    }
+                                )
                             }
 
                             if service.isLoading {
@@ -99,13 +140,20 @@ struct AIChatView: View {
                         .padding(.vertical, 8)
                     }
                     .onAppear { scrollProxy = scrollView }
+                    .onChange(of: appState.currentMessages.count) { _ in
+                        if let last = appState.currentMessages.last, let proxy = scrollProxy {
+                            withAnimation {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
+                        }
+                    }
                 }
 
                 Divider()
 
                 // Input
                 HStack(spacing: 8) {
-                    TextField("描述问题...", text: $inputText)
+                    TextField("描述问题... (/new, /sessions, /compact)", text: $inputText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                         .onSubmit { sendMessage() }
@@ -114,7 +162,6 @@ struct AIChatView: View {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.system(size: 18))
                     }
-                    
                     .buttonStyle(.plain)
                     .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || service.isLoading)
                 }
@@ -129,6 +176,24 @@ struct AIChatView: View {
                   !question.isEmpty else { return }
             sendMessage(text: question)
         }
+        .onAppear {
+            if let serverId = appState.currentServerId,
+               let tabId = appState.activeTabId {
+                appState.loadAISessions(serverId: serverId)
+                let _ = appState.ensureSession(tabId: tabId, serverId: serverId)
+            }
+        }
+        // Resizable panel: drag left edge
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    let newWidth = appState.aiPanelWidth - value.translation.width
+                    appState.aiPanelWidth = min(600, max(160, newWidth))
+                }
+                .onEnded { _ in
+                    appState.saveAIPanelWidth(appState.aiPanelWidth)
+                }
+        )
     }
 
     private func sendMessage(text: String? = nil) {
@@ -142,6 +207,30 @@ struct AIChatView: View {
             inputText = ""
         }
 
+        // Handle slash commands
+        if questionText.hasPrefix("/") {
+            let result = appState.handleSlashCommand(questionText)
+            switch result {
+            case .handled(let msg):
+                let sysMsg = AIChatMessage(id: UUID().uuidString, role: "system", content: msg, timestamp: Date())
+                appState.addMessageToCurrentSession(sysMsg)
+                if questionText.trimmingCharacters(in: .whitespaces) == "/sessions" {
+                    showSessionPicker = true
+                }
+            case .switchSession:
+                // Switching session handled directly by AppState
+                // Just close picker if open
+                break
+            case .ignore:
+                sendToAI(questionText)
+            }
+            return
+        }
+
+        sendToAI(questionText)
+    }
+
+    private func sendToAI(_ questionText: String) {
         let userMsg = AIChatMessage(
             id: UUID().uuidString,
             role: "user",
@@ -149,42 +238,130 @@ struct AIChatView: View {
             timestamp: Date()
         )
         appState.addMessageToCurrentSession(userMsg)
+        agentIteration = 0
+        continueAgentLoop()
+    }
+
+    /// Run one iteration of agent loop: call AI → handle executes → repeat
+    private func continueAgentLoop() {
+        let maxIterations = 5
+        guard agentIteration < maxIterations else {
+            let msg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "已达到最大自动执行次数，请手动检查", timestamp: Date())
+            appState.addMessageToCurrentSession(msg)
+            return
+        }
 
         let context = collectTerminalContext()
         let systemPrompt = buildSystemPrompt(context: context)
+        let sid = getActiveSSHSessionId() ?? ""
 
-        service.streamMessage(
+        service.runAgent(
             messages: appState.currentMessages,
             systemPrompt: systemPrompt,
             config: appState.aiConfig,
             onToken: { token in
                 self.appState.appendToCurrentAssistantMessage(text: token)
             },
+            onCommands: { commands in
+                // Execute commands sequentially, then re-enter loop
+                self.executeCommandsAndContinue(commands: commands)
+            },
             onComplete: { result in
                 switch result {
                 case .success(let content):
-                    // Content already accumulated via onToken; extract command suggestion
                     if !content.isEmpty, let cmd = self.extractCommand(from: content) {
                         let cmdMsg = AIChatMessage(
-                            id: UUID().uuidString,
-                            role: "system",
+                            id: UUID().uuidString, role: "system",
                             content: "💡 建议命令: `\(cmd)` — 点击执行或复制到终端",
-                            timestamp: Date()
-                        )
+                            timestamp: Date())
                         self.appState.addMessageToCurrentSession(cmdMsg)
                     }
-
                 case .failure(let error):
                     let errorMsg = AIChatMessage(
-                        id: UUID().uuidString,
-                        role: "system",
+                        id: UUID().uuidString, role: "system",
                         content: "错误: \(error.localizedDescription)",
-                        timestamp: Date()
-                    )
+                        timestamp: Date())
                     self.appState.addMessageToCurrentSession(errorMsg)
                 }
             }
         )
+    }
+
+    private func executeCommandsAndContinue(commands: [String]) {
+        guard let first = commands.first else {
+            agentIteration += 1
+            continueAgentLoop()
+            return
+        }
+        let remaining = Array(commands.dropFirst())
+
+        if AppState.CommandSafety.isSafe(command: first) {
+            // Safe: execute, add result, continue
+            executeCommand(first) {
+                if remaining.isEmpty {
+                    self.agentIteration += 1
+                    self.continueAgentLoop()
+                } else {
+                    self.executeCommandsAndContinue(commands: remaining)
+                }
+            }
+        } else {
+            // Need user confirmation — pause agent loop
+            if let tabId = appState.activeTabId {
+                let sid = getActiveSSHSessionId() ?? ""
+                appState.aiPendingConfirmation = (command: first, sessionId: sid, tabId: tabId)
+            }
+        }
+    }
+
+    private func executeCommand(_ command: String, onDone: @escaping () -> Void) {
+        guard let sid = getActiveSSHSessionId() else {
+            let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "执行失败: 无活跃 SSH 会话", timestamp: Date())
+            appState.addMessageToCurrentSession(errMsg)
+            onDone()
+            return
+        }
+        do {
+            try OrbitBridge.shared.writeSSH(sessionId: sid, data: Data((command + "\n").utf8))
+        } catch {
+            let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "执行失败: \(error.localizedDescription)", timestamp: Date())
+            appState.addMessageToCurrentSession(errMsg)
+            onDone()
+            return
+        }
+        // Wait for output to accumulate in terminal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            let output = self.collectTerminalContext()
+            let exitCode: Int32 = output.contains("command not found") ? 127 : 0
+            let resultMsg = AIChatMessage(
+                id: UUID().uuidString, role: "system",
+                content: "[命令结果] `\(command)`\nexit=\(exitCode)\n```\n\(output.prefix(2000))\n```",
+                timestamp: Date())
+            self.appState.addMessageToCurrentSession(resultMsg)
+            onDone()
+        }
+    }
+
+    private func executeConfirmedCommand() {
+        guard let pending = appState.aiPendingConfirmation else { return }
+        appState.aiPendingConfirmation = nil
+        let confirmMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+            content: "用户确认执行: `\(pending.command)`", timestamp: Date())
+        appState.addMessageToCurrentSession(confirmMsg)
+        agentIteration = 0 // Reset iteration counter after manual confirmation
+        executeCommand(pending.command) {
+            self.agentIteration += 1
+            self.continueAgentLoop()
+        }
+    }
+
+    private func getActiveSSHSessionId() -> String? {
+        guard let activeId = appState.activeTabId,
+              let tab = appState.tabs.first(where: { $0.id == activeId }) else { return nil }
+        return tab.sessionId ?? tab.focusedChannelId
     }
 
     private func collectTerminalContext() -> String {
@@ -392,5 +569,116 @@ struct AIErrorBanner: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Session Picker
+
+private struct SessionPickerView: View {
+    @EnvironmentObject var appState: AppState
+    let onSelect: (AISession) -> Void
+    let onDismiss: () -> Void
+
+    var sessions: [AISession] {
+        guard let serverId = appState.currentServerId else { return [] }
+        return appState.aiSessions[serverId] ?? []
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("历史会话")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+            }
+
+            if sessions.isEmpty {
+                Text("暂无历史会话")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(sessions) { session in
+                    Button(action: { onSelect(session) }) {
+                        HStack {
+                            Text(session.title.isEmpty ? "（空会话）" : session.title)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(formatDate(session.updatedAt))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                            if let activeSessionId = appState.activeAISessionId[appState.activeTabId ?? ""],
+                               activeSessionId == session.id {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(10)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f.string(from: date)
+    }
+}
+
+// MARK: - Pending Command Confirmation
+
+private struct PendingCommandView: View {
+    let command: String
+    let onConfirm: () -> Void
+    let onReject: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.yellow)
+                Text("AI 想执行命令:")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            Text(command)
+                .font(.system(size: 11, design: .monospaced))
+                .padding(4)
+                .background(Color.black.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            HStack(spacing: 8) {
+                Button("确认执行") { onConfirm() }
+                    .font(.system(size: 10))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.2))
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+
+                Button("拒绝") { onReject() }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(Color.yellow.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
