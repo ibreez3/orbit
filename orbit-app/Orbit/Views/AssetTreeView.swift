@@ -179,7 +179,6 @@ struct AssetTreeView: View {
 
     private var categoryCredentials: some View {
         let items = appState.credentialGroups
-        guard !items.isEmpty else { return AnyView(EmptyView()) }
 
         return AnyView(VStack(spacing: 0) {
             Button(action: { withAnimation(.easeInOut(duration: 0.15)) { credentialsExpanded.toggle() } }) {
@@ -205,6 +204,13 @@ struct AssetTreeView: View {
             .buttonStyle(.plain)
 
             if credentialsExpanded {
+                if items.isEmpty {
+                    Text("暂无凭据组")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 28)
+                        .padding(.vertical, 8)
+                }
                 ForEach(items) { cg in
                     HStack(spacing: 8) {
                         Image(systemName: "key")
@@ -238,7 +244,6 @@ struct AssetTreeView: View {
 
     private var categorySnippets: some View {
         let items = appState.snippets
-        guard !items.isEmpty else { return AnyView(EmptyView()) }
 
         return AnyView(VStack(spacing: 0) {
             Button(action: { withAnimation(.easeInOut(duration: 0.15)) { snippetsExpanded.toggle() } }) {
@@ -264,6 +269,13 @@ struct AssetTreeView: View {
             .buttonStyle(.plain)
 
             if snippetsExpanded {
+                if items.isEmpty {
+                    Text("暂无命令片段，点击 + 创建")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 28)
+                        .padding(.vertical, 8)
+                }
                 ForEach(items) { snippet in
                     HStack(spacing: 8) {
                         Image(systemName: "terminal")
