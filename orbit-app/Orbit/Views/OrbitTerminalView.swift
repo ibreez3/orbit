@@ -43,14 +43,15 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         }
     }
 
-    // MARK: - Keyboard shortcuts (Cmd+C / Cmd+A)
+    // MARK: - Keyboard & Mouse event monitors
 
-    private var localEventMonitor: Any?
+    private var keyMonitor: Any?
+    private var mouseMonitor: Any?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
-            localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self = self,
                       self.window?.firstResponder == self else { return event }
                 if event.modifierFlags.contains(.command) {
@@ -66,11 +67,19 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
                 }
                 return event
             }
-        } else {
-            if let monitor = localEventMonitor {
-                NSEvent.removeMonitor(monitor)
-                localEventMonitor = nil
+            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+                guard let self = self,
+                      self.window?.firstResponder == self,
+                      UserDefaults.standard.bool(forKey: "selectToCopy"),
+                      self.selectionActive else { return event }
+                self.copy(self)
+                return event
             }
+        } else {
+            if let m = keyMonitor { NSEvent.removeMonitor(m) }
+            if let m = mouseMonitor { NSEvent.removeMonitor(m) }
+            keyMonitor = nil
+            mouseMonitor = nil
         }
     }
 
