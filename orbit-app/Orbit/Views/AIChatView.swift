@@ -10,7 +10,31 @@ struct AIChatView: View {
     @State private var agentIteration: Int = 0
 
     var body: some View {
-        VStack(spacing: 0) {
+        HStack(spacing: 0) {
+            // Resize handle
+            Rectangle()
+                .fill(Color.primary.opacity(0.0))
+                .frame(width: 6)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeLeftRight.set()
+                    } else {
+                        NSCursor.arrow.set()
+                    }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let newWidth = appState.aiPanelWidth - value.translation.width
+                            appState.aiPanelWidth = min(600, max(160, newWidth))
+                        }
+                        .onEnded { _ in
+                            appState.saveAIPanelWidth(appState.aiPanelWidth)
+                        }
+                )
+
+            VStack(spacing: 0) {
             // Header
             HStack {
                 Image(systemName: "sparkles")
@@ -168,9 +192,10 @@ struct AIChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
+            }
+            .frame(width: appState.aiPanelWidth)
+            .background(Color(NSColor.controlBackgroundColor))
         }
-        .frame(width: appState.aiPanelWidth)
-        .background(Color(NSColor.controlBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: .askAI)) { notification in
             guard !service.isLoading,
                   let question = notification.userInfo?["question"] as? String,
@@ -184,17 +209,6 @@ struct AIChatView: View {
                 let _ = appState.ensureSession(tabId: tabId, serverId: serverId)
             }
         }
-        // Resizable panel: drag left edge
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    let newWidth = appState.aiPanelWidth - value.translation.width
-                    appState.aiPanelWidth = min(600, max(160, newWidth))
-                }
-                .onEnded { _ in
-                    appState.saveAIPanelWidth(appState.aiPanelWidth)
-                }
-        )
     }
 
     private func sendMessage(text: String? = nil) {
@@ -470,9 +484,17 @@ private struct MessageBubble: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(formattedContent)
-                    .font(.system(size: 12))
-                    .textSelection(.enabled)
+                if let md = formattedMarkdown {
+                    Text(md)
+                        .font(.system(size: 12))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(formattedContent)
+                        .font(.system(size: 12))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 if message.role == "system", message.content.contains("建议命令") {
                     HStack(spacing: 4) {
@@ -528,14 +550,18 @@ private struct MessageBubble: View {
     }
 
     private var formattedContent: String {
-        // Strip ```command blocks and inline ``` markers for display
         var content = message.content
-        // Remove code blocks with language specifier
         let blockPattern = "```[a-z]*\\s*\\n([\\s\\S]*?)\\n```"
         if let regex = try? NSRegularExpression(pattern: blockPattern, options: []) {
             content = regex.stringByReplacingMatches(in: content, range: NSRange(content.startIndex..., in: content), withTemplate: "$1")
         }
         return content
+    }
+
+    private var formattedMarkdown: AttributedString? {
+        let md = formattedContent
+        return try? AttributedString(markdown: md,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace))
     }
 
     private func extractSuggestedCommand(from content: String) -> String? {
