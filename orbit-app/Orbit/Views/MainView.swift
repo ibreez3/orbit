@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MainView: View {
     @StateObject private var appState = AppState()
-    @State private var snippetPanelVisible: Bool = false
     @State private var batchExecutionVisible: Bool = false
 
     var body: some View {
@@ -56,7 +55,6 @@ struct MainView: View {
             .modifier(FindInTerminalModifier(appState: appState))
             .modifier(ReconnectModifier(appState: appState))
             .onReceive(nc(.openSettings)) { _ in SettingsWindowController.shared.open(with: appState) }
-            .onReceive(nc(.openSnippetPicker)) { _ in snippetPanelVisible.toggle() }
             .onReceive(nc(.toggleAIPanel)) { _ in appState.toggleAIPanel() }
             .onReceive(nc(.openBatchExecution)) { _ in batchExecutionVisible = true }
     }
@@ -67,13 +65,35 @@ struct MainView: View {
 
     private var mainLayout: some View {
         HStack(spacing: 0) {
-            // Snippet panel (left)
-            if snippetPanelVisible {
-                SnippetListView()
-                    .environmentObject(appState)
-                    .frame(width: 260)
-                Divider()
-            }
+            // Asset tree (left, always visible)
+            AssetTreeView()
+                .environmentObject(appState)
+                .frame(width: appState.assetTreeWidth)
+
+            // Resize handle
+            Rectangle()
+                .fill(Color.primary.opacity(0.0))
+                .frame(width: 5)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeLeftRight.set()
+                    } else {
+                        NSCursor.arrow.set()
+                    }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let newWidth = appState.assetTreeWidth + value.translation.width
+                            appState.assetTreeWidth = min(350, max(160, newWidth))
+                        }
+                        .onEnded { _ in
+                            appState.saveAssetTreeWidth(appState.assetTreeWidth)
+                        }
+                )
+
+            Divider()
 
             // Main content
             VStack(spacing: 0) {
