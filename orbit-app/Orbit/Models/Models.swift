@@ -316,6 +316,32 @@ struct AIChatMessage: Identifiable, Codable {
     var timestamp: Date
 }
 
+struct AICommandResult: Codable {
+    let command: String
+    let output: String
+    let exitCode: Int32
+}
+
+struct AISession: Codable, Identifiable {
+    let id: String
+    let serverId: String
+    var title: String
+    var messages: [AIChatMessage]
+    var createdAt: Date
+    var updatedAt: Date
+
+    static func create(serverId: String) -> AISession {
+        AISession(
+            id: UUID().uuidString,
+            serverId: serverId,
+            title: "",
+            messages: [],
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
+}
+
 struct HistoryPoint: Identifiable {
     let id = UUID()
     let date: Date
