@@ -980,4 +980,26 @@ class AppState: ObservableObject {
         if recentServers.count > 6 { recentServers = Array(recentServers.prefix(6)) }
         saveRecentServers()
     }
+
+    func updateServerGroupName(oldName: String, newName: String) {
+        let targets = servers.filter { ($0.group_name.isEmpty ? "默认" : $0.group_name) == oldName }
+        for server in targets {
+            let input = ServerInput(
+                name: server.name,
+                host: server.host,
+                port: server.port,
+                group_name: newName,
+                auth_type: server.auth_type,
+                username: server.username,
+                password: server.password,
+                private_key: server.private_key,
+                key_source: server.key_source,
+                key_file_path: server.key_file_path,
+                key_passphrase: server.key_passphrase,
+                credential_group_id: server.credential_group_id,
+                jump_server_id: server.jump_server_id
+            )
+            updateServer(id: server.id, input: input)
+        }
+    }
 }
