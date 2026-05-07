@@ -31,11 +31,14 @@ class AppState: ObservableObject {
     // Keyword highlighting
     @Published var keywordHighlights: [KeywordHighlight] = KeywordHighlight.defaults
 
-    // AI Assistant
+    // AI Assistant — Session-based
     @Published var aiConfig: AIConfig = .defaults
-    @Published var aiMessages: [AIChatMessage] = []
+    @Published var aiSessions: [String: [AISession]] = [:]       // serverId → sessions
+    @Published var activeAISessionId: [String: String] = [:]     // tabId → sessionId
     @Published var aiPanelOpen: Bool = false
     @Published var aiLoading: Bool = false
+    @Published var aiPanelWidth: CGFloat = 280
+    @Published var aiPendingConfirmation: (command: String, sessionId: String, tabId: String)? = nil
     @Published var activeTabError: String? = nil
 
     var showAlert: Binding<Bool> {
@@ -56,7 +59,7 @@ class AppState: ObservableObject {
         loadSnippets()
         loadKeywords()
         loadAIConfig()
-        loadAIMessages()
+        loadAIPanelWidth()
     }
 
     func loadServers() {
@@ -622,43 +625,57 @@ class AppState: ObservableObject {
         }
     }
 
-    func saveAIMessages() {
-        let toSave = Array(aiMessages.suffix(50))
-        do {
-            let data = try JSONEncoder().encode(toSave)
-            UserDefaults.standard.set(data, forKey: "aiMessages")
-        } catch {
-            print("[Orbit] Failed to save AI messages: \(error)")
+    func addMessageToCurrentSession(_ message: AIChatMessage) {
+        guard let serverId = currentServerId,
+              let tabId = activeTabId else { return }
+
+        var session = ensureSession(tabId: tabId, serverId: serverId)
+
+        if session.title.isEmpty && message.role == "user" {
+            let t = message.content.trimmingCharacters(in: .whitespaces)
+            session.title = String(t.prefix(30))
         }
-    }
 
-    func loadAIMessages() {
-        guard let data = UserDefaults.standard.data(forKey: "aiMessages") else { return }
-        do {
-            aiMessages = try JSONDecoder().decode([AIChatMessage].self, from: data)
-        } catch {
-            print("[Orbit] Failed to load AI messages: \(error)")
+        session.messages.append(message)
+        session.updatedAt = Date()
+
+        if let idx = aiSessions[serverId]?.firstIndex(where: { $0.id == session.id }) {
+            aiSessions[serverId]?[idx] = session
         }
+        saveAISessions(serverId: serverId)
     }
 
-    func addAIMessage(_ message: AIChatMessage) {
-        aiMessages.append(message)
-        saveAIMessages()
-    }
+    func appendToCurrentAssistantMessage(text: String) {
+        guard let serverId = currentServerId,
+              let tabId = activeTabId,
+              let sessionId = activeAISessionId[tabId],
+              var sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
 
-    func appendToLastAssistantMessage(text: String) {
-        guard var last = aiMessages.last, last.role == "assistant" else {
+        var session = sessions[idx]
+        if var last = session.messages.last, last.role == "assistant" {
+            last.content += text
+            session.messages[session.messages.count - 1] = last
+        } else {
             let msg = AIChatMessage(id: UUID().uuidString, role: "assistant", content: text, timestamp: Date())
-            aiMessages.append(msg)
-            return
+            session.messages.append(msg)
         }
-        last.content += text
-        aiMessages[aiMessages.count - 1] = last
+        session.updatedAt = Date()
+        sessions[idx] = session
+        aiSessions[serverId] = sessions
+        saveAISessions(serverId: serverId)
     }
 
-    func clearAIMessages() {
-        aiMessages.removeAll()
-        saveAIMessages()
+    func clearCurrentSessionMessages() {
+        guard let serverId = currentServerId,
+              let tabId = activeTabId,
+              let sessionId = activeAISessionId[tabId],
+              var sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[idx].messages.removeAll()
+        sessions[idx].updatedAt = Date()
+        aiSessions[serverId] = sessions
+        saveAISessions(serverId: serverId)
     }
 
     func toggleAIPanel() {
@@ -666,13 +683,18 @@ class AppState: ObservableObject {
     }
 
     func submitAIQuestion(_ question: String) {
+        guard let serverId = currentServerId,
+              let tabId = activeTabId else { return }
+
         let userMsg = AIChatMessage(
             id: UUID().uuidString,
             role: "user",
             content: question,
             timestamp: Date()
         )
-        aiMessages.append(userMsg)
+        let _ = ensureSession(tabId: tabId, serverId: serverId)
+        addMessageToCurrentSession(userMsg)
+
         if !aiPanelOpen {
             aiPanelOpen = true
         }
@@ -690,6 +712,230 @@ class AppState: ObservableObject {
                     print("[Orbit] Batch exec to \(serverId) failed: \(error)")
                 }
             }
+        }
+    }
+
+    // MARK: - AI Session Helpers
+
+    var currentServerId: String? {
+        guard let activeId = activeTabId,
+              let tab = tabs.first(where: { $0.id == activeId }) else { return nil }
+        return tab.serverId
+    }
+
+    var currentSession: AISession? {
+        guard let serverId = currentServerId,
+              let tabId = activeTabId,
+              let sessionId = activeAISessionId[tabId],
+              let sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return nil }
+        return aiSessions[serverId]?[idx]
+    }
+
+    var currentMessages: [AIChatMessage] {
+        currentSession?.messages ?? []
+    }
+
+    func ensureSession(tabId: String, serverId: String) -> AISession {
+        if let sessionId = activeAISessionId[tabId],
+           var sessions = aiSessions[serverId],
+           let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
+            return sessions[idx]
+        }
+        let session = AISession.create(serverId: serverId)
+        if aiSessions[serverId] == nil {
+            aiSessions[serverId] = []
+        }
+        aiSessions[serverId]?.insert(session, at: 0)
+        activeAISessionId[tabId] = session.id
+        saveAISessions(serverId: serverId)
+        return session
+    }
+
+    func currentSessionTitle() -> String {
+        currentSession?.title ?? ""
+    }
+
+    func loadAISessions(serverId: String) {
+        guard let data = UserDefaults.standard.data(forKey: "aiSessions_\(serverId)") else { return }
+        do {
+            aiSessions[serverId] = try JSONDecoder().decode([AISession].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load AI sessions for \(serverId): \(error)")
+        }
+    }
+
+    func saveAISessions(serverId: String) {
+        guard let sessions = aiSessions[serverId] else { return }
+        do {
+            let data = try JSONEncoder().encode(sessions)
+            UserDefaults.standard.set(data, forKey: "aiSessions_\(serverId)")
+        } catch {
+            print("[Orbit] Failed to save AI sessions for \(serverId): \(error)")
+        }
+    }
+
+    func loadAIPanelWidth() {
+        let w = UserDefaults.standard.double(forKey: "aiPanelWidth")
+        if w >= 160 && w <= 600 { aiPanelWidth = w }
+    }
+
+    func saveAIPanelWidth(_ width: CGFloat) {
+        UserDefaults.standard.set(Double(width), forKey: "aiPanelWidth")
+    }
+
+    // MARK: - Slash Commands
+
+    enum SlashCommandResult {
+        case handled(String)
+        case switchSession(String)
+        case ignore
+    }
+
+    func handleSlashCommand(_ input: String) -> SlashCommandResult {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+
+        if trimmed == "/new" { return createNewSession() }
+        if trimmed == "/sessions" { return listSessions() }
+        if trimmed == "/compact" { return compactCurrentSession() }
+
+        if trimmed.hasPrefix("/load ") {
+            let sessionId = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            return loadSession(sessionId: sessionId)
+        }
+
+        return .ignore
+    }
+
+    private func createNewSession() -> SlashCommandResult {
+        guard let serverId = currentServerId, let tabId = activeTabId else {
+            return .handled("无法创建新 session：请先连接服务器")
+        }
+        saveAISessions(serverId: serverId)
+
+        let session = AISession.create(serverId: serverId)
+        if aiSessions[serverId] == nil { aiSessions[serverId] = [] }
+        aiSessions[serverId]?.insert(session, at: 0)
+        activeAISessionId[tabId] = session.id
+        saveAISessions(serverId: serverId)
+        return .handled("已创建新会话")
+    }
+
+    private func listSessions() -> SlashCommandResult {
+        guard let serverId = currentServerId else {
+            return .handled("无法列出 session：请先连接服务器")
+        }
+        loadAISessions(serverId: serverId)
+        let sessions = aiSessions[serverId] ?? []
+        if sessions.isEmpty { return .handled("当前没有历史会话") }
+        let df = aiDateFormatter
+        var lines = ["📋 **历史会话** (点击加载, 或用 `/load <id>`):"]
+        for s in sessions {
+            let dateStr = df.string(from: s.updatedAt)
+            let title = s.title.isEmpty ? "（空会话）" : s.title
+            let marker = activeAISessionId[activeTabId ?? ""] == s.id ? " ●" : ""
+            lines.append("- `\(s.id.prefix(8))` \(title) (\(s.messages.count) 条消息, \(dateStr))\(marker)")
+        }
+        return .handled(lines.joined(separator: "\n"))
+    }
+
+    private func loadSession(sessionId: String) -> SlashCommandResult {
+        guard let serverId = currentServerId, let tabId = activeTabId,
+              let sessions = aiSessions[serverId] else {
+            return .handled("无法加载 session")
+        }
+        let match = sessions.first(where: { $0.id.hasPrefix(sessionId) })
+        guard let session = match else {
+            return .handled("未找到 session: \(sessionId)")
+        }
+        activeAISessionId[tabId] = session.id
+        return .switchSession(session.id)
+    }
+
+    private func compactCurrentSession() -> SlashCommandResult {
+        guard let serverId = currentServerId, let tabId = activeTabId,
+              let sessionId = activeAISessionId[tabId],
+              var sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else {
+            return .handled("无法压缩：无活跃会话")
+        }
+        let msgs = sessions[idx].messages
+        guard msgs.count >= 4 else {
+            return .handled("消息太少，无需压缩")
+        }
+
+        let splitIdx = max(1, Int(Double(msgs.count) * 0.7))
+        let toCompress = Array(msgs[0..<splitIdx])
+        let toKeep = Array(msgs[splitIdx...])
+
+        let summaryContent = "[上下文摘要] 前 \(toCompress.count) 条消息已压缩。"
+        let summaryMsg = AIChatMessage(
+            id: UUID().uuidString, role: "system",
+            content: summaryContent, timestamp: Date())
+
+        sessions[idx].messages = [summaryMsg] + toKeep
+        sessions[idx].updatedAt = Date()
+        aiSessions[serverId] = sessions
+        saveAISessions(serverId: serverId)
+
+        return .handled("已压缩上下文：将前 \(toCompress.count) 条消息替换为摘要，保留 \(toKeep.count) 条")
+    }
+
+    private var aiDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
+
+    // MARK: - Command Safety Whitelist
+
+    struct CommandSafety {
+        static let safePrefixes: [String] = [
+            "ls", "cat ", "head ", "tail ", "less ", "file ", "stat ", "du ",
+            "grep ", "awk ", "sed -n", "wc ", "sort ", "uniq ", "cut ", "tr ",
+            "ps ", "top -bn", "htop -n", "free ", "df ", "uptime", "uname", "hostname", "whoami", "id ",
+            "ping -c", "curl -I", "wget --spider", "ss -tlnp", "ss -tuln",
+            "netstat ", "ip addr show", "ip a ", "nslookup ", "dig ",
+            "systemctl status", "journalctl ", "service ", "pgrep ", "pidof ",
+            "lsof -p", "dmesg", "last ", "lastlog",
+            "echo ", "printf ", "pwd", "env ", "printenv", "which ", "whereis", "type ",
+            "find ", "locate ", "dpkg -l", "rpm -q", "pip list",
+            "docker ps", "docker images", "docker inspect", "docker logs",
+        ]
+
+        static let dangerousPatterns: [String] = [
+            "rm ", "mv ", "cp ", "chmod ", "chown ",
+            "kill ", "pkill", "killall",
+            "systemctl start", "systemctl stop", "systemctl restart",
+            "systemctl enable", "systemctl disable", "systemctl mask",
+            "apt install", "apt remove", "apt purge", "apt-get",
+            "yum install", "yum remove", "dnf install", "dnf remove",
+            "brew install", "brew uninstall", "pip install", "pip uninstall",
+            "npm install -g", "npm uninstall -g",
+            "dd ", "mkfs", "fdisk", "parted",
+            "shutdown", "reboot", "halt", "poweroff",
+            "> ", ">>",
+        ]
+
+        static func isSafe(command: String) -> Bool {
+            let trimmed = command.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return false }
+
+            for pattern in dangerousPatterns {
+                if trimmed.lowercased().contains(pattern.lowercased()) {
+                    return false
+                }
+            }
+
+            if trimmed.lowercased().contains("sudo") { return false }
+
+            for prefix in safePrefixes {
+                if trimmed.lowercased().hasPrefix(prefix.lowercased()) {
+                    return true
+                }
+            }
+
+            return false
         }
     }
 }

@@ -18,13 +18,13 @@ struct AIChatView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(action: { appState.clearAIMessages() }) {
+                Button(action: { appState.clearCurrentSessionMessages() }) {
                     Image(systemName: "trash")
                         .font(.system(size: 10, weight: .medium))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.tertiary)
-                .disabled(appState.aiMessages.isEmpty)
+                .disabled(appState.currentMessages.isEmpty)
                 .help("清除对话历史")
                 Button(action: { appState.toggleAIPanel() }) {
                     Image(systemName: "xmark")
@@ -67,7 +67,7 @@ struct AIChatView: View {
                 ScrollViewReader { scrollView in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            if appState.aiMessages.isEmpty {
+                            if appState.currentMessages.isEmpty {
                                 VStack(spacing: 4) {
                                     Text("告诉我你遇到的问题，")
                                         .font(.system(size: 12))
@@ -80,7 +80,7 @@ struct AIChatView: View {
                                 .frame(maxWidth: .infinity)
                             }
 
-                            ForEach(appState.aiMessages) { message in
+                            ForEach(appState.currentMessages) { message in
                                 MessageBubble(message: message)
                             }
 
@@ -122,7 +122,7 @@ struct AIChatView: View {
                 .padding(.vertical, 8)
             }
         }
-        .frame(width: 280)
+        .frame(width: appState.aiPanelWidth)
         .background(Color(NSColor.controlBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: .askAI)) { notification in
             guard let question = notification.userInfo?["question"] as? String,
@@ -148,17 +148,17 @@ struct AIChatView: View {
             content: questionText,
             timestamp: Date()
         )
-        appState.addAIMessage(userMsg)
+        appState.addMessageToCurrentSession(userMsg)
 
         let context = collectTerminalContext()
         let systemPrompt = buildSystemPrompt(context: context)
 
         service.streamMessage(
-            messages: appState.aiMessages,
+            messages: appState.currentMessages,
             systemPrompt: systemPrompt,
             config: appState.aiConfig,
             onToken: { token in
-                self.appState.appendToLastAssistantMessage(text: token)
+                self.appState.appendToCurrentAssistantMessage(text: token)
             },
             onComplete: { result in
                 switch result {
@@ -171,7 +171,7 @@ struct AIChatView: View {
                             content: "💡 建议命令: `\(cmd)` — 点击执行或复制到终端",
                             timestamp: Date()
                         )
-                        self.appState.addAIMessage(cmdMsg)
+                        self.appState.addMessageToCurrentSession(cmdMsg)
                     }
 
                 case .failure(let error):
@@ -181,7 +181,7 @@ struct AIChatView: View {
                         content: "错误: \(error.localizedDescription)",
                         timestamp: Date()
                     )
-                    self.appState.addAIMessage(errorMsg)
+                    self.appState.addMessageToCurrentSession(errorMsg)
                 }
             }
         )
