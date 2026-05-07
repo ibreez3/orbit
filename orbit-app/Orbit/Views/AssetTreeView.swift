@@ -69,6 +69,10 @@ struct AssetTreeView: View {
         }
         .frame(minWidth: 160)
         .background(Color(NSColor.controlBackgroundColor))
+        .sheet(isPresented: $appState.snippetEditorOpen) {
+            SnippetEditorView()
+                .environmentObject(appState)
+        }
         .alert("重命名分组", isPresented: Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } }
