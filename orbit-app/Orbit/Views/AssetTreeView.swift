@@ -222,6 +222,10 @@ struct AssetTreeView: View {
                     .onTapGesture(count: 2) {
                         appState.openCgDialog(cg)
                     }
+                    .contextMenu {
+                        Button("编辑") { appState.openCgDialog(cg) }
+                        Button("删除", role: .destructive) { appState.deleteCg(cg.id) }
+                    }
                 }
             }
 
@@ -288,6 +292,21 @@ struct AssetTreeView: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(snippet.command, forType: .string)
                         }
+                    }
+                    .contextMenu {
+                        Button("插入到终端") {
+                            if let activeId = appState.activeTabId,
+                               let tab = appState.tabs.first(where: { $0.id == activeId }),
+                               let sid = tab.sessionId ?? tab.focusedChannelId,
+                               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+                                appState.insertSnippetCommand(snippet.command, into: tv)
+                            } else {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(snippet.command, forType: .string)
+                            }
+                        }
+                        Button("编辑") { appState.openSnippetEditor(snippet: snippet) }
+                        Button("删除", role: .destructive) { appState.deleteSnippet(snippet.id) }
                     }
                 }
             }
