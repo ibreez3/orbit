@@ -203,11 +203,10 @@ struct AIChatView: View {
             sendMessage(text: question)
         }
         .onAppear {
-            if let serverId = appState.currentServerId,
-               let tabId = appState.activeTabId {
-                appState.loadAISessions(serverId: serverId)
-                let _ = appState.ensureSession(tabId: tabId, serverId: serverId)
-            }
+            let serverId = appState.currentServerId
+            appState.loadAISessions(serverId: serverId)
+            let tabId = appState.activeTabId ?? "_standalone_tab_"
+            let _ = appState.ensureSession(tabId: tabId, serverId: serverId)
         }
     }
 
@@ -291,9 +290,7 @@ struct AIChatView: View {
                         self.appState.addMessageToCurrentSession(cmdMsg)
                     }
                     // Persist accumulated assistant message tokens
-                    if let serverId = self.appState.currentServerId {
-                        self.appState.saveAISessions(serverId: serverId)
-                    }
+                    self.appState.saveAISessions(serverId: self.appState.currentServerId)
                 case .failure(let error):
                     let errorMsg = AIChatMessage(
                         id: UUID().uuidString, role: "system",
@@ -628,7 +625,7 @@ private struct SessionPickerView: View {
     let onDismiss: () -> Void
 
     var sessions: [AISession] {
-        guard let serverId = appState.currentServerId else { return [] }
+        let serverId = appState.currentServerId
         return appState.aiSessions[serverId] ?? []
     }
 

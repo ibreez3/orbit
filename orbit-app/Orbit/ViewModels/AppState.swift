@@ -632,8 +632,8 @@ class AppState: ObservableObject {
     }
 
     func addMessageToCurrentSession(_ message: AIChatMessage) {
-        guard let serverId = currentServerId,
-              let tabId = activeTabId else { return }
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
 
         var session = ensureSession(tabId: tabId, serverId: serverId)
 
@@ -652,11 +652,16 @@ class AppState: ObservableObject {
     }
 
     func appendToCurrentAssistantMessage(text: String) {
-        guard let serverId = currentServerId,
-              let tabId = activeTabId,
-              let sessionId = activeAISessionId[tabId],
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessionId = activeAISessionId[tabId],
               var sessions = aiSessions[serverId],
-              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else {
+            // No session yet — create one
+            let _ = ensureSession(tabId: tabId, serverId: serverId)
+            appendToCurrentAssistantMessage(text: text)
+            return
+        }
 
         var session = sessions[idx]
         if var last = session.messages.last, last.role == "assistant" {
@@ -673,9 +678,9 @@ class AppState: ObservableObject {
     }
 
     func clearCurrentSessionMessages() {
-        guard let serverId = currentServerId,
-              let tabId = activeTabId,
-              let sessionId = activeAISessionId[tabId],
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessionId = activeAISessionId[tabId],
               var sessions = aiSessions[serverId],
               let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[idx].messages.removeAll()
@@ -689,8 +694,8 @@ class AppState: ObservableObject {
     }
 
     func submitAIQuestion(_ question: String) {
-        guard let serverId = currentServerId,
-              let tabId = activeTabId else { return }
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
 
         let userMsg = AIChatMessage(
             id: UUID().uuidString,
@@ -723,19 +728,28 @@ class AppState: ObservableObject {
 
     // MARK: - AI Session Helpers
 
-    var currentServerId: String? {
-        guard let activeId = activeTabId,
-              let tab = tabs.first(where: { $0.id == activeId }) else { return nil }
-        return tab.serverId
+    private static let standaloneServerId = "_standalone_"
+    private static let standaloneTabId = "_standalone_tab_"
+
+    var currentServerId: String {
+        if let activeId = activeTabId,
+           let tab = tabs.first(where: { $0.id == activeId }) {
+            return tab.serverId
+        }
+        return Self.standaloneServerId
+    }
+
+    private var currentActiveTabId: String {
+        activeTabId ?? Self.standaloneTabId
     }
 
     var currentSession: AISession? {
-        guard let serverId = currentServerId,
-              let tabId = activeTabId,
-              let sessionId = activeAISessionId[tabId],
-              let sessions = aiSessions[serverId],
+        let sid = currentServerId
+        let tid = currentActiveTabId
+        guard let sessionId = activeAISessionId[tid],
+              let sessions = aiSessions[sid],
               let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return nil }
-        return aiSessions[serverId]?[idx]
+        return aiSessions[sid]?[idx]
     }
 
     var currentMessages: [AIChatMessage] {
@@ -814,9 +828,8 @@ class AppState: ObservableObject {
     }
 
     private func createNewSession() -> SlashCommandResult {
-        guard let serverId = currentServerId, let tabId = activeTabId else {
-            return .handled("无法创建新 session：请先连接服务器")
-        }
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
         saveAISessions(serverId: serverId)
 
         let session = AISession.create(serverId: serverId)
@@ -828,9 +841,7 @@ class AppState: ObservableObject {
     }
 
     private func listSessions() -> SlashCommandResult {
-        guard let serverId = currentServerId else {
-            return .handled("无法列出 session：请先连接服务器")
-        }
+        let serverId = currentServerId
         loadAISessions(serverId: serverId)
         let sessions = aiSessions[serverId] ?? []
         if sessions.isEmpty { return .handled("当前没有历史会话") }
@@ -839,15 +850,16 @@ class AppState: ObservableObject {
         for s in sessions {
             let dateStr = df.string(from: s.updatedAt)
             let title = s.title.isEmpty ? "（空会话）" : s.title
-            let marker = activeAISessionId[activeTabId ?? ""] == s.id ? " ●" : ""
+            let marker = activeAISessionId[currentActiveTabId] == s.id ? " ●" : ""
             lines.append("- `\(s.id.prefix(8))` \(title) (\(s.messages.count) 条消息, \(dateStr))\(marker)")
         }
         return .handled(lines.joined(separator: "\n"))
     }
 
     private func loadSession(sessionId: String) -> SlashCommandResult {
-        guard let serverId = currentServerId, let tabId = activeTabId,
-              let sessions = aiSessions[serverId] else {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessions = aiSessions[serverId] else {
             return .handled("无法加载 session")
         }
         let match = sessions.first(where: { $0.id.hasPrefix(sessionId) })
@@ -859,8 +871,9 @@ class AppState: ObservableObject {
     }
 
     private func compactCurrentSession() -> SlashCommandResult {
-        guard let serverId = currentServerId, let tabId = activeTabId,
-              let sessionId = activeAISessionId[tabId],
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessionId = activeAISessionId[tabId],
               var sessions = aiSessions[serverId],
               let idx = sessions.firstIndex(where: { $0.id == sessionId }) else {
             return .handled("无法压缩：无活跃会话")
