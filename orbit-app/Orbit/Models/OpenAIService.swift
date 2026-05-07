@@ -11,6 +11,167 @@ class OpenAIService: ObservableObject {
         isLoading = false
     }
 
+    private var agentTask: Task<Void, Never>?
+
+    func cancelAgent() {
+        agentTask?.cancel()
+        agentTask = nil
+        streamTask?.cancel()
+        streamTask = nil
+        isLoading = false
+    }
+
+    // MARK: - Agent Loop (single-shot: call AI → extract ```execute → callback)
+
+    func runAgent(
+        messages: [AIChatMessage],
+        systemPrompt: String,
+        config: AIConfig,
+        onToken: @escaping (String) -> Void,
+        onCommands: @escaping ([String]) -> Void,
+        onComplete: @escaping (Result<String, Error>) -> Void
+    ) {
+        isLoading = true
+
+        agentTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            defer { self.isLoading = false }
+
+            // Build API messages with agent mode instruction
+            var agentPrompt = systemPrompt + """
+
+            ## 自动执行模式
+            你可以在回复中使用 ```execute 代码块直接执行命令并获取输出。
+            格式：
+            ```execute
+            command_here
+            ```
+            一次最多一个 execute 块。
+            """
+
+            var apiMessages: [[String: String]] = []
+            apiMessages.append(["role": "system", "content": agentPrompt])
+            let recent = Array(messages.suffix(30))
+            for msg in recent {
+                apiMessages.append(["role": msg.role, "content": msg.content])
+            }
+
+            let content = await self.callAndCollect(
+                messages: apiMessages, config: config, onToken: onToken)
+            if Task.isCancelled { return }
+
+            if let error = content.error {
+                onComplete(.failure(error))
+                return
+            }
+
+            let fullContent = content.text ?? ""
+            let commands = self.extractExecutes(from: fullContent)
+
+            if commands.isEmpty {
+                onComplete(.success(fullContent))
+            } else {
+                // Notify caller about commands, caller re-enters after execution
+                onCommands(commands)
+            }
+        }
+    }
+
+    /// Extract ```execute ... ``` blocks from AI response
+    func extractExecutes(from content: String) -> [String] {
+        let pattern = "```execute\\s*\\n([\\s\\S]*?)\\n```"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let matches = regex.matches(in: content, range: NSRange(content.startIndex..., in: content))
+        return matches.compactMap { match in
+            if let range = Range(match.range(at: 1), in: content) {
+                return String(content[range]).trimmingCharacters(in: .whitespaces)
+            }
+            return nil
+        }
+    }
+
+    // MARK: - Internal: call AI API and collect streaming response
+
+    private struct AgentCallResult {
+        let text: String?
+        let error: Error?
+    }
+
+    private func callAndCollect(
+        messages: [[String: String]],
+        config: AIConfig,
+        onToken: @escaping (String) -> Void
+    ) async -> AgentCallResult {
+        let endpoint = config.endpoint.hasSuffix("/v1")
+            ? config.endpoint + "/chat/completions"
+            : config.endpoint + "/v1/chat/completions"
+
+        guard let url = URL(string: endpoint) else {
+            return AgentCallResult(text: nil, error: NSError(domain: "AIService", code: -1))
+        }
+
+        let body: [String: Any] = [
+            "model": config.model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 2000,
+            "stream": true,
+        ]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 120
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        guard let (bytes, response) = try? await URLSession.shared.bytes(for: request),
+              let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            return AgentCallResult(text: nil, error: NSError(domain: "AIService", code: -2))
+        }
+
+        var fullContent = ""
+        var lineData = Data()
+
+        do {
+            for try await byte in bytes {
+                if Task.isCancelled { break }
+                lineData.append(byte)
+                if byte == UInt8(ascii: "\n") {
+                    guard let line = String(data: lineData, encoding: .utf8) else {
+                        lineData.removeAll(keepingCapacity: true)
+                        continue
+                    }
+                    lineData.removeAll(keepingCapacity: true)
+
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmed.hasPrefix("data:") else { continue }
+                    let dataStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    if dataStr == "[DONE]" { break }
+
+                    guard let data = dataStr.data(using: .utf8),
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let choices = json["choices"] as? [[String: Any]] else { continue }
+
+                    for choice in choices {
+                        if let delta = choice["delta"] as? [String: Any],
+                           let content = delta["content"] as? String {
+                            fullContent += content
+                            onToken(content)
+                        }
+                    }
+                }
+            }
+        } catch {
+            if fullContent.isEmpty {
+                return AgentCallResult(text: nil, error: error)
+            }
+        }
+
+        return AgentCallResult(text: fullContent, error: nil)
+    }
+
     // MARK: - Streaming (primary)
 
     func streamMessage(
@@ -118,19 +279,22 @@ class OpenAIService: ObservableObject {
         onComplete: (Result<String, Error>) -> Void
     ) async {
         var fullContent = ""
-        var buffer = ""
+        var lineData = Data()
 
         do {
             for try await byte in bytes {
                 if Task.isCancelled { break }
 
-                let char = Character(Unicode.Scalar(byte))
-                buffer.append(char)
+                lineData.append(byte)
 
-                if char == "\n" {
-                    let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-                    buffer = ""
+                if byte == UInt8(ascii: "\n") {
+                    guard let line = String(data: lineData, encoding: .utf8) else {
+                        lineData.removeAll(keepingCapacity: true)
+                        continue
+                    }
+                    lineData.removeAll(keepingCapacity: true)
 
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard trimmed.hasPrefix("data:") else { continue }
                     let dataStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
 
@@ -287,16 +451,16 @@ class OpenAIService: ObservableObject {
     // MARK: - Helpers
 
     private func collectString(from bytes: URLSession.AsyncBytes, maxLength: Int) async -> String {
-        var result = ""
+        var data = Data()
         do {
             for try await byte in bytes {
-                if result.count >= maxLength { break }
-                result.append(Character(Unicode.Scalar(byte)))
+                if data.count >= maxLength { break }
+                data.append(byte)
             }
         } catch {
             // ignore read errors
         }
-        return result
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
 
