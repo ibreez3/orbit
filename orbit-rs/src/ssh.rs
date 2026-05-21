@@ -33,6 +33,12 @@ struct SharedSession {
     guard: transport::SessionGuard,
     channels: HashMap<String, ActiveChannel>,
     session_lock: Arc<std::sync::Mutex<()>>,
+    server_id: String,
+}
+
+struct IdleSession {
+    guard: transport::SessionGuard,
+    session_lock: Arc<std::sync::Mutex<()>>,
 }
 
 pub(crate) fn spawn_channel_reader(
@@ -106,12 +112,14 @@ pub(crate) fn spawn_channel_reader(
 
 pub struct SshManager {
     sessions: HashMap<String, SharedSession>,
+    idle_pool: HashMap<String, Vec<IdleSession>>,
 }
 
 impl SshManager {
-pub fn register_session(
+    pub fn register_session(
         &mut self,
         session_id: &str,
+        server_id: &str,
         guard: transport::SessionGuard,
         active_channel: ActiveChannel,
         session_lock: Arc<std::sync::Mutex<()>>,
@@ -122,13 +130,25 @@ pub fn register_session(
                 guard,
                 channels: [(session_id.to_string(), active_channel)].into_iter().collect(),
                 session_lock,
+                server_id: server_id.to_string(),
             },
         );
+    }
+
+    pub fn take_idle_session(&mut self, server_id: &str) -> Option<(transport::SessionGuard, Arc<std::sync::Mutex<()>>)> {
+        if let Some(sessions) = self.idle_pool.get_mut(server_id) {
+            if let Some(idle) = sessions.pop() {
+                info!(server_id, "复用空闲 SSH 连接");
+                return Some((idle.guard, idle.session_lock));
+            }
+        }
+        None
     }
 
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
+            idle_pool: HashMap::new(),
         }
     }
 
@@ -158,6 +178,7 @@ pub fn register_session(
                 guard,
                 channels: [(session_id.to_string(), active_channel)].into_iter().collect(),
                 session_lock,
+                server_id: server.id.clone(),
             },
         );
         Ok(())
@@ -257,32 +278,57 @@ pub fn register_session(
         Err(anyhow!("会话不存在"))
     }
 
-    pub fn disconnect(&mut self, session_id: &str) -> Result<()> {
-        let mut to_remove_session: Option<String> = None;
+    pub fn disconnect(&mut self, channel_id: &str) -> Result<()> {
+        let mut pool_key: Option<String> = None;
 
+        // First pass: find and clean up the channel
         for (key, shared) in self.sessions.iter_mut() {
-            if let Some(mut ch) = shared.channels.remove(session_id) {
+            if let Some(mut ch) = shared.channels.remove(channel_id) {
                 ch.running.store(false, Ordering::Relaxed);
                 if let Some(h) = ch.reader_handle.take() {
                     let _ = h.join();
                 }
-                info!(session_id, "SSH channel 已关闭");
+                info!(channel_id, "SSH channel 已关闭");
 
                 if shared.channels.is_empty() {
-                    to_remove_session = Some(key.clone());
+                    pool_key = Some(key.clone());
                 }
                 break;
             }
         }
 
-        if let Some(key) = to_remove_session {
+        // Second pass: remove session and return to pool
+        if let Some(key) = pool_key {
             if let Some(shared) = self.sessions.remove(&key) {
-                let _ = shared.guard.session.set_blocking(true);
-                let _ = shared.guard.session.disconnect(None, "bye", None);
-                info!(session_id, "SSH 连接（最后一个 channel）已断开");
+                let server_id = shared.server_id;
+                self.idle_pool
+                    .entry(server_id)
+                    .or_default()
+                    .push(IdleSession {
+                        guard: shared.guard,
+                        session_lock: shared.session_lock,
+                    });
+                info!(channel_id, "SSH 连接已归还连接池");
             }
         }
         Ok(())
+    }
+
+    pub fn shutdown(&mut self) {
+        for (_, sessions) in self.idle_pool.drain() {
+            for idle in sessions {
+                let _ = idle.guard.session.set_blocking(true);
+                let _ = idle.guard.session.disconnect(None, "bye", None);
+            }
+        }
+        for (_, mut shared) in self.sessions.drain() {
+            for (_, ch) in shared.channels.drain() {
+                ch.running.store(false, Ordering::Relaxed);
+            }
+            let _ = shared.guard.session.set_blocking(true);
+            let _ = shared.guard.session.disconnect(None, "bye", None);
+        }
+        info!("SSH 连接池已关闭");
     }
 
     pub fn exec_command(
@@ -313,15 +359,6 @@ pub fn register_session(
 
 impl Drop for SshManager {
     fn drop(&mut self) {
-        for (_, mut shared) in self.sessions.drain() {
-            for (_, mut ch) in shared.channels.drain() {
-                ch.running.store(false, Ordering::Relaxed);
-                if let Some(h) = ch.reader_handle.take() {
-                    let _ = h.join();
-                }
-            }
-            let _ = shared.guard.session.set_blocking(true);
-            let _ = shared.guard.session.disconnect(None, "bye", None);
-        }
+        self.shutdown();
     }
 }
