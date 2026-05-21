@@ -3,6 +3,58 @@ import SwiftTerm
 import AppKit
 import CoreText
 
+// MARK: - Keyword Injection
+
+enum KeywordInjector {
+    private static let regexCache = NSCache<NSString, NSRegularExpression>()
+
+    static func highlight(_ data: Data, keywords: [KeywordHighlight]) -> Data {
+        let enabled = keywords.filter { $0.enabled }
+        guard !enabled.isEmpty else { return data }
+        guard let str = String(data: data, encoding: .utf8) else { return data }
+
+        var result = str
+        for kw in enabled {
+            let nsPattern = kw.pattern as NSString
+            let regex: NSRegularExpression
+            if let cached = regexCache.object(forKey: nsPattern) {
+                regex = cached
+            } else if let compiled = try? NSRegularExpression(pattern: kw.pattern, options: [.caseInsensitive]) {
+                regexCache.setObject(compiled, forKey: nsPattern)
+                regex = compiled
+            } else {
+                continue
+            }
+
+            let matches = regex.matches(in: result, options: [], range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let range = Range(match.range, in: result) else { continue }
+                let ansiCode = hexToAnsi(kw.colorHex)
+                let replacement = "\u{1b}[\(ansiCode)m\(result[range])\u{1b}[0m"
+                result.replaceSubrange(range, with: replacement)
+            }
+        }
+        return Data(result.utf8)
+    }
+
+    static func clearRegexCache() {
+        regexCache.removeAllObjects()
+    }
+
+    private static func hexToAnsi(_ hex: String) -> String {
+        var hexStr = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard hexStr.count == 6,
+              let r = Int(hexStr.prefix(2), radix: 16),
+              let g = Int(hexStr.dropFirst(2).prefix(2), radix: 16),
+              let b = Int(hexStr.suffix(2), radix: 16) else { return "33" }
+        let rc = r * 5 / 255
+        let gc = g * 5 / 255
+        let bc = b * 5 / 255
+        let colorIdx = 16 + 36 * rc + 6 * gc + bc
+        return "38;5;\(colorIdx)"
+    }
+}
+
 struct TerminalView: NSViewRepresentable {
     let channelId: String?
     let serverId: String
@@ -135,6 +187,14 @@ struct TerminalView: NSViewRepresentable {
         private var _pending = Data()
         private var _pendingCount = 0
 
+        // AI ! prefix question buffer
+        private var _aiBuffer = ""
+        private var _aiMode = false
+
+        // Error detection throttling
+        private var _lastErrorScanTime: Date = .distantPast
+        private var _lastErrorSetTime: Date = .distantPast
+
         var isLocal: Bool { serverId == "local" }
 
         init(channelId: String?, serverId: String, tabId: String, appState: AppState) {
@@ -165,14 +225,75 @@ struct TerminalView: NSViewRepresentable {
                     self._pendingCount = 0
                     os_unfair_lock_unlock(&self._batchLock)
                     if batch.isEmpty { return }
-                    let len = batch.count
-                    var copy = batch
+                    // Apply keyword highlighting — inject ANSI color codes
+                    let highlighted = KeywordInjector.highlight(batch, keywords: self.appState.keywordHighlights)
+
+                    // Scan for error patterns (throttled)
+                    self.scanForErrors(in: highlighted)
+
+                    let len = highlighted.count
+                    var copy = highlighted
                     copy.withUnsafeMutableBytes { buf in
                         if let base = buf.baseAddress {
                             let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
                             tv.feed(byteArray: slice)
                         }
                     }
+                }
+            }
+        }
+
+        private func scanForErrors(in data: Data) {
+            let now = Date()
+            guard now.timeIntervalSince(_lastErrorScanTime) >= 2.0 else { return }
+            _lastErrorScanTime = now
+
+            guard now.timeIntervalSince(_lastErrorSetTime) >= 3.0 else { return }
+
+            guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty else { return }
+
+            let patterns: [(String, String)] = [
+                ("command not found", "命令未找到"),
+                ("Permission denied", "权限被拒绝"),
+                ("FATAL", "严重错误"),
+                ("fatal:", "严重错误"),
+                ("panic:", "程序恐慌"),
+                ("Segmentation fault", "段错误"),
+                ("Aborted", "进程中止"),
+                ("Killed", "进程被杀死"),
+                ("Connection refused", "连接被拒绝"),
+                ("No route to host", "无法到达主机"),
+                ("Could not resolve host", "无法解析主机名"),
+                ("error:", "错误"),
+                ("Error:", "错误"),
+            ]
+
+            for (pattern, _) in patterns {
+                if text.range(of: pattern, options: .caseInsensitive) != nil {
+                    // Extract surrounding context
+                    let lines = text.components(separatedBy: "\n")
+                    var contextLines: [String] = []
+                    for (i, line) in lines.enumerated() {
+                        if line.range(of: pattern, options: .caseInsensitive) != nil {
+                            let start = max(0, i - 1)
+                            let end = min(lines.count, i + 2)
+                            contextLines.append(contentsOf: lines[start..<end])
+                            break
+                        }
+                    }
+                    let context = contextLines.joined(separator: "\n")
+                    _lastErrorSetTime = now
+                    DispatchQueue.main.async { [weak self] in
+                        self?.appState.activeTabError = context
+                        // Auto-dismiss after 10 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                            if self?.appState.activeTabError == context {
+                                self?.appState.activeTabError = nil
+                            }
+                        }
+                    }
+                    return
                 }
             }
         }
@@ -276,6 +397,46 @@ struct TerminalView: NSViewRepresentable {
         func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
             guard alive else { return }
             let bytes = Data(data)
+
+            // AI ! prefix interception
+            if _aiMode {
+                if bytes.contains(0x0d) || bytes.contains(0x0a) {
+                    // Enter pressed — submit the question
+                    _aiMode = false
+                    let question = _aiBuffer.trimmingCharacters(in: .whitespaces)
+                    _aiBuffer = ""
+                    if !question.isEmpty {
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: .askAI, object: nil, userInfo: ["question": question])
+                        }
+                    }
+                } else {
+                    _aiBuffer.append(String(data: bytes, encoding: .utf8) ?? "")
+                }
+                return
+            }
+
+            // Detect ! prefix at the start of a new input
+            let str = String(data: bytes, encoding: .utf8) ?? ""
+            if str.hasPrefix("! ") {
+                _aiMode = true
+                let remaining = String(str.dropFirst(2))
+                // Check if Enter is embedded in the same chunk (e.g. paste)
+                if let crIndex = remaining.firstIndex(where: { $0 == "\r" || $0 == "\n" }) {
+                    let question = String(remaining[..<crIndex]).trimmingCharacters(in: .whitespaces)
+                    _aiBuffer = ""
+                    _aiMode = false
+                    if !question.isEmpty {
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: .askAI, object: nil, userInfo: ["question": question])
+                        }
+                    }
+                } else {
+                    _aiBuffer = remaining
+                }
+                return
+            }
+
             if isLocal {
                 localShell?.write(bytes)
             } else if let sid = sessionId {

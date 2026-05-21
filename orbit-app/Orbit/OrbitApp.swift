@@ -50,6 +50,18 @@ struct OrbitCommands: Commands {
                 NotificationCenter.default.post(name: .reconnectSession, object: nil)
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Open Command Snippets") {
+                NotificationCenter.default.post(name: .openSnippetPicker, object: nil)
+            }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+
+            Button("Toggle AI Assistant") {
+                NotificationCenter.default.post(name: .toggleAIPanel, object: nil)
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .newItem) {
             Button("新建终端连接") {
@@ -129,4 +141,8 @@ extension Notification.Name {
     static let findInTerminal = Notification.Name("findInTerminal")
     static let openSettings = Notification.Name("openSettings")
     static let reconnectSession = Notification.Name("reconnectSession")
+    static let openSnippetPicker = Notification.Name("openSnippetPicker")
+    static let toggleAIPanel = Notification.Name("toggleAIPanel")
+    static let openBatchExecution = Notification.Name("openBatchExecution")
+    static let askAI = Notification.Name("askAI")
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SftpDrawerView: View {
     let tab: TabItem
+    @EnvironmentObject var drawerState: SftpDrawerState
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -9,7 +10,7 @@ struct SftpDrawerView: View {
             dragHandle
             SftpView(tab: tab)
         }
-        .frame(height: appState.sftpDrawerHeight)
+        .frame(height: drawerState.height)
         .background(.ultraThinMaterial)
     }
 
@@ -24,7 +25,7 @@ struct SftpDrawerView: View {
                 Text("SFTP · \(tab.serverName)")
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
-                Button(action: { appState.sftpDrawerTabId = nil }) {
+                Button(action: { drawerState.close() }) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
@@ -38,8 +39,8 @@ struct SftpDrawerView: View {
         .gesture(
             DragGesture()
                 .onChanged { value in
-                    let newHeight = appState.sftpDrawerHeight - value.translation.height
-                    appState.sftpDrawerHeight = max(160, min(newHeight, 600))
+                    let newHeight = drawerState.height - value.translation.height
+                    drawerState.height = max(160, min(newHeight, 600))
                 }
         )
     }

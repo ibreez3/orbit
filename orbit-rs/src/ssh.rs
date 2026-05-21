@@ -125,6 +125,8 @@ impl SshManager {
     ) -> Result<()> {
         let guard = transport::create_session(server, db)?;
         let mut channel = guard.session.channel_session()?;
+        channel.setenv("LANG", "en_US.UTF-8")?;
+        channel.setenv("LC_ALL", "en_US.UTF-8")?;
         channel.request_pty("xterm-256color", None, None)?;
         channel.shell()?;
         guard.session.set_blocking(false);
@@ -169,6 +171,10 @@ impl SshManager {
         shared.guard.session.set_blocking(true);
         let mut channel = shared.guard.session.channel_session()
             .map_err(|e| anyhow!("创建 channel 失败: {}", e))?;
+        channel.setenv("LANG", "en_US.UTF-8")
+            .map_err(|e| anyhow!("设置 LANG 环境变量失败: {}", e))?;
+        channel.setenv("LC_ALL", "en_US.UTF-8")
+            .map_err(|e| anyhow!("设置 LC_ALL 环境变量失败: {}", e))?;
         channel.request_pty("xterm-256color", None, None)
             .map_err(|e| anyhow!("请求 PTY 失败: {}", e))?;
         channel.shell()

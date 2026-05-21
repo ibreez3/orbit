@@ -7,9 +7,8 @@ class AppState: ObservableObject {
     @Published var activeTabId: String? = nil
     @Published var spotlightOpen: Bool = false
     @Published var spotlightQuery: String = ""
-    @Published var sftpDrawerTabId: String? = nil
-    @Published var sftpDrawerHeight: CGFloat = 280
     @Published var theme: AppTheme = .catppuccinMocha
+    let sftpDrawer = SftpDrawerState()
 
     @Published var dialogOpen: Bool = false
     @Published var editingServer: Server? = nil
@@ -24,6 +23,27 @@ class AppState: ObservableObject {
     @Published var alertMessage: String? = nil
     @Published var alertTitle: String = ""
 
+    // Command snippets
+    @Published var snippets: [CommandSnippet] = []
+    @Published var snippetEditorOpen: Bool = false
+    @Published var editingSnippet: CommandSnippet? = nil
+
+    // Keyword highlighting
+    @Published var keywordHighlights: [KeywordHighlight] = KeywordHighlight.defaults
+
+    // AI Assistant — Session-based
+    @Published var aiConfig: AIConfig = .defaults
+    @Published var aiSessions: [String: [AISession]] = [:]       // serverId → sessions
+    @Published var activeAISessionId: [String: String] = [:]     // tabId → sessionId
+    @Published var aiPanelOpen: Bool = false
+    @Published var aiLoading: Bool = false
+    @Published var aiPanelWidth: CGFloat = 280
+    @Published var aiPendingConfirmation: (command: String, sessionId: String, tabId: String)? = nil
+    @Published var assetTreeWidth: CGFloat = 220
+    @Published var recentServers: [String] = []     // 最多 6 个 serverId
+    @Published var assetTreeSearchQuery: String = ""
+    @Published var activeTabError: String? = nil
+
     var showAlert: Binding<Bool> {
         Binding(get: { self.alertMessage != nil }, set: { if !$0 { self.alertMessage = nil } })
     }
@@ -32,16 +52,19 @@ class AppState: ObservableObject {
     let textEditorWC = TextEditorWindowController()
 
     init() {
-        // Load persisted theme
         let savedTheme = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
         if let t = AppTheme(rawValue: savedTheme) {
             _theme = Published(initialValue: t)
         }
-        // Load themes from files
         ThemeManager.shared.loadThemes()
-        // Load servers immediately on init
         loadServers()
         loadCredentialGroups()
+        loadSnippets()
+        loadKeywords()
+        loadAIConfig()
+        loadAIPanelWidth()
+        loadAssetTreeWidth()
+        loadRecentServers()
     }
 
     func loadServers() {
@@ -50,8 +73,10 @@ class AppState: ObservableObject {
                 let result = try bridge.listServers()
                 await MainActor.run { self.servers = result }
             } catch {
-                alertTitle = "加载失败"
-                alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -62,8 +87,10 @@ class AppState: ObservableObject {
                 let result = try bridge.listCredentialGroups()
                 await MainActor.run { self.credentialGroups = result }
             } catch {
-                alertTitle = "加载失败"
-                alertMessage = "无法加载凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -72,10 +99,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let server = try bridge.addServer(input: input)
-                servers.append(server)
+                await MainActor.run { servers.append(server) }
             } catch {
-                alertTitle = "添加失败"
-                alertMessage = "无法添加服务器: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "添加失败"
+                    alertMessage = "无法添加服务器: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -84,10 +113,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let server = try bridge.updateServer(id: id, input: input)
-                servers = servers.map { $0.id == id ? server : $0 }
+                await MainActor.run { servers = servers.map { $0.id == id ? server : $0 } }
             } catch {
-                alertTitle = "更新失败"
-                alertMessage = "无法更新服务器: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新服务器: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -96,18 +127,22 @@ class AppState: ObservableObject {
         Task {
             do {
                 try bridge.deleteServer(id: id)
-                let tabsToRemove = tabs.filter { $0.serverId == id }
-                for tab in tabsToRemove {
-                    disconnectAllChannels(tab: tab)
-                }
-                servers.removeAll { $0.id == id }
-                tabs.removeAll { $0.serverId == id }
-                if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
-                    activeTabId = tabs.last?.id
+                await MainActor.run {
+                    let tabsToRemove = tabs.filter { $0.serverId == id }
+                    for tab in tabsToRemove {
+                        disconnectAllChannels(tab: tab)
+                    }
+                    servers.removeAll { $0.id == id }
+                    tabs.removeAll { $0.serverId == id }
+                    if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
+                        activeTabId = tabs.last?.id
+                    }
                 }
             } catch {
-                alertTitle = "删除失败"
-                alertMessage = "无法删除服务器: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "删除失败"
+                    alertMessage = "无法删除服务器: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -116,10 +151,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let cg = try bridge.addCredentialGroup(input: input)
-                credentialGroups.append(cg)
+                await MainActor.run { credentialGroups.append(cg) }
             } catch {
-                alertTitle = "添加失败"
-                alertMessage = "无法添加凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "添加失败"
+                    alertMessage = "无法添加凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -128,10 +165,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let cg = try bridge.updateCredentialGroup(id: id, input: input)
-                credentialGroups = credentialGroups.map { $0.id == id ? cg : $0 }
+                await MainActor.run { credentialGroups = credentialGroups.map { $0.id == id ? cg : $0 } }
             } catch {
-                alertTitle = "更新失败"
-                alertMessage = "无法更新凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -140,10 +179,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 try bridge.deleteCredentialGroup(id: id)
-                credentialGroups.removeAll { $0.id == id }
+                await MainActor.run { credentialGroups.removeAll { $0.id == id } }
             } catch {
-                alertTitle = "删除失败"
-                alertMessage = "无法删除凭据分组: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "删除失败"
+                    alertMessage = "无法删除凭据分组: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -167,13 +208,13 @@ class AppState: ObservableObject {
             .terminal: "SSH: \(server.name)",
             .sftp: "SFTP: \(server.name)",
             .monitor: "Monitor: \(server.name)",
-            .settings: "设置",
         ]
         var tab = TabItem(id: id, type: type, serverId: server.id, serverName: server.name, title: titles[type] ?? "")
         if type == .terminal {
             tab.paneTree = nil
         }
         tabs.append(tab)
+        trackRecentServer(server.id)
         activeTabId = id
     }
 
@@ -198,24 +239,28 @@ class AppState: ObservableObject {
             do {
                 newChannelId = try bridge.spawnChannel(existingSessionId: existingChannelId)
             } catch {
-                alertTitle = "分屏失败"
-                alertMessage = "无法创建新通道: \(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "分屏失败"
+                    alertMessage = "无法创建新通道: \(error.localizedDescription)"
+                }
                 return
             }
 
-            guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-            let newSplitId = UUID().uuidString
-            let newLeaf = PaneNode.leaf(channelId: newChannelId)
+            await MainActor.run {
+                guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+                let newSplitId = UUID().uuidString
+                let newLeaf = PaneNode.leaf(channelId: newChannelId)
 
-            if let tree = tabs[idx].paneTree {
-                tabs[idx].paneTree = tree.replacingLeaf(channelId: existingChannelId, with:
-                    .split(id: newSplitId, direction: direction, ratio: 0.5,
-                           first: .leaf(channelId: existingChannelId), second: newLeaf))
-            } else {
-                tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
-                                             first: .leaf(channelId: existingChannelId), second: newLeaf)
+                if let tree = tabs[idx].paneTree {
+                    tabs[idx].paneTree = tree.replacingLeaf(channelId: existingChannelId, with:
+                        .split(id: newSplitId, direction: direction, ratio: 0.5,
+                               first: .leaf(channelId: existingChannelId), second: newLeaf))
+                } else {
+                    tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
+                                                 first: .leaf(channelId: existingChannelId), second: newLeaf)
+                }
+                tabs[idx].focusedChannelId = newChannelId
             }
-            tabs[idx].focusedChannelId = newChannelId
 
             // Focus the new terminal after SwiftUI creates it
             let cid = newChannelId
@@ -348,10 +393,12 @@ class AppState: ObservableObject {
         Task {
             do {
                 let sessionId = try bridge.connectSSH(serverId: serverId)
-                updateTabSessionId(tabId, sessionId: sessionId)
+                await MainActor.run { updateTabSessionId(tabId, sessionId: sessionId) }
             } catch {
-                alertTitle = "连接失败"
-                alertMessage = "\(error.localizedDescription)"
+                await MainActor.run {
+                    alertTitle = "连接失败"
+                    alertMessage = "\(error.localizedDescription)"
+                }
             }
         }
     }
@@ -433,11 +480,7 @@ class AppState: ObservableObject {
     }
 
     func toggleSftpDrawer(for tabId: String) {
-        if sftpDrawerTabId == tabId {
-            sftpDrawerTabId = nil
-        } else {
-            sftpDrawerTabId = tabId
-        }
+        sftpDrawer.toggle(for: tabId)
     }
 
     func setTheme(_ newTheme: AppTheme) {
@@ -462,5 +505,514 @@ class AppState: ObservableObject {
 
         // Reconnect
         connectSSH(tabId: tabId, serverId: tab.serverId)
+    }
+
+    // MARK: - Command Snippets
+
+    func loadSnippets() {
+        guard let data = UserDefaults.standard.data(forKey: "commandSnippets") else { return }
+        do {
+            snippets = try JSONDecoder().decode([CommandSnippet].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load snippets: \(error)")
+        }
+    }
+
+    func saveSnippets() {
+        do {
+            let data = try JSONEncoder().encode(snippets)
+            UserDefaults.standard.set(data, forKey: "commandSnippets")
+        } catch {
+            print("[Orbit] Failed to save snippets: \(error)")
+        }
+    }
+
+    func addSnippet(_ input: CommandSnippetInput) {
+        let id = "snip-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let now = Date()
+        let snippet = CommandSnippet(
+            id: id, name: input.name, command: input.command,
+            description: input.description, tags: input.tags,
+            serverId: input.serverId, createdAt: now, updatedAt: now
+        )
+        snippets.append(snippet)
+        saveSnippets()
+    }
+
+    func updateSnippet(id: String, input: CommandSnippetInput) {
+        if let idx = snippets.firstIndex(where: { $0.id == id }) {
+            let now = Date()
+            let updated = CommandSnippet(
+                id: id, name: input.name, command: input.command,
+                description: input.description, tags: input.tags,
+                serverId: input.serverId, createdAt: snippets[idx].createdAt, updatedAt: now
+            )
+            snippets[idx] = updated
+            saveSnippets()
+        }
+    }
+
+    func deleteSnippet(_ id: String) {
+        snippets.removeAll { $0.id == id }
+        saveSnippets()
+    }
+
+    func openSnippetEditor(snippet: CommandSnippet? = nil) {
+        editingSnippet = snippet
+        snippetEditorOpen = true
+    }
+
+    func closeSnippetEditor() {
+        snippetEditorOpen = false
+        editingSnippet = nil
+    }
+
+    func insertSnippetCommand(_ command: String, into terminalView: OrbitTerminalView?) {
+        guard let tv = terminalView else { return }
+        var arr = Array(command.utf8)
+        tv.feed(byteArray: ArraySlice(arr))
+    }
+
+    // MARK: - Keyword Highlighting
+
+    func loadKeywords() {
+        guard let data = UserDefaults.standard.data(forKey: "keywordHighlights") else { return }
+        do {
+            keywordHighlights = try JSONDecoder().decode([KeywordHighlight].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load keywords: \(error)")
+        }
+    }
+
+    func saveKeywords() {
+        do {
+            let data = try JSONEncoder().encode(keywordHighlights)
+            UserDefaults.standard.set(data, forKey: "keywordHighlights")
+        } catch {
+            print("[Orbit] Failed to save keywords: \(error)")
+        }
+    }
+
+    func addKeyword(pattern: String, colorHex: String) {
+        let id = "kw-\(Int(Date().timeIntervalSince1970 * 1000))"
+        keywordHighlights.append(KeywordHighlight(id: id, pattern: pattern, colorHex: colorHex, enabled: true))
+        saveKeywords()
+    }
+
+    func updateKeyword(id: String, pattern: String, colorHex: String, enabled: Bool) {
+        if let idx = keywordHighlights.firstIndex(where: { $0.id == id }) {
+            keywordHighlights[idx] = KeywordHighlight(id: id, pattern: pattern, colorHex: colorHex, enabled: enabled)
+            saveKeywords()
+        }
+    }
+
+    func deleteKeyword(_ id: String) {
+        keywordHighlights.removeAll { $0.id == id }
+        saveKeywords()
+    }
+
+    // MARK: - AI Configuration
+
+    func loadAIConfig() {
+        guard let data = UserDefaults.standard.data(forKey: "aiConfig") else { return }
+        do {
+            aiConfig = try JSONDecoder().decode(AIConfig.self, from: data)
+        } catch {
+            print("[Orbit] Failed to load AI config: \(error)")
+        }
+    }
+
+    func saveAIConfig() {
+        do {
+            let data = try JSONEncoder().encode(aiConfig)
+            UserDefaults.standard.set(data, forKey: "aiConfig")
+        } catch {
+            print("[Orbit] Failed to save AI config: \(error)")
+        }
+    }
+
+    func addMessageToCurrentSession(_ message: AIChatMessage) {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+
+        var session = ensureSession(tabId: tabId, serverId: serverId)
+
+        if session.title.isEmpty && message.role == "user" {
+            let t = message.content.trimmingCharacters(in: .whitespaces)
+            session.title = String(t.prefix(30))
+        }
+
+        session.messages.append(message)
+        session.updatedAt = Date()
+
+        if let idx = aiSessions[serverId]?.firstIndex(where: { $0.id == session.id }) {
+            aiSessions[serverId]?[idx] = session
+        }
+        saveAISessions(serverId: serverId)
+    }
+
+    func appendToCurrentAssistantMessage(text: String) {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessionId = activeAISessionId[tabId],
+              var sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else {
+            // No session yet — create one
+            let _ = ensureSession(tabId: tabId, serverId: serverId)
+            appendToCurrentAssistantMessage(text: text)
+            return
+        }
+
+        var session = sessions[idx]
+        if var last = session.messages.last, last.role == "assistant" {
+            last.content += text
+            session.messages[session.messages.count - 1] = last
+        } else {
+            let msg = AIChatMessage(id: UUID().uuidString, role: "assistant", content: text, timestamp: Date())
+            session.messages.append(msg)
+        }
+        session.updatedAt = Date()
+        sessions[idx] = session
+        aiSessions[serverId] = sessions
+        // Persistence deferred — saved on next user message or explicit flush
+    }
+
+    func clearCurrentSessionMessages() {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessionId = activeAISessionId[tabId],
+              var sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[idx].messages.removeAll()
+        sessions[idx].updatedAt = Date()
+        aiSessions[serverId] = sessions
+        saveAISessions(serverId: serverId)
+    }
+
+    func toggleAIPanel() {
+        aiPanelOpen.toggle()
+    }
+
+    func submitAIQuestion(_ question: String) {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+
+        let userMsg = AIChatMessage(
+            id: UUID().uuidString,
+            role: "user",
+            content: question,
+            timestamp: Date()
+        )
+        let _ = ensureSession(tabId: tabId, serverId: serverId)
+        addMessageToCurrentSession(userMsg)
+
+        if !aiPanelOpen {
+            aiPanelOpen = true
+        }
+    }
+
+    // MARK: - Batch Execution
+
+    func sendToMultipleServers(command: String, serverIds: [String]) {
+        for serverId in serverIds {
+            Task {
+                do {
+                    let sessionId = try bridge.connectSSH(serverId: serverId)
+                    try bridge.writeSSH(sessionId: sessionId, data: Data((command + "\r").utf8))
+                } catch {
+                    print("[Orbit] Batch exec to \(serverId) failed: \(error)")
+                }
+            }
+        }
+    }
+
+    // MARK: - AI Session Helpers
+
+    private static let standaloneServerId = "_standalone_"
+    private static let standaloneTabId = "_standalone_tab_"
+
+    var currentServerId: String {
+        if let activeId = activeTabId,
+           let tab = tabs.first(where: { $0.id == activeId }) {
+            return tab.serverId
+        }
+        return Self.standaloneServerId
+    }
+
+    private var currentActiveTabId: String {
+        activeTabId ?? Self.standaloneTabId
+    }
+
+    var currentSession: AISession? {
+        let sid = currentServerId
+        let tid = currentActiveTabId
+        guard let sessionId = activeAISessionId[tid],
+              let sessions = aiSessions[sid],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return nil }
+        return aiSessions[sid]?[idx]
+    }
+
+    var currentMessages: [AIChatMessage] {
+        currentSession?.messages ?? []
+    }
+
+    func ensureSession(tabId: String, serverId: String) -> AISession {
+        if let sessionId = activeAISessionId[tabId],
+           let sessions = aiSessions[serverId],
+           let idx = sessions.firstIndex(where: { $0.id == sessionId }) {
+            return sessions[idx]
+        }
+        let session = AISession.create(serverId: serverId)
+        if aiSessions[serverId] == nil {
+            aiSessions[serverId] = []
+        }
+        aiSessions[serverId]?.insert(session, at: 0)
+        activeAISessionId[tabId] = session.id
+        saveAISessions(serverId: serverId)
+        return session
+    }
+
+    func currentSessionTitle() -> String {
+        currentSession?.title ?? ""
+    }
+
+    func loadAISessions(serverId: String) {
+        guard let data = UserDefaults.standard.data(forKey: "aiSessions_\(serverId)") else { return }
+        do {
+            aiSessions[serverId] = try JSONDecoder().decode([AISession].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load AI sessions for \(serverId): \(error)")
+        }
+    }
+
+    func saveAISessions(serverId: String) {
+        guard let sessions = aiSessions[serverId] else { return }
+        do {
+            let data = try JSONEncoder().encode(sessions)
+            UserDefaults.standard.set(data, forKey: "aiSessions_\(serverId)")
+        } catch {
+            print("[Orbit] Failed to save AI sessions for \(serverId): \(error)")
+        }
+    }
+
+    func loadAIPanelWidth() {
+        let w = UserDefaults.standard.double(forKey: "aiPanelWidth")
+        if w >= 160 && w <= 600 { aiPanelWidth = w }
+    }
+
+    func saveAIPanelWidth(_ width: CGFloat) {
+        UserDefaults.standard.set(Double(width), forKey: "aiPanelWidth")
+    }
+
+    // MARK: - Slash Commands
+
+    enum SlashCommandResult {
+        case handled(String)
+        case switchSession(String)
+        case ignore
+    }
+
+    func handleSlashCommand(_ input: String) -> SlashCommandResult {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+
+        if trimmed == "/new" { return createNewSession() }
+        if trimmed == "/sessions" { return listSessions() }
+        if trimmed == "/compact" { return compactCurrentSession() }
+
+        if trimmed.hasPrefix("/load ") {
+            let sessionId = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            return loadSession(sessionId: sessionId)
+        }
+
+        return .ignore
+    }
+
+    private func createNewSession() -> SlashCommandResult {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        saveAISessions(serverId: serverId)
+
+        let session = AISession.create(serverId: serverId)
+        if aiSessions[serverId] == nil { aiSessions[serverId] = [] }
+        aiSessions[serverId]?.insert(session, at: 0)
+        activeAISessionId[tabId] = session.id
+        saveAISessions(serverId: serverId)
+        return .handled("已创建新会话")
+    }
+
+    private func listSessions() -> SlashCommandResult {
+        let serverId = currentServerId
+        loadAISessions(serverId: serverId)
+        let sessions = aiSessions[serverId] ?? []
+        if sessions.isEmpty { return .handled("当前没有历史会话") }
+        let df = aiDateFormatter
+        var lines = ["📋 **历史会话** (点击加载, 或用 `/load <id>`):"]
+        for s in sessions {
+            let dateStr = df.string(from: s.updatedAt)
+            let title = s.title.isEmpty ? "（空会话）" : s.title
+            let marker = activeAISessionId[currentActiveTabId] == s.id ? " ●" : ""
+            lines.append("- `\(s.id.prefix(8))` \(title) (\(s.messages.count) 条消息, \(dateStr))\(marker)")
+        }
+        return .handled(lines.joined(separator: "\n"))
+    }
+
+    private func loadSession(sessionId: String) -> SlashCommandResult {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessions = aiSessions[serverId] else {
+            return .handled("无法加载 session")
+        }
+        let match = sessions.first(where: { $0.id.hasPrefix(sessionId) })
+        guard let session = match else {
+            return .handled("未找到 session: \(sessionId)")
+        }
+        activeAISessionId[tabId] = session.id
+        return .switchSession(session.id)
+    }
+
+    private func compactCurrentSession() -> SlashCommandResult {
+        let serverId = currentServerId
+        let tabId = currentActiveTabId
+        guard let sessionId = activeAISessionId[tabId],
+              var sessions = aiSessions[serverId],
+              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else {
+            return .handled("无法压缩：无活跃会话")
+        }
+        let msgs = sessions[idx].messages
+        guard msgs.count >= 4 else {
+            return .handled("消息太少，无需压缩")
+        }
+
+        let splitIdx = max(1, Int(Double(msgs.count) * 0.7))
+        let toCompress = Array(msgs[0..<splitIdx])
+        let toKeep = Array(msgs[splitIdx...])
+
+        let summaryContent = "[上下文摘要] 前 \(toCompress.count) 条消息已压缩。"
+        let summaryMsg = AIChatMessage(
+            id: UUID().uuidString, role: "system",
+            content: summaryContent, timestamp: Date())
+
+        sessions[idx].messages = [summaryMsg] + toKeep
+        sessions[idx].updatedAt = Date()
+        aiSessions[serverId] = sessions
+        saveAISessions(serverId: serverId)
+
+        return .handled("已压缩上下文：将前 \(toCompress.count) 条消息替换为摘要，保留 \(toKeep.count) 条")
+    }
+
+    private var aiDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
+
+    // MARK: - Command Safety Whitelist
+
+    struct CommandSafety {
+        static let safePrefixes: [String] = [
+            "ls ", "cat ", "head ", "tail ", "less ", "file ", "stat ", "du ",
+            "grep ", "awk ", "sed -n", "wc ", "sort ", "uniq ", "cut ", "tr ",
+            "ps ", "top -bn", "htop -n", "free ", "df ", "uptime", "uname", "hostname", "whoami", "id ",
+            "ping -c", "curl -I", "wget --spider", "ss -tlnp", "ss -tuln",
+            "netstat ", "ip addr show", "ip a ", "nslookup ", "dig ",
+            "systemctl status", "journalctl ", "service ", "pgrep ", "pidof ",
+            "lsof -p", "dmesg", "last ", "lastlog",
+            "echo ", "printf ", "pwd", "env ", "printenv", "which ", "whereis", "type ",
+            "find ", "locate ", "dpkg -l", "rpm -q", "pip list",
+            "docker ps", "docker images", "docker inspect", "docker logs",
+        ]
+
+        static let dangerousPatterns: [String] = [
+            "rm ", "mv ", "cp ", "chmod ", "chown ",
+            "kill ", "pkill", "killall",
+            "systemctl start", "systemctl stop", "systemctl restart",
+            "systemctl enable", "systemctl disable", "systemctl mask",
+            "apt install", "apt remove", "apt purge", "apt-get",
+            "yum install", "yum remove", "dnf install", "dnf remove",
+            "brew install", "brew uninstall", "pip install", "pip uninstall",
+            "npm install -g", "npm uninstall -g",
+            "dd ", "mkfs", "fdisk", "parted",
+            "shutdown", "reboot", "halt", "poweroff",
+            "> ", ">>",
+        ]
+
+        static func isSafe(command: String) -> Bool {
+            let trimmed = command.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return false }
+
+            for pattern in dangerousPatterns {
+                if trimmed.lowercased().contains(pattern.lowercased()) {
+                    return false
+                }
+            }
+
+            if trimmed.lowercased().contains("sudo") { return false }
+
+            for prefix in safePrefixes {
+                if trimmed.lowercased().hasPrefix(prefix.lowercased()) {
+                    return true
+                }
+            }
+
+            return false
+        }
+    }
+
+    // MARK: - Asset Tree & Recent Servers
+
+    func loadAssetTreeWidth() {
+        let w = UserDefaults.standard.double(forKey: "assetTreeWidth")
+        if w >= 160 && w <= 350 { assetTreeWidth = w }
+    }
+
+    func saveAssetTreeWidth(_ width: CGFloat) {
+        UserDefaults.standard.set(Double(width), forKey: "assetTreeWidth")
+    }
+
+    func loadRecentServers() {
+        guard let data = UserDefaults.standard.data(forKey: "recentServers") else { return }
+        do {
+            recentServers = try JSONDecoder().decode([String].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load recent servers: \(error)")
+        }
+    }
+
+    func saveRecentServers() {
+        do {
+            let data = try JSONEncoder().encode(recentServers)
+            UserDefaults.standard.set(data, forKey: "recentServers")
+        } catch {
+            print("[Orbit] Failed to save recent servers: \(error)")
+        }
+    }
+
+    func trackRecentServer(_ serverId: String) {
+        recentServers.removeAll { $0 == serverId }
+        recentServers.insert(serverId, at: 0)
+        if recentServers.count > 6 { recentServers = Array(recentServers.prefix(6)) }
+        saveRecentServers()
+    }
+
+    func updateServerGroupName(oldName: String, newName: String) {
+        let targets = servers.filter { ($0.group_name.isEmpty ? "默认" : $0.group_name) == oldName }
+        for server in targets {
+            let input = ServerInput(
+                name: server.name,
+                host: server.host,
+                port: server.port,
+                group_name: newName,
+                auth_type: server.auth_type,
+                username: server.username,
+                password: server.password,
+                private_key: server.private_key,
+                key_source: server.key_source,
+                key_file_path: server.key_file_path,
+                key_passphrase: server.key_passphrase,
+                credential_group_id: server.credential_group_id,
+                jump_server_id: server.jump_server_id
+            )
+            updateServer(id: server.id, input: input)
+        }
     }
 }

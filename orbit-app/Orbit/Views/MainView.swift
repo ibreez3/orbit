@@ -2,15 +2,17 @@ import SwiftUI
 
 struct MainView: View {
     @StateObject private var appState = AppState()
+    @State private var batchExecutionVisible: Bool = false
 
     var body: some View {
-        ZStack {
+        let base = ZStack {
             mainLayout
             spotlightOverlay
             quitConfirmationOverlay
         }
         .frame(minWidth: 900, minHeight: 600)
         .environmentObject(appState)
+        .environmentObject(appState.sftpDrawer)
         .sheet(isPresented: Binding(
             get: { appState.dialogOpen },
             set: { if !$0 { appState.closeDialog() } }
@@ -25,96 +27,88 @@ struct MainView: View {
             CredentialGroupDialog()
                 .environmentObject(appState)
         }
+        .sheet(isPresented: Binding(
+            get: { batchExecutionVisible },
+            set: { batchExecutionVisible = $0 }
+        )) {
+            BatchExecutionView()
+                .environmentObject(appState)
+        }
         .modifier(AlertModifier(appState: appState))
         .onAppear {
-            // Ensure bridge is initialized and data loaded
-            if appState.servers.isEmpty {
-                appState.loadServers()
-            }
-            if appState.credentialGroups.isEmpty {
-                appState.loadCredentialGroups()
-            }
+            if appState.servers.isEmpty { appState.loadServers() }
+            if appState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .newTerminal)) { _ in
-            appState.openSpotlight()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSpotlight)) { _ in
-            appState.openSpotlight()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .splitHorizontal)) { _ in
-            appState.splitCurrentPane(direction: .horizontal)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .splitVertical)) { _ in
-            appState.splitCurrentPane(direction: .vertical)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .closePane)) { _ in
-            appState.closeCurrentPane()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigatePrevPane)) { _ in
-            appState.navigatePane(forward: false)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateNextPane)) { _ in
-            appState.navigatePane(forward: true)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateLeftPane)) { _ in
-            appState.navigatePane(forward: false)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateRightPane)) { _ in
-            appState.navigatePane(forward: true)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .growPane)) { _ in
-            appState.resizePane(grow: true)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .shrinkPane)) { _ in
-            appState.resizePane(grow: false)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSftpDrawer)) { _ in
-            if let activeId = appState.activeTabId,
-               let tab = appState.tabs.first(where: { $0.id == activeId }),
-               tab.type == .terminal {
-                appState.toggleSftpDrawer(for: activeId)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .clearScreen)) { _ in
-            if let activeId = appState.activeTabId,
-               let tab = appState.tabs.first(where: { $0.id == activeId }),
-               let sid = tab.sessionId ?? tab.focusedChannelId,
-               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
-                let term = tv.getTerminal()
-                term.buffer.clear()
-                tv.setNeedsDisplay(tv.bounds)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .findInTerminal)) { _ in
-            if let activeId = appState.activeTabId,
-               let tab = appState.tabs.first(where: { $0.id == activeId }),
-               let sid = tab.sessionId ?? tab.focusedChannelId,
-               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
-                tv.performFindPanelAction(NSTextFinder.Action.showFindInterface.rawValue)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            if let existing = appState.tabs.first(where: { $0.type == .settings }) {
-                appState.activeTabId = existing.id
-            } else {
-                appState.addTab(server: Server.placeholder, type: .settings)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .reconnectSession)) { _ in
-            if let activeId = appState.activeTabId,
-               let tab = appState.tabs.first(where: { $0.id == activeId }),
-               tab.type == .terminal {
-                appState.reconnectTab(activeId)
-            }
-        }
+
+        return base
+            .onReceive(nc(.newTerminal)) { _ in appState.openSpotlight() }
+            .onReceive(nc(.openSpotlight)) { _ in appState.openSpotlight() }
+            .onReceive(nc(.splitHorizontal)) { _ in appState.splitCurrentPane(direction: .horizontal) }
+            .onReceive(nc(.splitVertical)) { _ in appState.splitCurrentPane(direction: .vertical) }
+            .onReceive(nc(.closePane)) { _ in appState.closeCurrentPane() }
+            .onReceive(nc(.navigatePrevPane)) { _ in appState.navigatePane(forward: false) }
+            .onReceive(nc(.navigateNextPane)) { _ in appState.navigatePane(forward: true) }
+            .onReceive(nc(.growPane)) { _ in appState.resizePane(grow: true) }
+            .onReceive(nc(.shrinkPane)) { _ in appState.resizePane(grow: false) }
+            .modifier(SftpDrawerModifier(appState: appState))
+            .modifier(ClearScreenModifier(appState: appState))
+            .modifier(FindInTerminalModifier(appState: appState))
+            .modifier(ReconnectModifier(appState: appState))
+            .onReceive(nc(.openSettings)) { _ in SettingsWindowController.shared.open(with: appState) }
+            .onReceive(nc(.toggleAIPanel)) { _ in appState.toggleAIPanel() }
+            .onReceive(nc(.openBatchExecution)) { _ in batchExecutionVisible = true }
+    }
+
+    private func nc(_ name: Notification.Name) -> NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: name)
     }
 
     private var mainLayout: some View {
-        VStack(spacing: 0) {
-            TabBarView()
-            contentArea
-            sftpDrawer
-            StatusBarView()
+        HStack(spacing: 0) {
+            // Asset tree (left, always visible)
+            AssetTreeView()
+                .environmentObject(appState)
+                .frame(width: appState.assetTreeWidth)
+
+            // Resize handle
+            Rectangle()
+                .fill(Color.primary.opacity(0.0))
+                .frame(width: 5)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeLeftRight.set()
+                    } else {
+                        NSCursor.arrow.set()
+                    }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let newWidth = appState.assetTreeWidth + value.translation.width
+                            appState.assetTreeWidth = min(350, max(160, newWidth))
+                        }
+                        .onEnded { _ in
+                            appState.saveAssetTreeWidth(appState.assetTreeWidth)
+                        }
+                )
+
+            Divider()
+
+            // Main content
+            VStack(spacing: 0) {
+                TabBarView()
+                contentArea
+                sftpDrawer
+                StatusBarView()
+            }
+
+            // AI panel (right)
+            if appState.aiPanelOpen {
+                Divider()
+                AIChatView()
+                    .environmentObject(appState)
+            }
         }
         .background(themeWindowColor)
         .preferredColorScheme(themeColorScheme)
@@ -150,8 +144,15 @@ struct MainView: View {
     private func tabContent(_ tab: TabItem) -> some View {
         switch tab.type {
         case .terminal:
-            TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id)
-                .id(tab.id)
+            ZStack(alignment: .bottomTrailing) {
+                TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id)
+                    .id(tab.id)
+                if appState.activeTabError != nil, tab.id == appState.activeTabId {
+                    AIErrorBanner(errorText: appState.activeTabError!)
+                        .environmentObject(appState)
+                        .padding(12)
+                }
+            }
         case .sftp:
             SftpView(tab: tab)
                 .id(tab.id)
@@ -161,14 +162,12 @@ struct MainView: View {
         case .database:
             DatabaseView(tab: tab)
                 .id(tab.id)
-        case .settings:
-            SettingsView()
         }
     }
 
     @ViewBuilder
     private var sftpDrawer: some View {
-        if let drawerTabId = appState.sftpDrawerTabId,
+        if let drawerTabId = appState.sftpDrawer.tabId,
            let tab = appState.tabs.first(where: { $0.id == drawerTabId }) {
             SftpDrawerView(tab: tab)
         }
@@ -238,6 +237,62 @@ struct MainView: View {
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
+            }
+        }
+    }
+}
+
+private struct SftpDrawerModifier: ViewModifier {
+    let appState: AppState
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .toggleSftpDrawer)) { _ in
+            if let activeId = appState.activeTabId,
+               let tab = appState.tabs.first(where: { $0.id == activeId }),
+               tab.type == .terminal {
+                appState.sftpDrawer.toggle(for: activeId)
+            }
+        }
+    }
+}
+
+private struct ClearScreenModifier: ViewModifier {
+    let appState: AppState
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .clearScreen)) { _ in
+            if let activeId = appState.activeTabId,
+               let tab = appState.tabs.first(where: { $0.id == activeId }),
+               let sid = tab.sessionId ?? tab.focusedChannelId,
+               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+                let term = tv.getTerminal()
+                term.buffer.clear()
+                tv.setNeedsDisplay(tv.bounds)
+            }
+        }
+    }
+}
+
+private struct FindInTerminalModifier: ViewModifier {
+    let appState: AppState
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .findInTerminal)) { _ in
+            if let activeId = appState.activeTabId,
+               let tab = appState.tabs.first(where: { $0.id == activeId }),
+               let sid = tab.sessionId ?? tab.focusedChannelId,
+               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+                tv.performFindPanelAction(NSTextFinder.Action.showFindInterface.rawValue)
+            }
+        }
+    }
+}
+
+private struct ReconnectModifier: ViewModifier {
+    let appState: AppState
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .reconnectSession)) { _ in
+            if let activeId = appState.activeTabId,
+               let tab = appState.tabs.first(where: { $0.id == activeId }),
+               tab.type == .terminal {
+                appState.reconnectTab(activeId)
             }
         }
     }

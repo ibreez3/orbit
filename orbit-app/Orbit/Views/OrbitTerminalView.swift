@@ -43,18 +43,62 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         }
     }
 
+    // MARK: - Keyboard & Mouse event monitors
+
+    private var keyMonitor: Any?
+    private var mouseMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self = self,
+                      self.window?.firstResponder == self else { return event }
+                if event.modifierFlags.contains(.command) {
+                    let chars = event.charactersIgnoringModifiers
+                    if chars == "c", self.selectionActive {
+                        self.copy(self)
+                        return nil
+                    }
+                    if chars == "a" {
+                        self.perform(#selector(NSResponder.selectAll(_:)), with: nil)
+                        return nil
+                    }
+                }
+                return event
+            }
+            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+                guard let self = self,
+                      self.window?.firstResponder == self,
+                      UserDefaults.standard.bool(forKey: "selectToCopy"),
+                      self.selectionActive else { return event }
+                self.copy(self)
+                return event
+            }
+        } else {
+            if let m = keyMonitor { NSEvent.removeMonitor(m) }
+            if let m = mouseMonitor { NSEvent.removeMonitor(m) }
+            keyMonitor = nil
+            mouseMonitor = nil
+        }
+    }
+
     // MARK: - Right-click context menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
 
-        menu.addItem(withTitle: "复制", action: #selector(copy(_:)), keyEquivalent: "c")
+        let copyItem = NSMenuItem(title: "复制", action: #selector(copy(_:)), keyEquivalent: "c")
+        copyItem.isEnabled = selectionActive
+        menu.addItem(copyItem)
+
         menu.addItem(withTitle: "粘贴", action: #selector(paste(_:)), keyEquivalent: "v")
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "全选", action: #selector(selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(withTitle: "全选", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(withTitle: "清屏", action: #selector(clearScreen(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "搜索", action: #selector(searchTerminal(_:)), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "插入命令片段...", action: #selector(openSnippetPicker(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "打开 SFTP", action: #selector(openSftpDrawer(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "重新连接", action: #selector(reconnectSession(_:)), keyEquivalent: "")
 
@@ -121,5 +165,9 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     @objc private func reconnectSession(_ sender: Any) {
         guard let tid = tabId, let state = appState else { return }
         state.reconnectTab(tid)
+    }
+
+    @objc private func openSnippetPicker(_ sender: Any) {
+        NotificationCenter.default.post(name: .openSnippetPicker, object: nil)
     }
 }
