@@ -322,8 +322,11 @@ impl SshManager {
             }
         }
         for (_, mut shared) in self.sessions.drain() {
-            for (_, ch) in shared.channels.drain() {
+            for (_, mut ch) in shared.channels.drain() {
                 ch.running.store(false, Ordering::Relaxed);
+                if let Some(h) = ch.reader_handle.take() {
+                    let _ = h.join();
+                }
             }
             let _ = shared.guard.session.set_blocking(true);
             let _ = shared.guard.session.disconnect(None, "bye", None);
