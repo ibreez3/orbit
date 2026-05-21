@@ -42,42 +42,54 @@ struct TabBarView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(.ultraThinMaterial)
-        .popover(item: $pendingCloseTab, arrowEdge: .top) { tab in
-            VStack(spacing: 16) {
-                Image(systemName: "xmark.circle")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.orange)
+        .overlay {
+            if let tab = pendingCloseTab {
+                ZStack {
+                    Color.black.opacity(0.2)
+                        .ignoresSafeArea()
+                        .onTapGesture { pendingCloseTab = nil }
 
-                Text("关闭终端")
-                    .font(.system(size: 14, weight: .semibold))
+                    VStack(spacing: 16) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.orange)
 
-                Text("\"\(tab.title)\" 的连接将被断开。")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                        Text("关闭终端")
+                            .font(.system(size: 14, weight: .semibold))
 
-                HStack(spacing: 12) {
-                    Button("取消") { pendingCloseTab = nil }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(Color.primary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text("\"\(tab.title)\" 的连接将被断开。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
 
-                    Button("关闭") {
-                        appState.removeTab(tab.id)
-                        pendingCloseTab = nil
+                        HStack(spacing: 12) {
+                            Button("取消") { pendingCloseTab = nil }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 6)
+                                .background(Color.primary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                            Button("关闭") {
+                                appState.removeTab(tab.id)
+                                pendingCloseTab = nil
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.85))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(Color.orange.opacity(0.85))
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .padding(20)
+                    .frame(width: 260)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(20)
-            .frame(width: 260)
         }
     }
 

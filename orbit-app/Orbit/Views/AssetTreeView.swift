@@ -365,6 +365,7 @@ private struct ServerNodeRow: View {
     let server: Server
     var indent: CGFloat = 12
     @EnvironmentObject var appState: AppState
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -387,8 +388,15 @@ private struct ServerNodeRow: View {
         .padding(.leading, indent)
         .padding(.trailing, 12)
         .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovered ? Color.primary.opacity(0.06) : Color.clear)
+        )
         .contentShape(Rectangle())
-        .onTapGesture {
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .onTapGesture(count: 2) {
             appState.addTab(server: server, type: .terminal)
             appState.trackRecentServer(server.id)
         }

@@ -237,7 +237,7 @@ class AppState: ObservableObject {
         Task {
             let newChannelId: String
             do {
-                newChannelId = try bridge.spawnChannel(existingSessionId: existingChannelId)
+                newChannelId = try await bridge.spawnChannelAsync(existingSessionId: existingChannelId)
             } catch {
                 await MainActor.run {
                     alertTitle = "分屏失败"
@@ -347,7 +347,11 @@ class AppState: ObservableObject {
             bridge.sshDataHandlers.removeValue(forKey: channelId)
             bridge.sshClosedHandlers.removeValue(forKey: channelId)
             bridge.terminalViewCache.removeValue(forKey: channelId)
-            Task { try? bridge.disconnectSSH(sessionId: channelId) }
+        }
+        Task.detached {
+            for channelId in channelIds {
+                try? self.bridge.disconnectSSH(sessionId: channelId)
+            }
         }
     }
 
@@ -392,7 +396,7 @@ class AppState: ObservableObject {
     func connectSSH(tabId: String, serverId: String) {
         Task {
             do {
-                let sessionId = try bridge.connectSSH(serverId: serverId)
+                let sessionId = try await bridge.connectSSHAsync(serverId: serverId)
                 await MainActor.run { updateTabSessionId(tabId, sessionId: sessionId) }
             } catch {
                 await MainActor.run {
@@ -631,7 +635,7 @@ class AppState: ObservableObject {
         }
     }
 
-    func addMessageToCurrentSession(_ message: AIChatMessage) {
+    func addMessageToCurrentSession(_ message: AIChatMessage, shouldSave: Bool = true) {
         let serverId = currentServerId
         let tabId = currentActiveTabId
 
@@ -648,33 +652,9 @@ class AppState: ObservableObject {
         if let idx = aiSessions[serverId]?.firstIndex(where: { $0.id == session.id }) {
             aiSessions[serverId]?[idx] = session
         }
-        saveAISessions(serverId: serverId)
-    }
-
-    func appendToCurrentAssistantMessage(text: String) {
-        let serverId = currentServerId
-        let tabId = currentActiveTabId
-        guard let sessionId = activeAISessionId[tabId],
-              var sessions = aiSessions[serverId],
-              let idx = sessions.firstIndex(where: { $0.id == sessionId }) else {
-            // No session yet — create one
-            let _ = ensureSession(tabId: tabId, serverId: serverId)
-            appendToCurrentAssistantMessage(text: text)
-            return
+        if shouldSave {
+            saveAISessions(serverId: serverId)
         }
-
-        var session = sessions[idx]
-        if var last = session.messages.last, last.role == "assistant" {
-            last.content += text
-            session.messages[session.messages.count - 1] = last
-        } else {
-            let msg = AIChatMessage(id: UUID().uuidString, role: "assistant", content: text, timestamp: Date())
-            session.messages.append(msg)
-        }
-        session.updatedAt = Date()
-        sessions[idx] = session
-        aiSessions[serverId] = sessions
-        // Persistence deferred — saved on next user message or explicit flush
     }
 
     func clearCurrentSessionMessages() {
@@ -717,7 +697,7 @@ class AppState: ObservableObject {
         for serverId in serverIds {
             Task {
                 do {
-                    let sessionId = try bridge.connectSSH(serverId: serverId)
+                    let sessionId = try await bridge.connectSSHAsync(serverId: serverId)
                     try bridge.writeSSH(sessionId: sessionId, data: Data((command + "\r").utf8))
                 } catch {
                     print("[Orbit] Batch exec to \(serverId) failed: \(error)")

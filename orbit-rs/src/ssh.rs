@@ -21,7 +21,7 @@ pub struct TrafficStats {
 pub type DataCallback = Box<dyn Fn(&str, &[u8]) + Send + Sync>;
 pub type ClosedCallback = Box<dyn Fn(&str) + Send + Sync>;
 
-struct ActiveChannel {
+pub(crate) struct ActiveChannel {
     channel: Arc<std::sync::Mutex<ssh2::Channel>>,
     running: Arc<AtomicBool>,
     reader_handle: Option<std::thread::JoinHandle<()>>,
@@ -35,7 +35,7 @@ struct SharedSession {
     session_lock: Arc<std::sync::Mutex<()>>,
 }
 
-fn spawn_channel_reader(
+pub(crate) fn spawn_channel_reader(
     channel_id: &str,
     channel: ssh2::Channel,
     data_cb: DataCallback,
@@ -109,6 +109,23 @@ pub struct SshManager {
 }
 
 impl SshManager {
+pub fn register_session(
+        &mut self,
+        session_id: &str,
+        guard: transport::SessionGuard,
+        active_channel: ActiveChannel,
+        session_lock: Arc<std::sync::Mutex<()>>,
+    ) {
+        self.sessions.insert(
+            session_id.to_string(),
+            SharedSession {
+                guard,
+                channels: [(session_id.to_string(), active_channel)].into_iter().collect(),
+                session_lock,
+            },
+        );
+    }
+
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),

@@ -200,6 +200,27 @@ class OrbitBridge {
 
     // MARK: - SSH
 
+    private func runOffThread<T>(_ block: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let result = try block()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func connectSSHAsync(serverId: String) async throws -> String {
+        try await runOffThread { try self.connectSSH(serverId: serverId) }
+    }
+
+    func spawnChannelAsync(existingSessionId: String) async throws -> String {
+        try await runOffThread { try self.spawnChannel(existingSessionId: existingSessionId) }
+    }
+
     func connectSSH(serverId: String) throws -> String {
         try ensureInitialized()
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
@@ -387,6 +408,10 @@ class OrbitBridge {
 
     // MARK: - Monitor
 
+    func getServerStatsAsync(serverId: String) async throws -> ServerStats {
+        try await runOffThread { try self.getServerStats(serverId: serverId) }
+    }
+
     func getServerStats(serverId: String) throws -> ServerStats {
         try ensureInitialized()
         var outJson: UnsafeMutablePointer<CChar>?
@@ -411,6 +436,10 @@ class OrbitBridge {
         }
         defer { orbit_free_string(home) }
         return String(cString: home)
+    }
+
+    func getServerProcessesAsync(serverId: String) async throws -> [ServerProcess] {
+        try await runOffThread { try self.getServerProcesses(serverId: serverId) }
     }
 
     func getServerProcesses(serverId: String) throws -> [ServerProcess] {

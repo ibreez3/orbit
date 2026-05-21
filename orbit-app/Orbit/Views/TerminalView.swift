@@ -361,7 +361,7 @@ struct TerminalView: NSViewRepresentable {
             let closedHandler = makeClosedHandler()
             Task {
                 do {
-                    let sid = try OrbitBridge.shared.connectSSH(serverId: serverId)
+                    let sid = try await OrbitBridge.shared.connectSSHAsync(serverId: serverId)
                     guard alive else { return }
                     sessionId = sid
                     OrbitBridge.shared.handlersLock.lock()

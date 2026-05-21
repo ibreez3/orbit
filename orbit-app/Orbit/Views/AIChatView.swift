@@ -129,6 +129,12 @@ struct AIChatView: View {
                                 MessageBubble(message: message)
                             }
 
+                            if !service.streamingText.isEmpty {
+                                MessageBubble(message: AIChatMessage(
+                                    id: "_streaming", role: "assistant",
+                                    content: service.streamingText, timestamp: Date()))
+                            }
+
                             // Pending command confirmation
                             if let pending = appState.aiPendingConfirmation {
                                 PendingCommandView(
@@ -268,20 +274,33 @@ struct AIChatView: View {
         let hasActiveSSH = getActiveSSHSessionId() != nil
         let systemPrompt = buildSystemPrompt(context: context, agentMode: hasActiveSSH)
 
+        service.streamingText = ""
         service.runAgent(
             messages: appState.currentMessages,
             systemPrompt: systemPrompt,
             config: appState.aiConfig,
             onToken: { token in
-                self.appState.appendToCurrentAssistantMessage(text: token)
+                self.service.streamingText += token
             },
             onCommands: { commands in
-                // Execute commands sequentially, then re-enter loop
+                // Commit streaming text before executing commands
+                if !self.service.streamingText.isEmpty {
+                    self.appState.addMessageToCurrentSession(AIChatMessage(
+                        id: UUID().uuidString, role: "assistant",
+                        content: self.service.streamingText, timestamp: Date()))
+                    self.service.streamingText = ""
+                }
                 self.executeCommandsAndContinue(commands: commands)
             },
             onComplete: { result in
                 switch result {
                 case .success(let content):
+                    if !self.service.streamingText.isEmpty {
+                        self.appState.addMessageToCurrentSession(AIChatMessage(
+                            id: UUID().uuidString, role: "assistant",
+                            content: self.service.streamingText, timestamp: Date()))
+                        self.service.streamingText = ""
+                    }
                     if !content.isEmpty, let cmd = self.extractCommand(from: content) {
                         let cmdMsg = AIChatMessage(
                             id: UUID().uuidString, role: "system",
@@ -289,9 +308,14 @@ struct AIChatView: View {
                             timestamp: Date())
                         self.appState.addMessageToCurrentSession(cmdMsg)
                     }
-                    // Persist accumulated assistant message tokens
                     self.appState.saveAISessions(serverId: self.appState.currentServerId)
                 case .failure(let error):
+                    if !self.service.streamingText.isEmpty {
+                        self.appState.addMessageToCurrentSession(AIChatMessage(
+                            id: UUID().uuidString, role: "assistant",
+                            content: self.service.streamingText, timestamp: Date()))
+                        self.service.streamingText = ""
+                    }
                     let errorMsg = AIChatMessage(
                         id: UUID().uuidString, role: "system",
                         content: "错误: \(error.localizedDescription)",
@@ -360,7 +384,7 @@ struct AIChatView: View {
                 id: UUID().uuidString, role: "system",
                 content: "[命令结果] `\(command)`\nexit=\(exitCode)\n```\n\(output.prefix(2000))\n```",
                 timestamp: Date())
-            self.appState.addMessageToCurrentSession(resultMsg)
+            self.appState.addMessageToCurrentSession(resultMsg, shouldSave: false)
             onDone()
         }
     }

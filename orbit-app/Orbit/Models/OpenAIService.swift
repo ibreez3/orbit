@@ -2,6 +2,7 @@ import Foundation
 
 class OpenAIService: ObservableObject {
     @Published var isLoading = false
+    @Published var streamingText: String = ""
 
     private var streamTask: Task<Void, Never>?
 
@@ -31,6 +32,7 @@ class OpenAIService: ObservableObject {
         onCommands: @escaping ([String]) -> Void,
         onComplete: @escaping (Result<String, Error>) -> Void
     ) {
+        cancelAgent()
         isLoading = true
 
         agentTask = Task { @MainActor [weak self] in

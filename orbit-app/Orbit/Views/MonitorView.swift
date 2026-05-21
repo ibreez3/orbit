@@ -541,7 +541,7 @@ class MonitorState: ObservableObject {
 
     private func fetchStats(serverId: String, bridge: OrbitBridge) async -> StatsResult? {
         do {
-            let result = try bridge.getServerStats(serverId: serverId)
+            let result = try await bridge.getServerStatsAsync(serverId: serverId)
             return StatsResult(stats: result, error: nil)
         } catch {
             return StatsResult(stats: stats ?? ServerStats(cpu_usage: 0, mem_total_mb: 0, mem_used_mb: 0, mem_percent: 0, disk_total: "", disk_used: "", disk_percent: 0, uptime: "", load_avg: ""), error: "获取监控数据失败: \(error.localizedDescription)")
@@ -550,7 +550,7 @@ class MonitorState: ObservableObject {
 
     private func fetchProcesses(serverId: String, bridge: OrbitBridge) async -> ProcessesResult? {
         do {
-            let result = try bridge.getServerProcesses(serverId: serverId)
+            let result = try await bridge.getServerProcessesAsync(serverId: serverId)
             return ProcessesResult(processes: result, error: nil)
         } catch {
             return ProcessesResult(processes: [], error: "获取进程列表失败: \(error.localizedDescription)")

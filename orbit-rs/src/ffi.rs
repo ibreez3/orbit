@@ -246,18 +246,48 @@ pub extern "C" fn orbit_connect_ssh(
         closed_cb(c_sid.as_ptr(), ud as *mut c_void);
     });
 
+    // Slow: TCP + SSH handshake — done WITHOUT holding the lock
+    let guard = match crate::transport::create_session(&server, &app.db) {
+        Ok(g) => g,
+        Err(_) => return -5,
+    };
+
+    let mut channel: ssh2::Channel = match guard.session.channel_session() {
+        Ok(ch) => ch,
+        Err(_) => return -6,
+    };
+    let _ = channel.setenv("LANG", "en_US.UTF-8");
+    let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
+    if channel.request_pty("xterm-256color", None, None).is_err() {
+        return -7;
+    }
+    if channel.shell().is_err() {
+        return -8;
+    }
+    guard.session.set_blocking(false);
+
+    let session_lock = std::sync::Arc::new(std::sync::Mutex::new(()));
+    let active_channel = match ssh::spawn_channel_reader(
+        &session_id, channel, data_cb, closed_cb, session_lock.clone(),
+    ) {
+        Ok(ac) => ac,
+        Err(_) => return -9,
+    };
+
+    // Fast: only lock briefly to insert the session
     let mut mgr = match app.ssh.lock() {
         Ok(m) => m,
         Err(_) => return -4,
     };
-    match mgr.connect(&session_id, &server, &app.db, data_cb, closed_cb) {
-        Ok(_) => {
-            let c_id = CString::new(sid_for_cb).unwrap_or_default();
-            unsafe { *out_session_id = c_id.into_raw() };
-            0
-        }
-        Err(_) => -5,
-    }
+    mgr.register_session(
+        &session_id,
+        guard,
+        active_channel,
+        session_lock,
+    );
+    let c_id = CString::new(sid_for_cb).unwrap_or_default();
+    unsafe { *out_session_id = c_id.into_raw() };
+    0
 }
 
 #[no_mangle]
