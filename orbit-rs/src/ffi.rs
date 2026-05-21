@@ -230,23 +230,75 @@ pub extern "C" fn orbit_connect_ssh(
     let sid_for_cb = session_id.clone();
     let ud = userdata as usize;
 
-    let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
-        let c_sid = match CString::new(sid) {
-            Ok(s) => s,
-            Err(_) => return,
+    // --- Try to reuse idle connection from pool ---
+    let reused = {
+        let mut mgr = match app.ssh.lock() {
+            Ok(m) => m,
+            Err(_) => return -4,
         };
-        data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
-    });
+        mgr.take_idle_session(sid_str)
+    };
 
-    let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
-        let c_sid = match CString::new(sid) {
-            Ok(s) => s,
-            Err(_) => return,
+    if let Some((guard, session_lock)) = reused {
+        let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
+            let c_sid = match CString::new(sid) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
+        });
+
+        let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
+            let c_sid = match CString::new(sid) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            closed_cb(c_sid.as_ptr(), ud as *mut c_void);
+        });
+
+        let channel_result = {
+            let _lock = match session_lock.lock() {
+                Ok(l) => l,
+                Err(_) => return -6,
+            };
+            guard.session.set_blocking(true);
+            let result: anyhow::Result<ssh2::Channel> = (|| {
+                let mut channel = guard.session.channel_session()?;
+                channel.setenv("LANG", "en_US.UTF-8")?;
+                channel.setenv("LC_ALL", "en_US.UTF-8")?;
+                channel.request_pty("xterm-256color", None, None)?;
+                channel.shell()?;
+                Ok(channel)
+            })();
+            guard.session.set_blocking(false);
+            drop(_lock);
+            result
         };
-        closed_cb(c_sid.as_ptr(), ud as *mut c_void);
-    });
 
-    // Slow: TCP + SSH handshake — done WITHOUT holding the lock
+        match channel_result {
+            Ok(channel) => {
+                match ssh::spawn_channel_reader(&session_id, channel, data_cb, closed_cb, session_lock.clone()) {
+                    Ok(active_channel) => {
+                        let mut mgr = match app.ssh.lock() {
+                            Ok(m) => m,
+                            Err(_) => return -4,
+                        };
+                        mgr.register_session(&session_id, sid_str, guard, active_channel, session_lock);
+                        let c_id = CString::new(sid_for_cb).unwrap_or_default();
+                        unsafe { *out_session_id = c_id.into_raw() };
+                        return 0;
+                    }
+                    Err(_) => {}
+                }
+            }
+            Err(_) => {
+                info!(server_id = sid_str, "空闲连接已失效，创建新连接");
+            }
+        }
+        // Reuse failed — guard dropped, stale connection cleaned up. Fall through.
+    }
+
+    // --- No idle session → create new connection ---
     let guard = match crate::transport::create_session(&server, &app.db) {
         Ok(g) => g,
         Err(_) => return -5,
@@ -266,6 +318,22 @@ pub extern "C" fn orbit_connect_ssh(
     }
     guard.session.set_blocking(false);
 
+    let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
+        let c_sid = match CString::new(sid) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
+    });
+
+    let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
+        let c_sid = match CString::new(sid) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        closed_cb(c_sid.as_ptr(), ud as *mut c_void);
+    });
+
     let session_lock = std::sync::Arc::new(std::sync::Mutex::new(()));
     let active_channel = match ssh::spawn_channel_reader(
         &session_id, channel, data_cb, closed_cb, session_lock.clone(),
@@ -274,17 +342,11 @@ pub extern "C" fn orbit_connect_ssh(
         Err(_) => return -9,
     };
 
-    // Fast: only lock briefly to insert the session
     let mut mgr = match app.ssh.lock() {
         Ok(m) => m,
         Err(_) => return -4,
     };
-    mgr.register_session(
-        &session_id,
-        guard,
-        active_channel,
-        session_lock,
-    );
+    mgr.register_session(&session_id, sid_str, guard, active_channel, session_lock);
     let c_id = CString::new(sid_for_cb).unwrap_or_default();
     unsafe { *out_session_id = c_id.into_raw() };
     0
@@ -793,6 +855,15 @@ pub extern "C" fn orbit_get_server_processes(app: *mut OrbitApp, server_id: *con
             json_to_out(&processes, out_json)
         }
         Err(_) => -4,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_shutdown_pool(app: *mut OrbitApp) {
+    if app.is_null() { return; }
+    let app = unsafe { &*app };
+    if let Ok(mut mgr) = app.ssh.lock() {
+        mgr.shutdown();
     }
 }
 
