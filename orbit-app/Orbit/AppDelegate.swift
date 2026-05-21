@@ -19,6 +19,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        OrbitBridge.shared.shutdownPool()
+    }
+
     deinit {
         if let m = globalMonitor { NSEvent.removeMonitor(m) }
     }

@@ -275,6 +275,11 @@ class OrbitBridge {
         guard rc == 0 else { throw OrbitError.apiError(rc) }
     }
 
+    func shutdownPool() {
+        guard let app = self.app else { return }
+        orbit_shutdown_pool(app)
+    }
+
     func getSSHTraffic(sessionId: String) throws -> (read: UInt64, written: UInt64) {
         try ensureInitialized()
         var bytesRead: UInt64 = 0
