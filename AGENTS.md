@@ -16,7 +16,7 @@ GitHub: https://github.com/ibreez3/orbit
 | 终端 | SwiftTerm | xterm-256color PTY，Metal GPU 渲染 |
 | 图表 | Swift Charts | 资源监控趋势图 |
 | 状态管理 | ObservableObject | SwiftUI 状态管理 |
-| 后端 | Rust (orbit-core) | ssh2 crate 实现 SSH/SFTP，编译为 universal 静态库 |
+| 后端 | Rust (orbit-core) | ssh2 crate 实现 SSH/SFTP，编译为 Apple Silicon 静态库 |
 | FFI | C ABI (cbindgen) | Rust 通过 C 接口暴露给 Swift |
 | 数据库 | SQLite (rusqlite) | bundled 模式，无需系统安装 |
 | 加密 | aes-gcm | AES-256-GCM 凭据加密 |
@@ -27,13 +27,13 @@ GitHub: https://github.com/ibreez3/orbit
 - macOS 13.0+
 - Xcode 15+
 - Rust >= 1.77（通过 rustup 安装）
-- rustup targets: `aarch64-apple-darwin` + `x86_64-apple-darwin`
+- rustup target: `aarch64-apple-darwin`
 - xcodegen（`brew install xcodegen`）
 
 ## 常用命令
 
 ```bash
-# 构建 Rust universal 静态库（首次或修改 Rust 代码后）
+# 构建 Rust Apple Silicon 静态库（首次或修改 Rust 代码后）
 ./scripts/build-rust.sh
 
 # 重新生成 Xcode 工程（添加/删除源文件后、修改 project.yml 后）
@@ -119,7 +119,7 @@ orbit/
 │       └── monitor.rs                # 资源监控脚本 + 输出解析
 │
 ├── scripts/
-│   └── build-rust.sh                 # Rust universal 静态库构建脚本
+│   └── build-rust.sh                 # Rust Apple Silicon 静态库构建脚本
 │
 └── docs/                             # 文档/设计稿
 ```
@@ -141,21 +141,20 @@ Swift invoke OrbitBridge.connectSSH(serverId)
 
 ### 静态库构建与链接
 
-Rust 编译为 universal 静态库（x86_64 + arm64），由 Xcode 直接链接：
+Rust 编译为 Apple Silicon 静态库（arm64），由 Xcode 直接链接：
 
 ```
 build-rust.sh 流程:
   1. cargo build --release --target aarch64-apple-darwin  (arm64)
-  2. cargo build --release --target x86_64-apple-darwin    (x86_64)
-  3. find 查找 C 依赖的 .a 文件 (sqlite3, ssh2, ssl, crypto)
-  4. lipo -create 合并为 universal .a 放入 target/universal-apple-darwin/release/
+  2. find 查找 C 依赖的 .a 文件 (sqlite3, ssh2, ssl, crypto)
+  3. 复制 arm64 静态库放入 target/apple-silicon-apple-darwin/release/
 
 project.yml 通过 OTHER_LDFLAGS 绝对路径链接:
-  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a
-  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a
-  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a
-  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a
-  - $(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a
+  - $(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/liborbit_core.a
+  - $(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libsqlite3.a
+  - $(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libssh2.a
+  - $(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libssl.a
+  - $(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libcrypto.a
   - -lz -liconv -framework Security -framework SystemConfiguration
 ```
 
@@ -246,9 +245,9 @@ NSViewRepresentable 创建 SwiftTerm.TerminalView
 
 ## 常见问题
 
-### 静态库架构不完整
+### 静态库架构不正确
 
-`lipo -info orbit-rs/target/universal-apple-darwin/release/*.a` 检查所有 .a 是否都包含 x86_64 + arm64。如果某个库缺少一个架构，重新运行 `./scripts/build-rust.sh`。
+`lipo -info orbit-rs/target/apple-silicon-apple-darwin/release/*.a` 检查所有 .a 是否为 arm64。如果某个库不是 arm64，重新运行 `./scripts/build-rust.sh`。
 
 ### cargo clean 后构建失败
 

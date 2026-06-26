@@ -283,10 +283,9 @@ class AppState: ObservableObject {
             return
         }
 
-        bridge.sshDataHandlers.removeValue(forKey: focused)
-        bridge.sshClosedHandlers.removeValue(forKey: focused)
+        bridge.removeSSHHandlers(sessionId: focused)
         bridge.terminalViewCache.removeValue(forKey: focused)
-        Task { try? bridge.disconnectSSH(sessionId: focused) }
+        Task { try? await bridge.disconnectSSHAsync(sessionId: focused) }
 
         if let newTree = tree.removing(channelId: focused) {
             if case .leaf(let remaining) = newTree {
@@ -344,8 +343,7 @@ class AppState: ObservableObject {
             channelIds = []
         }
         for channelId in channelIds {
-            bridge.sshDataHandlers.removeValue(forKey: channelId)
-            bridge.sshClosedHandlers.removeValue(forKey: channelId)
+            bridge.removeSSHHandlers(sessionId: channelId)
             bridge.terminalViewCache.removeValue(forKey: channelId)
         }
         Task.detached {
@@ -440,10 +438,9 @@ class AppState: ObservableObject {
         let tab = tabs[tabIdx]
 
         // Clean up handlers and disconnect the dead channel
-        bridge.sshDataHandlers.removeValue(forKey: channelId)
-        bridge.sshClosedHandlers.removeValue(forKey: channelId)
+        bridge.removeSSHHandlers(sessionId: channelId)
         bridge.terminalViewCache.removeValue(forKey: channelId)
-        Task { try? bridge.disconnectSSH(sessionId: channelId) }
+        Task { try? await bridge.disconnectSSHAsync(sessionId: channelId) }
 
         if let tree = tab.paneTree {
             // Split pane: remove this leaf from the tree
@@ -499,8 +496,7 @@ class AppState: ObservableObject {
 
         // Clear old session state
         if let oldSid = tab.sessionId {
-            bridge.sshDataHandlers.removeValue(forKey: oldSid)
-            bridge.sshClosedHandlers.removeValue(forKey: oldSid)
+            bridge.removeSSHHandlers(sessionId: oldSid)
             bridge.terminalViewCache.removeValue(forKey: oldSid)
         }
         tabs[tabIdx].sessionId = nil

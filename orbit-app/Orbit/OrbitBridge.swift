@@ -82,6 +82,20 @@ class OrbitBridge {
         handler?(transferred, total)
     }
 
+    func removeSSHHandlers(sessionId: String) {
+        handlersLock.lock()
+        sshDataHandlers.removeValue(forKey: sessionId)
+        sshClosedHandlers.removeValue(forKey: sessionId)
+        handlersLock.unlock()
+    }
+
+    func setSSHHandlers(sessionId: String, dataHandler: @escaping (Data) -> Void, closedHandler: @escaping () -> Void) {
+        handlersLock.lock()
+        sshDataHandlers[sessionId] = dataHandler
+        sshClosedHandlers[sessionId] = closedHandler
+        handlersLock.unlock()
+    }
+
     // MARK: - Server CRUD
 
     func listServers() throws -> [Server] {
@@ -273,6 +287,10 @@ class OrbitBridge {
             orbit_disconnect_ssh(app, sidPtr)
         }
         guard rc == 0 else { throw OrbitError.apiError(rc) }
+    }
+
+    func disconnectSSHAsync(sessionId: String) async throws {
+        try await runOffThread { try self.disconnectSSH(sessionId: sessionId) }
     }
 
     func shutdownPool() {

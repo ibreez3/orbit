@@ -3,6 +3,117 @@ import SwiftTerm
 import AppKit
 import CoreText
 
+final class TerminalOutputPump {
+    private static let defaultMaxBufferedBytes = 2 * 1024 * 1024
+    private static let defaultChunkBytes = 64 * 1024
+    static let keywordBypassBacklogBytes = 512 * 1024
+
+    private let maxBufferedBytes: Int
+    private let chunkBytes: Int
+    private let frameInterval: TimeInterval
+    private let condition = NSCondition()
+    private let handleChunk: (Data, Int) -> Void
+
+    private var pending = Data()
+    private var scheduled = false
+    private var invalidated = false
+
+    init(
+        maxBufferedBytes: Int = TerminalOutputPump.defaultMaxBufferedBytes,
+        chunkBytes: Int = TerminalOutputPump.defaultChunkBytes,
+        frameInterval: TimeInterval = 1.0 / 120.0,
+        handleChunk: @escaping (Data, Int) -> Void
+    ) {
+        self.maxBufferedBytes = maxBufferedBytes
+        self.chunkBytes = chunkBytes
+        self.frameInterval = frameInterval
+        self.handleChunk = handleChunk
+    }
+
+    func enqueue(_ data: Data) {
+        guard !data.isEmpty else { return }
+
+        condition.lock()
+        if !Thread.isMainThread {
+            let deadline = Date().addingTimeInterval(0.1)
+            while !invalidated && pending.count >= maxBufferedBytes && Date() < deadline {
+                condition.wait(until: min(Date().addingTimeInterval(0.02), deadline))
+            }
+        }
+
+        guard !invalidated else {
+            condition.unlock()
+            return
+        }
+
+        pending.append(data)
+        if !scheduled {
+            scheduled = true
+            DispatchQueue.main.async { [weak self] in
+                self?.drainOnMain()
+            }
+        }
+        condition.unlock()
+    }
+
+    func invalidate() {
+        condition.lock()
+        invalidated = true
+        scheduled = false
+        pending.removeAll(keepingCapacity: false)
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    private func drainOnMain() {
+        condition.lock()
+        guard !invalidated else {
+            scheduled = false
+            condition.broadcast()
+            condition.unlock()
+            return
+        }
+
+        let take = min(pending.count, chunkBytes)
+        let chunk = take > 0 ? Data(pending.prefix(take)) : Data()
+        if take > 0 {
+            pending.removeFirst(take)
+        }
+        let queuedBytes = pending.count
+        condition.broadcast()
+        condition.unlock()
+
+        if !chunk.isEmpty {
+            handleChunk(chunk, queuedBytes)
+        }
+
+        condition.lock()
+        if invalidated || pending.isEmpty {
+            scheduled = false
+            condition.broadcast()
+            condition.unlock()
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + frameInterval) { [weak self] in
+            self?.drainOnMain()
+        }
+        condition.unlock()
+    }
+
+    static func feed(_ data: Data, to terminalView: SwiftTerm.TerminalView) {
+        guard !data.isEmpty else { return }
+        let len = data.count
+        var copy = data
+        copy.withUnsafeMutableBytes { buf in
+            if let base = buf.baseAddress {
+                let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
+                terminalView.feed(byteArray: slice)
+            }
+        }
+    }
+}
+
 // MARK: - Keyword Injection
 
 enum KeywordInjector {
@@ -181,11 +292,7 @@ struct TerminalView: NSViewRepresentable {
         var sessionId: String?
         private var alive = true
         private var localShell: LocalShell?
-
-        // Frame-batched feed: coalesce multiple data chunks into one feed() per run loop
-        private var _batchLock = os_unfair_lock()
-        private var _pending = Data()
-        private var _pendingCount = 0
+        private var outputPump: TerminalOutputPump?
 
         // AI ! prefix question buffer
         private var _aiBuffer = ""
@@ -206,40 +313,25 @@ struct TerminalView: NSViewRepresentable {
 
         deinit {
             alive = false
+            outputPump?.invalidate()
             localShell = nil
         }
 
         private func enqueueData(_ data: Data) {
-            let first: Bool
-            os_unfair_lock_lock(&_batchLock)
-            _pending.append(data)
-            _pendingCount += 1
-            first = (_pendingCount == 1)
-            os_unfair_lock_unlock(&_batchLock)
-            if first {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, self.alive, let tv = self.terminalView else { return }
-                    os_unfair_lock_lock(&self._batchLock)
-                    let batch = self._pending
-                    self._pending = Data()
-                    self._pendingCount = 0
-                    os_unfair_lock_unlock(&self._batchLock)
-                    if batch.isEmpty { return }
-                    // Apply keyword highlighting — inject ANSI color codes
-                    let highlighted = KeywordInjector.highlight(batch, keywords: self.appState.keywordHighlights)
+            if outputPump == nil {
+                outputPump = makeOutputPump()
+            }
+            outputPump?.enqueue(data)
+        }
 
-                    // Scan for error patterns (throttled)
-                    self.scanForErrors(in: highlighted)
-
-                    let len = highlighted.count
-                    var copy = highlighted
-                    copy.withUnsafeMutableBytes { buf in
-                        if let base = buf.baseAddress {
-                            let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
-                            tv.feed(byteArray: slice)
-                        }
-                    }
-                }
+        private func makeOutputPump() -> TerminalOutputPump {
+            TerminalOutputPump { [weak self] data, queuedBytes in
+                guard let self = self, self.alive, let tv = self.terminalView else { return }
+                let output = queuedBytes > TerminalOutputPump.keywordBypassBacklogBytes
+                    ? data
+                    : KeywordInjector.highlight(data, keywords: self.appState.keywordHighlights)
+                self.scanForErrors(in: output)
+                TerminalOutputPump.feed(output, to: tv)
             }
         }
 
@@ -364,13 +456,10 @@ struct TerminalView: NSViewRepresentable {
                     let sid = try await OrbitBridge.shared.connectSSHAsync(serverId: serverId)
                     guard alive else { return }
                     sessionId = sid
-                    OrbitBridge.shared.handlersLock.lock()
-                    OrbitBridge.shared.sshDataHandlers[sid] = dataHandler
-                    OrbitBridge.shared.sshClosedHandlers[sid] = closedHandler
-                    OrbitBridge.shared.terminalViewCache[sid] = self.terminalView
-                    OrbitBridge.shared.handlersLock.unlock()
-                    appState.updateTabSessionId(tabId, sessionId: sid)
+                    OrbitBridge.shared.setSSHHandlers(sessionId: sid, dataHandler: dataHandler, closedHandler: closedHandler)
                     await MainActor.run {
+                        OrbitBridge.shared.terminalViewCache[sid] = self.terminalView
+                        appState.updateTabSessionId(tabId, sessionId: sid)
                         if let tv = terminalView {
                             let term = tv.getTerminal()
                             do { try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(connect) failed: \(error)") }
@@ -388,10 +477,7 @@ struct TerminalView: NSViewRepresentable {
         func registerHandlers() {
             if isLocal { return }
             guard let sid = sessionId else { return }
-            OrbitBridge.shared.handlersLock.lock()
-            OrbitBridge.shared.sshDataHandlers[sid] = makeDataHandler()
-            OrbitBridge.shared.sshClosedHandlers[sid] = makeClosedHandler()
-            OrbitBridge.shared.handlersLock.unlock()
+            OrbitBridge.shared.setSSHHandlers(sessionId: sid, dataHandler: makeDataHandler(), closedHandler: makeClosedHandler())
         }
 
         func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {

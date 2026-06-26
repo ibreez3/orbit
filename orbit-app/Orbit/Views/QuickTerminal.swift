@@ -10,11 +10,10 @@ class QuickTerminalController: NSObject {
     private var terminalView: OrbitTerminalView?
     private var localShell: LocalShell?
     private var isVisible = false
-
-    // Frame-batched feed
-    private var _batchLock = os_unfair_lock()
-    private var _pending = Data()
-    private var _pendingCount = 0
+    private lazy var outputPump = TerminalOutputPump { [weak self] data, _ in
+        guard let tv = self?.terminalView else { return }
+        TerminalOutputPump.feed(data, to: tv)
+    }
 
     private let hotkeyIdentifier = "quickTerminal"
 
@@ -136,31 +135,7 @@ class QuickTerminalController: NSObject {
         let shell = LocalShell()
         localShell = shell
         shell.onData = { [weak self] data in
-            guard let self = self else { return }
-            os_unfair_lock_lock(&self._batchLock)
-            self._pending.append(data)
-            self._pendingCount += 1
-            let first = (self._pendingCount == 1)
-            os_unfair_lock_unlock(&self._batchLock)
-            if first {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, let tv = self.terminalView else { return }
-                    os_unfair_lock_lock(&self._batchLock)
-                    let batch = self._pending
-                    self._pending = Data()
-                    self._pendingCount = 0
-                    os_unfair_lock_unlock(&self._batchLock)
-                    if batch.isEmpty { return }
-                    let len = batch.count
-                    var copy = batch
-                    copy.withUnsafeMutableBytes { buf in
-                        if let base = buf.baseAddress {
-                            let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
-                            tv.feed(byteArray: slice)
-                        }
-                    }
-                }
-            }
+            self?.outputPump.enqueue(data)
         }
         shell.onClosed = {
             DispatchQueue.main.async {

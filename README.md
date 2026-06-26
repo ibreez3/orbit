@@ -25,7 +25,7 @@
 - **凭据分组** — 共享认证信息，多台服务器复用同一套密码或密钥
 - **多认证方式** — 密码 / 密钥认证（粘贴内容或选择本地文件）
 - **连接测试** — 保存前可一键测试 SSH 连接是否正常
-- **Universal 二进制** — 同时支持 Intel (x86_64) 和 Apple Silicon (arm64)
+- **Apple Silicon 原生** — 面向 M 系列芯片构建 arm64 二进制
 
 ## 下载安装
 
@@ -149,7 +149,7 @@ xattr -cr /Applications/Orbit.app
 git clone https://github.com/ibreez3/orbit.git
 cd orbit
 
-# 构建 Rust 静态库（x86_64 + arm64）
+# 构建 Rust 静态库（Apple Silicon / arm64）
 ./scripts/build-rust.sh
 
 # 生成 Xcode 工程并运行
