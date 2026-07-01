@@ -1,0 +1,262 @@
+name: Release DMG
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/release-dmg.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and upload"
+        required: true
+        default: "v0.0.5-pre.1"
+      update_appcast:
+        description: "Update docs/appcast.xml when SPARKLE_PRIVATE_KEY is configured"
+        required: true
+        type: boolean
+        default: true
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload-dmg:
+    name: Build and upload Apple Silicon DMG
+    runs-on: macos-15
+
+    env:
+      DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="v0.0.5-pre.1"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=Orbit-${TAG}-AppleSilicon.dmg" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-darwin
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          if ! command -v gh >/dev/null 2>&1; then
+            brew install gh
+          fi
+          xcodebuild -version
+          rustc --version
+          xcodegen --version
+          gh --version
+
+      - name: Build Rust static libraries
+        shell: bash
+        run: ./scripts/build-rust.sh
+
+      - name: Generate Xcode project
+        shell: bash
+        working-directory: orbit-app
+        run: xcodegen generate
+
+      - name: Build Orbit.app
+        shell: bash
+        working-directory: orbit-app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Orbit.xcodeproj \
+            -scheme Orbit \
+            -configuration Release \
+            -arch arm64 \
+            -derivedDataPath "$DERIVED_DATA" \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_IDENTITY="-" \
+            build
+
+      - name: Verify Orbit.app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
+          test -x "$APP_PATH/Contents/MacOS/Orbit"
+          codesign --verify --deep --strict --verbose=4 "$APP_PATH"
+          /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist"
+
+      - name: Build and verify DMG
+        id: dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
+          DMG_PATH="$PWD/release/${{ steps.release.outputs.asset }}"
+          DMG_ROOT="$(mktemp -d /tmp/orbit-dmg-root.XXXXXX)"
+          trap 'rm -rf "$DMG_ROOT"' EXIT
+
+          mkdir -p "$(dirname "$DMG_PATH")"
+          rm -f "$DMG_PATH"
+          ditto "$APP_PATH" "$DMG_ROOT/Orbit.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+
+          hdiutil create \
+            -volname "Orbit ${{ steps.release.outputs.tag }}" \
+            -srcfolder "$DMG_ROOT" \
+            -fs HFS+ \
+            -ov \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "$DMG_PATH"
+
+          codesign --force --sign - "$DMG_PATH"
+          codesign --verify --verbose=4 "$DMG_PATH"
+          hdiutil verify "$DMG_PATH"
+
+          MOUNT_DIR="$(mktemp -d /tmp/orbit-dmg.XXXXXX)"
+          hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
+          trap 'hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true; rmdir "$MOUNT_DIR" 2>/dev/null || true' EXIT
+          test -x "$MOUNT_DIR/Orbit.app/Contents/MacOS/Orbit"
+          codesign --verify --deep --strict --verbose=4 "$MOUNT_DIR/Orbit.app"
+          hdiutil detach "$MOUNT_DIR" -quiet
+          trap - EXIT
+          rmdir "$MOUNT_DIR"
+
+          echo "path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+          echo "length=$(wc -c < "$DMG_PATH" | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          shasum -a 256 "$DMG_PATH"
+
+      - name: Sign DMG for Sparkle
+        id: sparkle
+        if: env.SPARKLE_PRIVATE_KEY != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIGN_UPDATE="$DERIVED_DATA/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
+          if [ ! -x "$SIGN_UPDATE" ]; then
+            SIGN_UPDATE="$(find "$DERIVED_DATA/SourcePackages" -path '*/Sparkle/bin/sign_update' -type f | head -1)"
+          fi
+          test -x "$SIGN_UPDATE"
+
+          OUTPUT="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - "${{ steps.dmg.outputs.path }}")"
+          echo "$OUTPUT"
+          SIGNATURE="$(printf '%s\n' "$OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+          LENGTH="$(printf '%s\n' "$OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')"
+          test -n "$SIGNATURE"
+          test -n "$LENGTH"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "${{ steps.dmg.outputs.path }}" "$SIGNATURE"
+
+          echo "sign_update=$SIGN_UPDATE" >> "$GITHUB_OUTPUT"
+          echo "signature=$SIGNATURE" >> "$GITHUB_OUTPUT"
+          echo "length=$LENGTH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload DMG to GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.release.outputs.tag }}"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Orbit $TAG" \
+              --prerelease \
+              --notes "Orbit macOS preview release."
+          fi
+          gh release upload "$TAG" "${{ steps.dmg.outputs.path }}" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
+
+      - name: Update appcast on develop
+        if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.release.outputs.tag }}"
+          VERSION="${{ steps.release.outputs.version }}"
+          ASSET="${{ steps.release.outputs.asset }}"
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET"
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
+          BUILD_VERSION="$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist")"
+          PUB_DATE="$(date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+          export TAG VERSION URL BUILD_VERSION PUB_DATE
+          export SPARKLE_SIGNATURE="${{ steps.sparkle.outputs.signature }}"
+          export SPARKLE_LENGTH="${{ steps.sparkle.outputs.length }}"
+
+          git fetch origin develop
+          git switch develop
+          git pull --ff-only origin develop
+
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("docs/appcast.xml")
+          text = path.read_text()
+          tag = os.environ["TAG"]
+          version = os.environ["VERSION"]
+          url = os.environ["URL"]
+          build_version = os.environ["BUILD_VERSION"]
+          signature = os.environ["SPARKLE_SIGNATURE"]
+          length = os.environ["SPARKLE_LENGTH"]
+          pub_date = os.environ["PUB_DATE"]
+
+          text = re.sub(r"<title>Orbit [^<]+</title>", f"<title>Orbit {tag}</title>", text, count=1)
+          text = re.sub(r"<sparkle:releaseNotesLink>[^<]+</sparkle:releaseNotesLink>", f"<sparkle:releaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/{tag}</sparkle:releaseNotesLink>", text, count=1)
+          text = re.sub(r"<pubDate>[^<]+</pubDate>", f"<pubDate>{pub_date}</pubDate>", text, count=1)
+          enclosure = (
+              f'<enclosure url="{url}" sparkle:version="{build_version}" '
+              f'sparkle:shortVersionString="{version}" sparkle:minimumSystemVersion="13.0" '
+              f'sparkle:edSignature="{signature}" length="{length}" '
+              f'type="application/x-apple-diskimage"></enclosure>'
+          )
+          text = re.sub(r"<enclosure\b[^>]*></enclosure>", enclosure, text, count=1)
+          path.write_text(text)
+          PY
+
+      - name: Sign and push appcast
+        if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIGN_UPDATE="${{ steps.sparkle.outputs.sign_update }}"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - docs/appcast.xml
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify docs/appcast.xml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- docs/appcast.xml; then
+            echo "appcast unchanged"
+            exit 0
+          fi
+          git add docs/appcast.xml
+          git commit -m "chore: update appcast for ${{ steps.release.outputs.tag }}"
+          git push origin develop
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release.outputs.asset }}
+          path: ${{ steps.dmg.outputs.path }}

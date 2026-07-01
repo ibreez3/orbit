@@ -1,35 +1,52 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-APP_DIR="/Users/sunyang/Library/Developer/Xcode/DerivedData/Orbit-fkcszsgwpkpzkhdvqnneqyzogtzh/Build/Products/Release"
-APP_NAME="Orbit"
-DMG_NAME="Orbit"
-TMP_DIR=$(mktemp -d /tmp/orbit-dmg.XXXXXX)
+usage() {
+    echo "Usage: $0 <Orbit.app path> <output.dmg path> [volume name]"
+}
 
-echo "=== Building DMG for Orbit ==="
+APP_PATH="${1:-${APP_PATH:-}}"
+OUTPUT_PATH="${2:-${OUTPUT_PATH:-}}"
+VOLUME_NAME="${3:-${VOLUME_NAME:-Orbit}}"
 
-# Clean up old DMG
-rm -f "$APP_DIR/$DMG_NAME.dmg"
+if [ -z "$APP_PATH" ] || [ -z "$OUTPUT_PATH" ]; then
+    usage
+    exit 1
+fi
 
-# Prepare DMG contents
-echo "→ Copying app to temp dir..."
-cp -R "$APP_DIR/$APP_NAME.app" "$TMP_DIR/"
+if [ ! -d "$APP_PATH" ]; then
+    echo "ERROR: app bundle not found: $APP_PATH" >&2
+    exit 1
+fi
 
-# Create Applications symlink
-echo "→ Creating Applications symlink..."
+TMP_DIR="$(mktemp -d /tmp/orbit-dmg.XXXXXX)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+mkdir -p "$(dirname "$OUTPUT_PATH")"
+rm -f "$OUTPUT_PATH"
+
+echo "==> Preparing DMG contents..."
+ditto "$APP_PATH" "$TMP_DIR/Orbit.app"
 ln -s /Applications "$TMP_DIR/Applications"
 
-# Create DMG
-echo "→ Creating DMG..."
-hdiutil create -volname "$APP_NAME" \
+echo "==> Creating DMG..."
+hdiutil create \
+    -volname "$VOLUME_NAME" \
     -srcfolder "$TMP_DIR" \
+    -fs HFS+ \
     -ov \
     -format UDZO \
     -imagekey zlib-level=9 \
-    "$APP_DIR/$DMG_NAME.dmg"
+    "$OUTPUT_PATH"
 
-# Cleanup
-rm -rf "$TMP_DIR"
+if [ "${SIGN_DMG:-1}" = "1" ]; then
+    echo "==> Signing DMG locally..."
+    codesign --force --sign - "$OUTPUT_PATH"
+fi
 
-echo "=== Done: $APP_DIR/$DMG_NAME.dmg ==="
-ls -lh "$APP_DIR/$DMG_NAME.dmg"
+echo "==> Verifying DMG..."
+codesign --verify --verbose=4 "$OUTPUT_PATH"
+hdiutil verify "$OUTPUT_PATH"
+
+echo "==> Done: $OUTPUT_PATH"
+ls -lh "$OUTPUT_PATH"
