@@ -130,7 +130,7 @@ private struct AppearancePane: View {
 
 private struct TerminalPane: View {
     @AppStorage("fontSize") private var fontSize: Double = 14
-    @AppStorage("fontFamily") private var fontFamily: String = "Menlo"
+    @AppStorage("fontFamily") private var fontFamily: String = TerminalRenderSettings.defaultFontName
     @AppStorage("cursorStyle") private var cursorStyle: String = "bar"
     @AppStorage("useMetalRenderer") private var useMetalRenderer: Bool = false
     @AppStorage("backgroundBlur") private var backgroundBlur: Bool = false
@@ -138,7 +138,7 @@ private struct TerminalPane: View {
     @AppStorage("selectToCopy") private var selectToCopy: Bool = true
     @AppStorage("scrollbackLines") private var scrollbackLines: Int = 10000
 
-    private static let cachedMonoFonts: [String] = loadMonoFonts()
+    private static let cachedMonoFonts: [String] = TerminalRenderSettings.availableTerminalFonts()
     private var monoFonts: [String] { Self.cachedMonoFonts }
 
     var body: some View {
@@ -148,7 +148,7 @@ private struct TerminalPane: View {
 
                 SettingsGroup("字体") {
                     VStack(alignment: .leading, spacing: 8) {
-                        LabeledRow("字体家族") {
+                        LabeledRow("渲染字体") {
                             Picker("", selection: $fontFamily) {
                                 ForEach(monoFonts, id: \.self) { name in Text(name).tag(name) }
                             }
@@ -165,11 +165,16 @@ private struct TerminalPane: View {
 
                         SettingsToggle("字体连字", isOn: $fontLigatures)
 
-                        Text("ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789")
+                        Text(" sunyang  ~/dev  23:19  ABC abc 012")
                             .font(.custom(fontFamily, size: fontSize))
                             .lineLimit(1)
                             .foregroundStyle(.secondary)
                             .padding(.top, 4)
+
+                        Text("如果提示符里的图标显示为问号，请选择 MesloLGS NF、JetBrainsMono Nerd Font Mono 或其他 Nerd Font。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -212,20 +217,6 @@ private struct TerminalPane: View {
             }
             .padding(24)
         }
-    }
-
-    private static func loadMonoFonts() -> [String] {
-        var names = Set<String>()
-        for family in NSFontManager.shared.availableFontFamilies {
-            let members = NSFontManager.shared.availableMembers(ofFontFamily: family) as? [[Any]]
-            for member in (members ?? []) {
-                guard member.count >= 1, let name = member[0] as? String else { continue }
-                let font = NSFont(name: name, size: 14)
-                if font?.isFixedPitch == true { names.insert(family); break }
-            }
-        }
-        let sorted = names.sorted()
-        return sorted.contains("Menlo") ? sorted : ["Menlo"] + sorted
     }
 }
 

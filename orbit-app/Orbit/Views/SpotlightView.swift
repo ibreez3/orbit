@@ -367,12 +367,15 @@ struct SpotlightView: View {
 
     private func openSftpDrawer(for server: Server) {
         if let existingTab = appState.tabs.first(where: { $0.type == .terminal && $0.serverId == server.id }) {
-            appState.activeTabId = existingTab.id
-            appState.toggleSftpDrawer(for: existingTab.id)
+            if appState.requestActivateTab(existingTab.id) {
+                appState.openTool(.sftp)
+            }
         } else {
             appState.addTab(server: server, type: .terminal)
             if let newTab = appState.tabs.last {
-                appState.toggleSftpDrawer(for: newTab.id)
+                if appState.requestActivateTab(newTab.id) {
+                    appState.openTool(.sftp)
+                }
             }
         }
         appState.closeSpotlight()

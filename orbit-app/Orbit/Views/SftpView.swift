@@ -36,6 +36,7 @@ struct SftpView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { loadHome() }
+        .onDisappear { appState.setSftpTransferActive(false, for: tab.id) }
         .alert("重命名", isPresented: $showRenameAlert) {
             TextField("新名称", text: $renameName)
             Button("确定") { handleRename() }
@@ -396,12 +397,16 @@ struct SftpView: View {
             let remotePath = entry.path
             let localPath = url.path
             let bridge = appState.bridge
+            appState.setSftpTransferActive(true, for: tab.id)
             OrbitBridge.shared.handlersLock.lock()
             OrbitBridge.shared.progressHandlers[serverId] = { (transferred: UInt64, total: UInt64) in
                 DispatchQueue.main.async {
                     self.transfer?.transferred = transferred
                     self.transfer?.total = total
-                    if transferred >= total { self.transfer = nil }
+                    if transferred >= total {
+                        self.transfer = nil
+                        self.appState.setSftpTransferActive(false, for: self.tab.id)
+                    }
                 }
             }
             OrbitBridge.shared.handlersLock.unlock()
@@ -410,6 +415,7 @@ struct SftpView: View {
                     try bridge.sftpDownload(serverId: serverId, remotePath: remotePath, localPath: localPath)
                     DispatchQueue.main.async {
                         self.transfer = nil
+                        self.appState.setSftpTransferActive(false, for: self.tab.id)
                         OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
                         OrbitBridge.shared.handlersLock.unlock()
@@ -419,6 +425,7 @@ struct SftpView: View {
                         self.errorTitle = "下载失败"
                         self.errorMessage = error.localizedDescription
                         self.transfer = nil
+                        self.appState.setSftpTransferActive(false, for: self.tab.id)
                         OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
                         OrbitBridge.shared.handlersLock.unlock()
@@ -441,12 +448,16 @@ struct SftpView: View {
             let localPath = url.path
             let bridge = appState.bridge
             let currentPath = path
+            appState.setSftpTransferActive(true, for: tab.id)
             OrbitBridge.shared.handlersLock.lock()
             OrbitBridge.shared.progressHandlers[serverId] = { (transferred: UInt64, total: UInt64) in
                 DispatchQueue.main.async {
                     self.transfer?.transferred = transferred
                     self.transfer?.total = total
-                    if transferred >= total { self.transfer = nil }
+                    if transferred >= total {
+                        self.transfer = nil
+                        self.appState.setSftpTransferActive(false, for: self.tab.id)
+                    }
                 }
             }
             OrbitBridge.shared.handlersLock.unlock()
@@ -455,6 +466,7 @@ struct SftpView: View {
                     try bridge.sftpUpload(serverId: serverId, localPath: localPath, remotePath: remotePath)
                     DispatchQueue.main.async {
                         self.transfer = nil
+                        self.appState.setSftpTransferActive(false, for: self.tab.id)
                         OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
                         OrbitBridge.shared.handlersLock.unlock()
@@ -465,6 +477,7 @@ struct SftpView: View {
                         self.errorTitle = "上传失败"
                         self.errorMessage = error.localizedDescription
                         self.transfer = nil
+                        self.appState.setSftpTransferActive(false, for: self.tab.id)
                         OrbitBridge.shared.handlersLock.lock()
                         OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
                         OrbitBridge.shared.handlersLock.unlock()

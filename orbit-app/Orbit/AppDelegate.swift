@@ -1,8 +1,14 @@
 import AppKit
 import Carbon
+import Sparkle
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalMonitor: Any?
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
@@ -17,9 +23,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(checkForUpdates),
+            name: .checkForUpdates,
+            object: nil
+        )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        OrbitBridge.shared.shutdownPool()
+    }
+
+    @objc private func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
     }
 
     deinit {
         if let m = globalMonitor { NSEvent.removeMonitor(m) }
+        NotificationCenter.default.removeObserver(self)
     }
 }

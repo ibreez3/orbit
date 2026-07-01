@@ -9,12 +9,12 @@ echo "==> Generating Xcode project..."
 cd "$APP_DIR"
 xcodegen generate
 
-echo "==> Building Orbit (Release, universal)..."
+echo "==> Building Orbit (Release, Apple Silicon)..."
 xcodebuild -project Orbit.xcodeproj \
     -scheme Orbit \
     -configuration Release \
-    -arch arm64 -arch x86_64 \
-    ONLY_ACTIVE_ARCH=NO \
+    -arch arm64 \
+    ONLY_ACTIVE_ARCH=YES \
     build
 
 PRODUCT_DIR="$(

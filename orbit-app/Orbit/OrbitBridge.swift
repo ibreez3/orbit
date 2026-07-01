@@ -82,6 +82,20 @@ class OrbitBridge {
         handler?(transferred, total)
     }
 
+    func removeSSHHandlers(sessionId: String) {
+        handlersLock.lock()
+        sshDataHandlers.removeValue(forKey: sessionId)
+        sshClosedHandlers.removeValue(forKey: sessionId)
+        handlersLock.unlock()
+    }
+
+    func setSSHHandlers(sessionId: String, dataHandler: @escaping (Data) -> Void, closedHandler: @escaping () -> Void) {
+        handlersLock.lock()
+        sshDataHandlers[sessionId] = dataHandler
+        sshClosedHandlers[sessionId] = closedHandler
+        handlersLock.unlock()
+    }
+
     // MARK: - Server CRUD
 
     func listServers() throws -> [Server] {
@@ -200,6 +214,27 @@ class OrbitBridge {
 
     // MARK: - SSH
 
+    private func runOffThread<T>(_ block: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let result = try block()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func connectSSHAsync(serverId: String) async throws -> String {
+        try await runOffThread { try self.connectSSH(serverId: serverId) }
+    }
+
+    func spawnChannelAsync(existingSessionId: String) async throws -> String {
+        try await runOffThread { try self.spawnChannel(existingSessionId: existingSessionId) }
+    }
+
     func connectSSH(serverId: String) throws -> String {
         try ensureInitialized()
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
@@ -252,6 +287,15 @@ class OrbitBridge {
             orbit_disconnect_ssh(app, sidPtr)
         }
         guard rc == 0 else { throw OrbitError.apiError(rc) }
+    }
+
+    func disconnectSSHAsync(sessionId: String) async throws {
+        try await runOffThread { try self.disconnectSSH(sessionId: sessionId) }
+    }
+
+    func shutdownPool() {
+        guard let app = self.app else { return }
+        orbit_shutdown_pool(app)
     }
 
     func getSSHTraffic(sessionId: String) throws -> (read: UInt64, written: UInt64) {
@@ -387,6 +431,10 @@ class OrbitBridge {
 
     // MARK: - Monitor
 
+    func getServerStatsAsync(serverId: String) async throws -> ServerStats {
+        try await runOffThread { try self.getServerStats(serverId: serverId) }
+    }
+
     func getServerStats(serverId: String) throws -> ServerStats {
         try ensureInitialized()
         var outJson: UnsafeMutablePointer<CChar>?
@@ -411,6 +459,10 @@ class OrbitBridge {
         }
         defer { orbit_free_string(home) }
         return String(cString: home)
+    }
+
+    func getServerProcessesAsync(serverId: String) async throws -> [ServerProcess] {
+        try await runOffThread { try self.getServerProcesses(serverId: serverId) }
     }
 
     func getServerProcesses(serverId: String) throws -> [ServerProcess] {

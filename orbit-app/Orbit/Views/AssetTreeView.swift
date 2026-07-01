@@ -269,6 +269,13 @@ struct AssetTreeView: View {
                     Text("命令片段")
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
+                    Button(action: { appState.openTool(.snippets) }) {
+                        Image(systemName: "rectangle.on.rectangle")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("打开片段面板")
                     Button(action: { appState.openSnippetEditor() }) {
                         Image(systemName: "plus")
                             .font(.system(size: 9, weight: .bold))
@@ -315,7 +322,7 @@ struct AssetTreeView: View {
                     .onTapGesture {
                         if let activeId = appState.activeTabId,
                            let tab = appState.tabs.first(where: { $0.id == activeId }),
-                           let sid = tab.sessionId ?? tab.focusedChannelId,
+                           let sid = tab.focusedChannelId ?? tab.sessionId,
                            let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
                             appState.insertSnippetCommand(snippet.command, into: tv)
                         } else {
@@ -327,7 +334,7 @@ struct AssetTreeView: View {
                         Button("插入到终端") {
                             if let activeId = appState.activeTabId,
                                let tab = appState.tabs.first(where: { $0.id == activeId }),
-                               let sid = tab.sessionId ?? tab.focusedChannelId,
+                               let sid = tab.focusedChannelId ?? tab.sessionId,
                                let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
                                 appState.insertSnippetCommand(snippet.command, into: tv)
                             } else {
@@ -365,6 +372,7 @@ private struct ServerNodeRow: View {
     let server: Server
     var indent: CGFloat = 12
     @EnvironmentObject var appState: AppState
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -387,8 +395,15 @@ private struct ServerNodeRow: View {
         .padding(.leading, indent)
         .padding(.trailing, 12)
         .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovered ? Color.primary.opacity(0.06) : Color.clear)
+        )
         .contentShape(Rectangle())
-        .onTapGesture {
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .onTapGesture(count: 2) {
             appState.addTab(server: server, type: .terminal)
             appState.trackRecentServer(server.id)
         }

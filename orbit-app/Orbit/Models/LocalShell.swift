@@ -107,9 +107,7 @@ class LocalShell {
             let count = read(self.masterFd, &buffer, buffer.count)
             if count > 0 {
                 let data = Data(buffer[..<count])
-                DispatchQueue.main.async {
-                    self.onData?(data)
-                }
+                self.onData?(data)
             } else if count == 0 || errno != EAGAIN {
                 self.cleanup()
             }

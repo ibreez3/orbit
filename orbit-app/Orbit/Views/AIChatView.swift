@@ -129,14 +129,28 @@ struct AIChatView: View {
                                 MessageBubble(message: message)
                             }
 
+                            if !service.streamingText.isEmpty {
+                                MessageBubble(message: AIChatMessage(
+                                    id: "_streaming", role: "assistant",
+                                    content: service.streamingText, timestamp: Date()),
+                                    isStreaming: true)
+                            }
+
                             // Pending command confirmation
                             if let pending = appState.aiPendingConfirmation {
                                 PendingCommandView(
-                                    command: pending.command,
+                                    pending: pending,
                                     onConfirm: {
                                         executeConfirmedCommand()
                                     },
                                     onReject: {
+                                        appState.appendAuditEvent(
+                                            category: .aiAction,
+                                            action: "command_confirmation",
+                                            target: pending.command,
+                                            result: .denied,
+                                            summary: "用户拒绝 AI 命令执行"
+                                        )
                                         appState.aiPendingConfirmation = nil
                                         let rejectMsg = AIChatMessage(
                                             id: UUID().uuidString,
@@ -259,39 +273,62 @@ struct AIChatView: View {
         let maxIterations = 5
         guard agentIteration < maxIterations else {
             let msg = AIChatMessage(id: UUID().uuidString, role: "system",
-                content: "已达到最大自动执行次数，请手动检查", timestamp: Date())
+                content: "已达到最大 AI 工具调用轮次，请手动检查", timestamp: Date())
             appState.addMessageToCurrentSession(msg)
             return
         }
 
-        let context = collectTerminalContext()
-        let hasActiveSSH = getActiveSSHSessionId() != nil
-        let systemPrompt = buildSystemPrompt(context: context, agentMode: hasActiveSSH)
+        let sessionContext = appState.activeSessionContext
+        let context = collectAIContext(for: sessionContext)
+        let canExecuteInTerminal = sessionContext.kind != .database && sessionContext.sessionId != nil
+        let systemPrompt = buildSystemPrompt(
+            context: context,
+            agentMode: canExecuteInTerminal,
+            sessionContext: sessionContext
+        )
 
+        service.streamingText = ""
         service.runAgent(
             messages: appState.currentMessages,
             systemPrompt: systemPrompt,
             config: appState.aiConfig,
             onToken: { token in
-                self.appState.appendToCurrentAssistantMessage(text: token)
+                self.service.streamingText += token
             },
             onCommands: { commands in
-                // Execute commands sequentially, then re-enter loop
+                // Commit streaming text before executing commands
+                if !self.service.streamingText.isEmpty {
+                    self.appState.addMessageToCurrentSession(AIChatMessage(
+                        id: UUID().uuidString, role: "assistant",
+                        content: self.service.streamingText, timestamp: Date()))
+                    self.service.streamingText = ""
+                }
                 self.executeCommandsAndContinue(commands: commands)
             },
             onComplete: { result in
                 switch result {
                 case .success(let content):
+                    if !self.service.streamingText.isEmpty {
+                        self.appState.addMessageToCurrentSession(AIChatMessage(
+                            id: UUID().uuidString, role: "assistant",
+                            content: self.service.streamingText, timestamp: Date()))
+                        self.service.streamingText = ""
+                    }
                     if !content.isEmpty, let cmd = self.extractCommand(from: content) {
                         let cmdMsg = AIChatMessage(
                             id: UUID().uuidString, role: "system",
-                            content: "💡 建议命令: `\(cmd)` — 点击执行或复制到终端",
+                            content: "💡 建议命令: `\(cmd)` — 可插入终端，运行前需要确认",
                             timestamp: Date())
                         self.appState.addMessageToCurrentSession(cmdMsg)
                     }
-                    // Persist accumulated assistant message tokens
                     self.appState.saveAISessions(serverId: self.appState.currentServerId)
                 case .failure(let error):
+                    if !self.service.streamingText.isEmpty {
+                        self.appState.addMessageToCurrentSession(AIChatMessage(
+                            id: UUID().uuidString, role: "assistant",
+                            content: self.service.streamingText, timestamp: Date()))
+                        self.service.streamingText = ""
+                    }
                     let errorMsg = AIChatMessage(
                         id: UUID().uuidString, role: "system",
                         content: "错误: \(error.localizedDescription)",
@@ -310,47 +347,116 @@ struct AIChatView: View {
         }
         let remaining = Array(commands.dropFirst())
 
-        if AppState.CommandSafety.isSafe(command: first) {
-            // Safe: execute, add result, continue
-            executeCommand(first) {
-                if remaining.isEmpty {
-                    self.agentIteration += 1
-                    self.continueAgentLoop()
-                } else {
-                    self.executeCommandsAndContinue(commands: remaining)
-                }
-            }
+        if remaining.isEmpty {
+            requestCommandConfirmation(first, source: "agent_execute")
         } else {
-            // Need user confirmation — pause agent loop
-            if let tabId = appState.activeTabId {
-                let sid = getActiveSSHSessionId() ?? ""
-                appState.aiPendingConfirmation = (command: first, sessionId: sid, tabId: tabId)
-            }
+            let skippedCount = remaining.count
+            requestCommandConfirmation(first, source: "agent_execute")
+            let msg = AIChatMessage(
+                id: UUID().uuidString,
+                role: "system",
+                content: "AI 请求执行多条命令。已暂停在第一条命令，其余 \(skippedCount) 条需在确认后重新评估。",
+                timestamp: Date()
+            )
+            appState.addMessageToCurrentSession(msg)
         }
     }
 
-    private func executeCommand(_ command: String, onDone: @escaping () -> Void) {
-        guard let sid = getActiveSSHSessionId() else {
+    private func requestCommandConfirmation(_ command: String, source: String) {
+        guard let tabId = appState.activeTabId else {
+            appState.appendAuditEvent(
+                category: .aiAction,
+                action: "command_confirmation",
+                target: command,
+                result: .failed,
+                summary: "AI 请求执行命令失败：无活动 Tab"
+            )
             let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
-                content: "执行失败: 无活跃 SSH 会话", timestamp: Date())
+                content: "执行失败: 无活动 Tab", timestamp: Date())
             appState.addMessageToCurrentSession(errMsg)
+            return
+        }
+
+        let context = appState.activeSessionContext
+        guard context.kind != .database else {
+            let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "Database AI 暂不支持自动执行 SQL。请复制建议到 SQL 编辑器手动确认。", timestamp: Date())
+            appState.addMessageToCurrentSession(errMsg)
+            return
+        }
+        guard let sid = context.sessionId else {
+            appState.appendAuditEvent(
+                category: .aiAction,
+                action: "command_confirmation",
+                target: command,
+                result: .failed,
+                summary: "AI 请求执行命令失败：无活跃终端会话"
+            )
+            let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "执行失败: 无活跃终端会话", timestamp: Date())
+            appState.addMessageToCurrentSession(errMsg)
+            return
+        }
+        let riskReason = AppState.CommandSafety.riskReason(command: command)
+        appState.aiPendingConfirmation = PendingAICommand(
+            command: command,
+            sessionId: sid,
+            tabId: tabId,
+            contextIdentity: context.identity,
+            serverName: context.serverName,
+            host: context.host,
+            isHighRisk: riskReason != nil,
+            riskReason: riskReason
+        )
+        appState.appendAuditEvent(
+            category: .aiAction,
+            action: "command_confirmation",
+            target: command,
+            result: .requested,
+            summary: "AI 请求执行命令，需要用户确认（\(source)）"
+        )
+    }
+
+    private func executeCommand(_ command: String, pending: PendingAICommand, onDone: @escaping () -> Void) {
+        guard pending.tabId == appState.activeTabId,
+              pending.sessionId == appState.activeSessionContext.sessionId,
+              pending.contextIdentity == appState.activeSessionContext.identity else {
+            let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "执行已取消: 会话上下文已切换", timestamp: Date())
+            appState.addMessageToCurrentSession(errMsg)
+            appState.appendAuditEvent(
+                category: .terminalCommand,
+                action: "ai_command_execute",
+                target: command,
+                result: .canceled,
+                summary: "AI 命令执行已取消：会话上下文已切换"
+            )
             onDone()
             return
         }
         do {
-            try OrbitBridge.shared.writeSSH(sessionId: sid, data: Data((command + "\n").utf8))
+            try appState.sendTerminalInput(command + "\n", sessionId: pending.sessionId)
         } catch {
             let errMsg = AIChatMessage(id: UUID().uuidString, role: "system",
                 content: "执行失败: \(error.localizedDescription)", timestamp: Date())
             appState.addMessageToCurrentSession(errMsg)
+            appState.appendAuditEvent(
+                category: .terminalCommand,
+                action: "ai_command_execute",
+                target: command,
+                result: .failed,
+                summary: "AI 命令写入终端失败：\(error.localizedDescription)"
+            )
             onDone()
             return
         }
         // Wait for output to accumulate in terminal
-        let capturedTabId = appState.activeTabId
-        let capturedSessionId = capturedTabId.flatMap { appState.activeAISessionId[$0] }
+        let capturedTabId = pending.tabId
+        let capturedSessionId = appState.activeAISessionId[capturedTabId]
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            guard appState.activeAISessionId[capturedTabId ?? ""] == capturedSessionId else {
+            guard self.appState.activeTabId == pending.tabId,
+                  self.appState.activeSessionContext.sessionId == pending.sessionId,
+                  appState.activeAISessionId[capturedTabId] == capturedSessionId else {
                 onDone()
                 return
             }
@@ -360,7 +466,14 @@ struct AIChatView: View {
                 id: UUID().uuidString, role: "system",
                 content: "[命令结果] `\(command)`\nexit=\(exitCode)\n```\n\(output.prefix(2000))\n```",
                 timestamp: Date())
-            self.appState.addMessageToCurrentSession(resultMsg)
+            self.appState.addMessageToCurrentSession(resultMsg, shouldSave: false)
+            self.appState.appendAuditEvent(
+                category: .terminalCommand,
+                action: "ai_command_execute",
+                target: command,
+                result: exitCode == 0 ? .succeeded : .failed,
+                summary: "AI 命令已执行，exit=\(exitCode)"
+            )
             onDone()
         }
     }
@@ -368,11 +481,33 @@ struct AIChatView: View {
     private func executeConfirmedCommand() {
         guard let pending = appState.aiPendingConfirmation else { return }
         appState.aiPendingConfirmation = nil
+        guard pending.tabId == appState.activeTabId,
+              pending.sessionId == appState.activeSessionContext.sessionId,
+              pending.contextIdentity == appState.activeSessionContext.identity else {
+            let staleMsg = AIChatMessage(id: UUID().uuidString, role: "system",
+                content: "执行已取消: 会话上下文已切换", timestamp: Date())
+            appState.addMessageToCurrentSession(staleMsg)
+            appState.appendAuditEvent(
+                category: .aiAction,
+                action: "command_confirmation",
+                target: pending.command,
+                result: .canceled,
+                summary: "用户确认前会话上下文已切换，AI 命令未执行"
+            )
+            return
+        }
         let confirmMsg = AIChatMessage(id: UUID().uuidString, role: "system",
             content: "用户确认执行: `\(pending.command)`", timestamp: Date())
         appState.addMessageToCurrentSession(confirmMsg)
+        appState.appendAuditEvent(
+            category: .aiAction,
+            action: "command_confirmation",
+            target: pending.command,
+            result: .authorized,
+            summary: "用户确认 AI 命令执行"
+        )
         agentIteration = 0 // Reset iteration counter after manual confirmation
-        executeCommand(pending.command) {
+        executeCommand(pending.command, pending: pending) {
             self.agentIteration += 1
             self.continueAgentLoop()
         }
@@ -381,13 +516,32 @@ struct AIChatView: View {
     private func getActiveSSHSessionId() -> String? {
         guard let activeId = appState.activeTabId,
               let tab = appState.tabs.first(where: { $0.id == activeId }) else { return nil }
-        return tab.sessionId ?? tab.focusedChannelId
+        return tab.focusedChannelId ?? tab.sessionId
+    }
+
+    private func collectAIContext(for sessionContext: ActiveSessionContext) -> String {
+        if sessionContext.kind == .database {
+            guard let tabId = sessionContext.tabId,
+                  let dbContext = appState.databaseAIContexts[tabId] else {
+                return "（Database 面板已打开，暂无 SQL 上下文）"
+            }
+            return """
+            当前 Database Tab: \(sessionContext.serverName ?? "Database")
+            当前选表: \(dbContext.selectedTable ?? "未选择")
+            SQL 编辑器:
+            ```sql
+            \(dbContext.sqlText)
+            ```
+            结果摘要: \(dbContext.resultSummary)
+            """
+        }
+        return collectTerminalContext()
     }
 
     private func collectTerminalContext() -> String {
         guard let activeId = appState.activeTabId,
               let tab = appState.tabs.first(where: { $0.id == activeId }),
-              let sid = tab.sessionId ?? tab.focusedChannelId else {
+              let sid = tab.focusedChannelId ?? tab.sessionId else {
             return "（无活跃终端会话）"
         }
 
@@ -417,7 +571,25 @@ struct AIChatView: View {
         return result
     }
 
-    private func buildSystemPrompt(context: String, agentMode: Bool) -> String {
+    private func buildSystemPrompt(context: String, agentMode: Bool, sessionContext: ActiveSessionContext) -> String {
+        if sessionContext.kind == .database {
+            return """
+            你是一个数据库助手，帮助用户分析 SQL、表结构和查询结果。
+
+            ## 当前数据库上下文
+            \(context)
+
+            ## 你的职责
+            1. 解释当前 SQL 的意图和风险
+            2. 给出可复制到 SQL 编辑器的建议 SQL
+            3. 对 UPDATE/DELETE/DROP/ALTER/TRUNCATE 等高风险 SQL 明确提示
+
+            ## 注意
+            - 当前版本不能自动执行 SQL
+            - 不要使用 execute 代码块
+            - 建议 SQL 请使用 ```sql 代码块
+            """
+        }
         var prompt = """
         你是一个 SSH 终端助手，帮助用户排查服务器问题。你可以看到用户的终端输出。
 
@@ -438,13 +610,13 @@ struct AIChatView: View {
         if agentMode {
             prompt += """
 
-        ## 自动执行模式
-        你已连接到终端，可以使用 ```execute 代码块让命令在终端中自动执行并获取输出。
+        ## 授权执行模式
+        你已连接到终端，可以使用 ```execute 代码块请求在终端中执行命令并获取输出。
         格式：
         ```execute
         command_here
         ```
-        每条回复最多一个 execute 块。只在需要获取系统信息时使用。
+        每条回复最多一个 execute 块。只在需要获取系统信息时使用。任何 execute 块都会先展示给用户确认，用户确认前不会执行。
         """
         }
         return prompt
@@ -465,6 +637,7 @@ struct AIChatView: View {
 
 private struct MessageBubble: View {
     let message: AIChatMessage
+    var isStreaming: Bool = false
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -481,28 +654,37 @@ private struct MessageBubble: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                if let md = formattedMarkdown {
-                    Text(md)
-                        .font(.system(size: 12))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text(formattedContent)
-                        .font(.system(size: 12))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                messageText
 
                 if message.role == "system", message.content.contains("建议命令") {
                     HStack(spacing: 4) {
-                        Button("执行") {
+                        Button("插入") {
                             if let cmd = extractSuggestedCommand(from: message.content) {
                                 if let activeId = appState.activeTabId,
                                    let tab = appState.tabs.first(where: { $0.id == activeId }),
-                                   let sid = tab.sessionId ?? tab.focusedChannelId,
+                                   let sid = tab.focusedChannelId ?? tab.sessionId,
                                    let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
-                                    appState.insertSnippetCommand(cmd + "\r", into: tv)
+                                    appState.insertSnippetCommand(cmd, into: tv)
+                                    appState.appendAuditEvent(
+                                        category: .aiAction,
+                                        action: "command_insert",
+                                        target: cmd,
+                                        result: .succeeded,
+                                        summary: "AI 建议命令已插入终端"
+                                    )
                                 }
+                            }
+                        }
+                        .font(.system(size: 10))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.18))
+                        .clipShape(Capsule())
+                        .buttonStyle(.plain)
+
+                        Button("运行") {
+                            if let cmd = extractSuggestedCommand(from: message.content) {
+                                requestSuggestedCommandConfirmation(cmd)
                             }
                         }
                         .font(.system(size: 10))
@@ -546,6 +728,28 @@ private struct MessageBubble: View {
         }
     }
 
+    @ViewBuilder
+    private var messageText: some View {
+        if isStreaming {
+            Text(formattedContent)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if message.role == "user" {
+            Text(formattedContent)
+                .font(.system(size: 12))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let md = formattedMarkdown {
+            Text(md)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(formattedContent)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private var formattedContent: String {
         var content = message.content
         let blockPattern = "```[a-z]*\\s*\\n([\\s\\S]*?)\\n```"
@@ -572,6 +776,50 @@ private struct MessageBubble: View {
             return String(content[range])
         }
         return nil
+    }
+
+    private func requestSuggestedCommandConfirmation(_ command: String) {
+        guard let tabId = appState.activeTabId else {
+            appState.appendAuditEvent(
+                category: .aiAction,
+                action: "command_confirmation",
+                target: command,
+                result: .failed,
+                summary: "AI 建议命令请求运行失败：无活动 Tab"
+            )
+            return
+        }
+
+        let context = appState.activeSessionContext
+        guard context.kind != .database, let sid = context.sessionId else {
+            appState.appendAuditEvent(
+                category: .aiAction,
+                action: "command_confirmation",
+                target: command,
+                result: .failed,
+                summary: "AI 建议命令请求运行失败：无活跃终端会话"
+            )
+            return
+        }
+
+        let riskReason = AppState.CommandSafety.riskReason(command: command)
+        appState.aiPendingConfirmation = PendingAICommand(
+            command: command,
+            sessionId: sid,
+            tabId: tabId,
+            contextIdentity: context.identity,
+            serverName: context.serverName,
+            host: context.host,
+            isHighRisk: riskReason != nil,
+            riskReason: riskReason
+        )
+        appState.appendAuditEvent(
+            category: .aiAction,
+            action: "command_confirmation",
+            target: command,
+            result: .requested,
+            summary: "用户点击运行 AI 建议命令，需要确认"
+        )
     }
 }
 
@@ -688,33 +936,56 @@ private struct SessionPickerView: View {
 // MARK: - Pending Command Confirmation
 
 private struct PendingCommandView: View {
-    let command: String
+    let pending: PendingAICommand
     let onConfirm: () -> Void
     let onReject: () -> Void
+    @State private var confirmationText: String = ""
+
+    private var canConfirm: Bool {
+        !pending.isHighRisk || confirmationText == "EXECUTE"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(.yellow)
-                Text("AI 想执行命令:")
+                    .foregroundStyle(pending.isHighRisk ? .red : .yellow)
+                Text(pending.isHighRisk ? "高风险命令需要强化确认" : "AI 想执行命令")
                     .font(.system(size: 11, weight: .medium))
             }
-            Text(command)
+
+            if let serverName = pending.serverName {
+                Text([serverName, pending.host].compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Text(pending.command)
                 .font(.system(size: 11, design: .monospaced))
                 .padding(4)
                 .background(Color.black.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
 
+            if pending.isHighRisk {
+                Text(pending.riskReason ?? "该命令可能修改系统状态或造成破坏性影响")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                TextField("输入 EXECUTE 确认执行", text: $confirmationText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textFieldStyle(.roundedBorder)
+            }
+
             HStack(spacing: 8) {
-                Button("确认执行") { onConfirm() }
+                Button(pending.isHighRisk ? "确认执行高风险命令" : "确认执行") { onConfirm() }
                     .font(.system(size: 10))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Color.green.opacity(0.2))
+                    .background((pending.isHighRisk ? Color.red : Color.green).opacity(canConfirm ? 0.22 : 0.08))
                     .clipShape(Capsule())
                     .buttonStyle(.plain)
+                    .disabled(!canConfirm)
 
                 Button("拒绝") { onReject() }
                     .font(.system(size: 10))
@@ -723,7 +994,7 @@ private struct PendingCommandView: View {
             }
         }
         .padding(10)
-        .background(Color.yellow.opacity(0.08))
+        .background((pending.isHighRisk ? Color.red : Color.yellow).opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

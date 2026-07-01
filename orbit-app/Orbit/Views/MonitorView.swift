@@ -103,6 +103,7 @@ struct MonitorView: View {
                 VStack(spacing: 16) {
                     statsCards(stats)
                     infoCards(stats)
+                    networkCard(stats)
                     if monitorState.history.count > 1 {
                         chartSection
                     }
@@ -146,9 +147,20 @@ struct MonitorView: View {
             // Process table
             if monitorState.processes.isEmpty && !monitorState.loading {
                 VStack(spacing: 8) {
-                    Text("暂无进程数据")
-                        .foregroundStyle(.tertiary)
+                    if let processError = monitorState.processError {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.orange)
+                        Text(processError)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    } else {
+                        Text("暂无进程数据")
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView([.horizontal, .vertical]) {
@@ -367,6 +379,14 @@ struct MonitorView: View {
         }
     }
 
+    private func networkCard(_ stats: ServerStats) -> some View {
+        HStack(spacing: 12) {
+            infoCard(icon: "arrow.down.circle", title: "网络下行", value: formatRate(stats.net_rx_kbps))
+            infoCard(icon: "arrow.up.circle", title: "网络上行", value: formatRate(stats.net_tx_kbps))
+            infoCard(icon: "network", title: "网络接口", value: networkInterface(stats))
+        }
+    }
+
     private func infoCard(icon: String, title: String, value: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
@@ -463,6 +483,19 @@ struct MonitorView: View {
         if bytes >= 1024 { return String(format: "%.0fK", Double(bytes) / 1024.0) }
         return "\(bytes)B"
     }
+
+    private func formatRate(_ value: Double?) -> String {
+        guard let value else { return "N/A" }
+        if value >= 1024 {
+            return String(format: "%.1f MB/s", value / 1024.0)
+        }
+        return String(format: "%.1f KB/s", value)
+    }
+
+    private func networkInterface(_ stats: ServerStats) -> String {
+        guard let iface = stats.net_interface, !iface.isEmpty else { return "N/A" }
+        return iface
+    }
 }
 
 enum ProcessSortField {
@@ -478,6 +511,7 @@ class MonitorState: ObservableObject {
     @Published var history: [HistoryPoint] = []
     @Published var autoRefresh = false
     @Published var processes: [ServerProcess] = []
+    @Published var processError: String?
     let interval = 3
 
     private let maxPoints = 200
@@ -506,6 +540,7 @@ class MonitorState: ObservableObject {
     func refresh(serverId: String, bridge: OrbitBridge) {
         loading = true
         error = nil
+        processError = nil
 
         // Fetch stats and processes in parallel
         Task {
@@ -529,7 +564,7 @@ class MonitorState: ObservableObject {
                 }
                 if let p = p {
                     self.processes = p.processes
-                    if self.error == nil { self.error = p.error }
+                    self.processError = p.error
                 }
                 self.loading = false
             }
@@ -541,16 +576,16 @@ class MonitorState: ObservableObject {
 
     private func fetchStats(serverId: String, bridge: OrbitBridge) async -> StatsResult? {
         do {
-            let result = try bridge.getServerStats(serverId: serverId)
+            let result = try await bridge.getServerStatsAsync(serverId: serverId)
             return StatsResult(stats: result, error: nil)
         } catch {
-            return StatsResult(stats: stats ?? ServerStats(cpu_usage: 0, mem_total_mb: 0, mem_used_mb: 0, mem_percent: 0, disk_total: "", disk_used: "", disk_percent: 0, uptime: "", load_avg: ""), error: "获取监控数据失败: \(error.localizedDescription)")
+            return StatsResult(stats: stats ?? ServerStats(cpu_usage: 0, mem_total_mb: 0, mem_used_mb: 0, mem_percent: 0, disk_total: "", disk_used: "", disk_percent: 0, net_rx_kbps: nil, net_tx_kbps: nil, net_interface: nil, uptime: "", load_avg: ""), error: "获取监控数据失败: \(error.localizedDescription)")
         }
     }
 
     private func fetchProcesses(serverId: String, bridge: OrbitBridge) async -> ProcessesResult? {
         do {
-            let result = try bridge.getServerProcesses(serverId: serverId)
+            let result = try await bridge.getServerProcessesAsync(serverId: serverId)
             return ProcessesResult(processes: result, error: nil)
         } catch {
             return ProcessesResult(processes: [], error: "获取进程列表失败: \(error.localizedDescription)")

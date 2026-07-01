@@ -9,6 +9,7 @@ struct MainView: View {
             mainLayout
             spotlightOverlay
             quitConfirmationOverlay
+            terminalCloseConfirmationOverlay
         }
         .frame(minWidth: 900, minHeight: 600)
         .environmentObject(appState)
@@ -35,12 +36,30 @@ struct MainView: View {
                 .environmentObject(appState)
         }
         .modifier(AlertModifier(appState: appState))
+        .alert("确认切换会话", isPresented: Binding(
+            get: { appState.pendingContextSwitchTabId != nil },
+            set: { if !$0 { appState.cancelPendingContextSwitch() } }
+        )) {
+            Button("继续切换", role: .destructive) {
+                appState.confirmPendingContextSwitch()
+            }
+            Button("取消", role: .cancel) {
+                appState.cancelPendingContextSwitch()
+            }
+        } message: {
+            Text(appState.pendingContextSwitchMessage ?? "")
+        }
         .onAppear {
             if appState.servers.isEmpty { appState.loadServers() }
             if appState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
         }
 
         return base
+            .onExitCommand {
+                if appState.activeTool?.tool != .ai {
+                    appState.closeOverlayTool()
+                }
+            }
             .onReceive(nc(.newTerminal)) { _ in appState.openSpotlight() }
             .onReceive(nc(.openSpotlight)) { _ in appState.openSpotlight() }
             .onReceive(nc(.splitHorizontal)) { _ in appState.splitCurrentPane(direction: .horizontal) }
@@ -65,53 +84,66 @@ struct MainView: View {
 
     private var mainLayout: some View {
         HStack(spacing: 0) {
-            // Asset tree (left, always visible)
             AssetTreeView()
                 .environmentObject(appState)
                 .frame(width: appState.assetTreeWidth)
 
-            // Resize handle
-            Rectangle()
-                .fill(Color.primary.opacity(0.0))
-                .frame(width: 5)
-                .contentShape(Rectangle())
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.resizeLeftRight.set()
-                    } else {
-                        NSCursor.arrow.set()
-                    }
-                }
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            let newWidth = appState.assetTreeWidth + value.translation.width
-                            appState.assetTreeWidth = min(350, max(160, newWidth))
-                        }
-                        .onEnded { _ in
-                            appState.saveAssetTreeWidth(appState.assetTreeWidth)
-                        }
-                )
+            resizeHandle
 
             Divider()
 
-            // Main content
             VStack(spacing: 0) {
                 TabBarView()
-                contentArea
-                sftpDrawer
+                ZStack(alignment: .topTrailing) {
+                    contentArea
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            appState.closeOverlayTool()
+                        }
+
+                    SessionToolOverlayView()
+                        .environmentObject(appState)
+                }
                 StatusBarView()
             }
 
-            // AI panel (right)
             if appState.aiPanelOpen {
                 Divider()
                 AIChatView()
                     .environmentObject(appState)
             }
+
+            Divider()
+            SessionToolDockView()
+                .environmentObject(appState)
         }
         .background(themeWindowColor)
         .preferredColorScheme(themeColorScheme)
+    }
+
+    private var resizeHandle: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.0))
+            .frame(width: 5)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.set()
+                } else {
+                    NSCursor.arrow.set()
+                }
+            }
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let newWidth = appState.assetTreeWidth + value.translation.width
+                        appState.assetTreeWidth = min(350, max(160, newWidth))
+                    }
+                    .onEnded { _ in
+                        appState.saveAssetTreeWidth(appState.assetTreeWidth)
+                    }
+            )
     }
 
     private var themeWindowColor: Color {
@@ -165,14 +197,6 @@ struct MainView: View {
         }
     }
 
-    @ViewBuilder
-    private var sftpDrawer: some View {
-        if let drawerTabId = appState.sftpDrawer.tabId,
-           let tab = appState.tabs.first(where: { $0.id == drawerTabId }) {
-            SftpDrawerView(tab: tab)
-        }
-    }
-
     private var emptyState: some View {
         HomeView()
     }
@@ -187,6 +211,90 @@ struct MainView: View {
 
                 SpotlightView()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var terminalCloseConfirmationOverlay: some View {
+        if let tab = appState.pendingCloseTab {
+            ZStack {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
+                    .onTapGesture { appState.cancelCloseTab() }
+
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .frame(width: 32, height: 32)
+                            .background(Color.orange.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("关闭终端")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+
+                            Text("此操作会断开当前 SSH 连接。")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+
+                        Text("终端会话将被关闭，正在运行的交互命令也会随连接一起结束。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.045))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    HStack(spacing: 10) {
+                        Spacer()
+
+                        Button("取消") {
+                            appState.cancelCloseTab()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(Color.primary.opacity(0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+
+                        Button("关闭终端") {
+                            appState.confirmCloseTab()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(Color.orange.opacity(0.9))
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    }
+                }
+                .padding(22)
+                .frame(width: 360)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -249,7 +357,7 @@ private struct SftpDrawerModifier: ViewModifier {
             if let activeId = appState.activeTabId,
                let tab = appState.tabs.first(where: { $0.id == activeId }),
                tab.type == .terminal {
-                appState.sftpDrawer.toggle(for: activeId)
+                appState.openTool(.sftp)
             }
         }
     }
@@ -261,7 +369,7 @@ private struct ClearScreenModifier: ViewModifier {
         content.onReceive(NotificationCenter.default.publisher(for: .clearScreen)) { _ in
             if let activeId = appState.activeTabId,
                let tab = appState.tabs.first(where: { $0.id == activeId }),
-               let sid = tab.sessionId ?? tab.focusedChannelId,
+               let sid = tab.focusedChannelId ?? tab.sessionId,
                let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
                 let term = tv.getTerminal()
                 term.buffer.clear()
@@ -277,7 +385,7 @@ private struct FindInTerminalModifier: ViewModifier {
         content.onReceive(NotificationCenter.default.publisher(for: .findInTerminal)) { _ in
             if let activeId = appState.activeTabId,
                let tab = appState.tabs.first(where: { $0.id == activeId }),
-               let sid = tab.sessionId ?? tab.focusedChannelId,
+               let sid = tab.focusedChannelId ?? tab.sessionId,
                let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
                 tv.performFindPanelAction(NSTextFinder.Action.showFindInterface.rawValue)
             }

@@ -16,9 +16,7 @@ struct SplitPaneView: View {
                         : Color.clear
                 )
                 .onTapGesture {
-                    if let idx = appState.tabs.firstIndex(where: { $0.id == tabId }) {
-                        appState.tabs[idx].focusedChannelId = channelId
-                    }
+                    appState.requestFocusPane(tabId: tabId, paneId: channelId)
                     if let tv = OrbitBridge.shared.terminalViewCache[channelId] as? OrbitTerminalView {
                         tv.window?.makeFirstResponder(tv)
                     }

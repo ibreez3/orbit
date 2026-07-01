@@ -8,10 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		060FE66BA0E797B7B1ECFA6E /* LocalShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */; };
+		0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */; };
 		0B108A04325E375330215A8F /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495DCA72659439056D676B45 /* HomeView.swift */; };
+		0EC2179A038ECDE8E22EBF35 /* WorkbenchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E803F410398610C4BEAD1D /* WorkbenchModels.swift */; };
+		0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7C11206A070E05D66487CD /* SessionToolDockView.swift */; };
 		1062C1837AEDF5F4036823C8 /* QuickTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DD037D568D1130F776EA29 /* QuickTerminal.swift */; };
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		277D07614AF08EA716071858 /* SnippetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E598CB14BB36E079220CE3C /* SnippetEditorView.swift */; };
+		2F169B27AC1ECA61187A4C2C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */; };
 		33335E4F882F977DFA66C647 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20936134E6681D18358932B7 /* Assets.xcassets */; };
 		3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86934760741D5FA928C8E48 /* TabBarView.swift */; };
 		3F4D5B977572BFF569200D8B /* SftpDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */; };
@@ -45,6 +49,7 @@
 		D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */; };
 		D48895C458D1C1630C41D403 /* tokyo-night.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 5A58E42EA49E82B92FA0F9F1 /* tokyo-night.orbit-theme */; };
 		D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452C79E5111500BF24C41C53 /* SpotlightView.swift */; };
+		DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */; };
 		DAE7F6E609EA79B75390ABD6 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64825B472441C790427EFF55 /* AppState.swift */; };
 		E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E812A16C099009B7BB010371 /* ServerDialog.swift */; };
 		EE85C664EE48A8EE1FC69A4E /* catppuccin-mocha.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */; };
@@ -66,6 +71,7 @@
 		20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchExecutionView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
 		38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneView.swift; sourceTree = "<group>"; };
+		3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingToolCard.swift; sourceTree = "<group>"; };
 		3A329973670FE763965019E7 /* OrbitTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitTerminalView.swift; sourceTree = "<group>"; };
 		3FADD919EE5ECC5150989E91 /* dracula.orbit-theme */ = {isa = PBXFileReference; path = "dracula.orbit-theme"; sourceTree = "<group>"; };
 		452C79E5111500BF24C41C53 /* SpotlightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightView.swift; sourceTree = "<group>"; };
@@ -74,6 +80,7 @@
 		49216EECC7DFB1EC893159AF /* SftpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpView.swift; sourceTree = "<group>"; };
 		495DCA72659439056D676B45 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		55E803F410398610C4BEAD1D /* WorkbenchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchModels.swift; sourceTree = "<group>"; };
 		57DD037D568D1130F776EA29 /* QuickTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTerminal.swift; sourceTree = "<group>"; };
 		592ABFA32AB4754E55D7B74E /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
 		5A58E42EA49E82B92FA0F9F1 /* tokyo-night.orbit-theme */ = {isa = PBXFileReference; path = "tokyo-night.orbit-theme"; sourceTree = "<group>"; };
@@ -82,6 +89,7 @@
 		608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		64825B472441C790427EFF55 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		750B458B02EF6C413A15C484 /* Orbit-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Orbit-Bridging-Header.h"; sourceTree = "<group>"; };
+		8D7C11206A070E05D66487CD /* SessionToolDockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolDockView.swift; sourceTree = "<group>"; };
 		8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindings.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		94DB15AA26D20B36334209E7 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -91,10 +99,12 @@
 		B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */ = {isa = PBXFileReference; path = "catppuccin-mocha.orbit-theme"; sourceTree = "<group>"; };
 		C9A251128C8C2F5D900FF058 /* solarized-dark.orbit-theme */ = {isa = PBXFileReference; path = "solarized-dark.orbit-theme"; sourceTree = "<group>"; };
 		CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolOverlayView.swift; sourceTree = "<group>"; };
 		D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalShell.swift; sourceTree = "<group>"; };
 		D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E360B425AAB16860239DB977 /* dark.orbit-theme */ = {isa = PBXFileReference; path = "dark.orbit-theme"; sourceTree = "<group>"; };
+		E691E1A576C579A627A7BDDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E812A16C099009B7BB010371 /* ServerDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDialog.swift; sourceTree = "<group>"; };
 		F86934760741D5FA928C8E48 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 		FEF0CBEB3829B9B225431C77 /* nord.orbit-theme */ = {isa = PBXFileReference; path = "nord.orbit-theme"; sourceTree = "<group>"; };
@@ -106,6 +116,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */,
+				2F169B27AC1ECA61187A4C2C /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -117,6 +128,7 @@
 			children = (
 				E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */,
 				20936134E6681D18358932B7 /* Assets.xcassets */,
+				E691E1A576C579A627A7BDDF /* Info.plist */,
 				750B458B02EF6C413A15C484 /* Orbit-Bridging-Header.h */,
 				AA0E97AE18D6AF113D5ECCC8 /* Orbit.entitlements */,
 				26EB023126B42D85C78E726C /* OrbitApp.swift */,
@@ -153,6 +165,7 @@
 				B24FD058B7D00E7C9D29DA78 /* Models.swift */,
 				46605F10D644D3CD69AD1B42 /* OpenAIService.swift */,
 				07692D9E82A9DF921C55B64F /* OrbitConfig.swift */,
+				55E803F410398610C4BEAD1D /* WorkbenchModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -174,12 +187,15 @@
 				20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */,
 				0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */,
 				1E3983C4735026A30426864D /* DatabaseView.swift */,
+				3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */,
 				495DCA72659439056D676B45 /* HomeView.swift */,
 				20E9630F023416DA2028BB98 /* MainView.swift */,
 				08F1ADE58D311170A9C63C4E /* MonitorView.swift */,
 				3A329973670FE763965019E7 /* OrbitTerminalView.swift */,
 				57DD037D568D1130F776EA29 /* QuickTerminal.swift */,
 				E812A16C099009B7BB010371 /* ServerDialog.swift */,
+				8D7C11206A070E05D66487CD /* SessionToolDockView.swift */,
+				D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
 				608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */,
 				D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */,
@@ -229,6 +245,7 @@
 			name = Orbit;
 			packageProductDependencies = (
 				3E1BDD661D1C0F68B456CE86 /* SwiftTerm */,
+				C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */,
 			);
 			productName = Orbit;
 			productReference = 93E43D9E19F5EF7D480B0771 /* Orbit.app */;
@@ -258,6 +275,7 @@
 			mainGroup = C5F01767FDAE31EE06DFF523;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				D2FAFE15914F3543C362D846 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				64BE90261AF065D978C22802 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -302,6 +320,7 @@
 				C785EF55D48C3015D138C8FA /* BatchExecutionView.swift in Sources */,
 				C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */,
 				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
+				DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */,
 				0B108A04325E375330215A8F /* HomeView.swift in Sources */,
 				9864F6FA7399046CFED1A7AB /* KeyBindings.swift in Sources */,
 				060FE66BA0E797B7B1ECFA6E /* LocalShell.swift in Sources */,
@@ -315,6 +334,8 @@
 				F71C69B4875E03688CF85C57 /* OrbitTerminalView.swift in Sources */,
 				1062C1837AEDF5F4036823C8 /* QuickTerminal.swift in Sources */,
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
+				0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */,
+				0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */,
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
 				89A6C1418D76248F48E469F3 /* SettingsWindowController.swift in Sources */,
 				8CC5BD2F7028843A2B71958E /* SftpDrawerState.swift in Sources */,
@@ -327,6 +348,7 @@
 				3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */,
 				82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */,
 				9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */,
+				0EC2179A038ECDE8E22EBF35 /* WorkbenchModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,7 +359,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ARCHS = (
-					x86_64,
 					arm64,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -345,23 +366,24 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_BITCODE = NO;
-				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/../orbit-rs/include",
 				);
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_FILE = Orbit/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				ONLY_ACTIVE_ARCH = NO;
+				MARKETING_VERSION = 0.0.5;
+				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = (
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/liborbit_core.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libsqlite3.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libssh2.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libssl.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libcrypto.a",
 					"-lz",
 					"-liconv",
 					"-framework",
@@ -439,32 +461,29 @@
 		73F0DFF75D6E8A438E59D6FA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = (
-					x86_64,
-					arm64,
-				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_BITCODE = NO;
-				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(PROJECT_DIR)/../orbit-rs/include",
 				);
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_FILE = Orbit/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				ONLY_ACTIVE_ARCH = NO;
+				MARKETING_VERSION = 0.0.5;
+				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = (
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/liborbit_core.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libsqlite3.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssh2.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libssl.a",
-					"$(PROJECT_DIR)/../orbit-rs/target/universal-apple-darwin/release/libcrypto.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/liborbit_core.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libsqlite3.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libssh2.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libssl.a",
+					"$(PROJECT_DIR)/../orbit-rs/target/apple-silicon-apple-darwin/release/libcrypto.a",
 					"-lz",
 					"-liconv",
 					"-framework",
@@ -578,6 +597,14 @@
 				minimumVersion = 1.13.0;
 			};
 		};
+		D2FAFE15914F3543C362D846 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -585,6 +612,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 64BE90261AF065D978C22802 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D2FAFE15914F3543C362D846 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
