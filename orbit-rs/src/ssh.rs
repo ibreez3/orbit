@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
-use tracing::{info, debug, warn};
+use tracing::{debug, info, warn};
 
-use crate::models::Server;
 use crate::db::Database;
+use crate::models::Server;
 use crate::transport;
 
 #[derive(Serialize, Clone)]
@@ -128,14 +128,19 @@ impl SshManager {
             session_id.to_string(),
             SharedSession {
                 guard,
-                channels: [(session_id.to_string(), active_channel)].into_iter().collect(),
+                channels: [(session_id.to_string(), active_channel)]
+                    .into_iter()
+                    .collect(),
                 session_lock,
                 server_id: server_id.to_string(),
             },
         );
     }
 
-    pub fn take_idle_session(&mut self, server_id: &str) -> Option<(transport::SessionGuard, Arc<std::sync::Mutex<()>>)> {
+    pub fn take_idle_session(
+        &mut self,
+        server_id: &str,
+    ) -> Option<(transport::SessionGuard, Arc<std::sync::Mutex<()>>)> {
         if let Some(sessions) = self.idle_pool.get_mut(server_id) {
             if let Some(idle) = sessions.pop() {
                 info!(server_id, "复用空闲 SSH 连接");
@@ -170,13 +175,21 @@ impl SshManager {
         info!(session_id, server = %server.name, "SSH 终端连接成功");
 
         let session_lock = Arc::new(std::sync::Mutex::new(()));
-        let active_channel = spawn_channel_reader(session_id, channel, data_cb, closed_cb, session_lock.clone())?;
+        let active_channel = spawn_channel_reader(
+            session_id,
+            channel,
+            data_cb,
+            closed_cb,
+            session_lock.clone(),
+        )?;
 
         self.sessions.insert(
             session_id.to_string(),
             SharedSession {
                 guard,
-                channels: [(session_id.to_string(), active_channel)].into_iter().collect(),
+                channels: [(session_id.to_string(), active_channel)]
+                    .into_iter()
+                    .collect(),
                 session_lock,
                 server_id: server.id.clone(),
             },
@@ -191,41 +204,67 @@ impl SshManager {
         data_cb: DataCallback,
         closed_cb: ClosedCallback,
     ) -> Result<()> {
-        let session_key = self.find_session_key(existing_session_id)
+        let session_key = self
+            .find_session_key(existing_session_id)
             .ok_or_else(|| anyhow!("源会话不存在: {}", existing_session_id))?;
 
         let session_lock_arc = {
-            let shared = self.sessions.get(&session_key)
+            let shared = self
+                .sessions
+                .get(&session_key)
                 .ok_or_else(|| anyhow!("共享会话丢失"))?;
             shared.session_lock.clone()
         };
 
-        let shared = self.sessions.get_mut(&session_key)
+        let shared = self
+            .sessions
+            .get_mut(&session_key)
             .ok_or_else(|| anyhow!("共享会话在创建 channel 前丢失"))?;
 
-        let _lock = session_lock_arc.lock()
+        let _lock = session_lock_arc
+            .lock()
             .map_err(|e| anyhow!("session lock failed: {}", e))?;
 
         shared.guard.session.set_blocking(true);
-        let mut channel = shared.guard.session.channel_session()
+        let mut channel = shared
+            .guard
+            .session
+            .channel_session()
             .map_err(|e| anyhow!("创建 channel 失败: {}", e))?;
-        channel.setenv("LANG", "en_US.UTF-8")
+        channel
+            .setenv("LANG", "en_US.UTF-8")
             .map_err(|e| anyhow!("设置 LANG 环境变量失败: {}", e))?;
-        channel.setenv("LC_ALL", "en_US.UTF-8")
+        channel
+            .setenv("LC_ALL", "en_US.UTF-8")
             .map_err(|e| anyhow!("设置 LC_ALL 环境变量失败: {}", e))?;
-        channel.request_pty("xterm-256color", None, None)
+        channel
+            .request_pty("xterm-256color", None, None)
             .map_err(|e| anyhow!("请求 PTY 失败: {}", e))?;
-        channel.shell()
+        channel
+            .shell()
             .map_err(|e| anyhow!("启动 shell 失败: {}", e))?;
         shared.guard.session.set_blocking(false);
         drop(_lock);
 
-        info!(existing_session_id, new_channel_id, "复用 SSH 连接创建新 channel");
+        info!(
+            existing_session_id,
+            new_channel_id, "复用 SSH 连接创建新 channel"
+        );
 
-        let shared = self.sessions.get_mut(&session_key)
+        let shared = self
+            .sessions
+            .get_mut(&session_key)
             .ok_or_else(|| anyhow!("共享会话在添加 channel 前丢失"))?;
-        let active_channel = spawn_channel_reader(new_channel_id, channel, data_cb, closed_cb, session_lock_arc)?;
-        shared.channels.insert(new_channel_id.to_string(), active_channel);
+        let active_channel = spawn_channel_reader(
+            new_channel_id,
+            channel,
+            data_cb,
+            closed_cb,
+            session_lock_arc,
+        )?;
+        shared
+            .channels
+            .insert(new_channel_id.to_string(), active_channel);
         Ok(())
     }
 
@@ -244,10 +283,14 @@ impl SshManager {
     pub fn write(&self, session_id: &str, data: &[u8]) -> Result<()> {
         for shared in self.sessions.values() {
             if let Some(ch) = shared.channels.get(session_id) {
-                let _lock = shared.session_lock.lock().map_err(|_| anyhow!("session lock failed"))?;
+                let _lock = shared
+                    .session_lock
+                    .lock()
+                    .map_err(|_| anyhow!("session lock failed"))?;
                 let mut c = ch.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
                 c.write_all(data)?;
-                ch.bytes_written.fetch_add(data.len() as u64, Ordering::Relaxed);
+                ch.bytes_written
+                    .fetch_add(data.len() as u64, Ordering::Relaxed);
                 return Ok(());
             }
         }
@@ -257,7 +300,10 @@ impl SshManager {
     pub fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<()> {
         for shared in self.sessions.values() {
             if let Some(ch) = shared.channels.get(session_id) {
-                let _lock = shared.session_lock.lock().map_err(|_| anyhow!("session lock failed"))?;
+                let _lock = shared
+                    .session_lock
+                    .lock()
+                    .map_err(|_| anyhow!("session lock failed"))?;
                 let mut c = ch.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
                 c.request_pty_size(cols, rows, None, None)?;
                 return Ok(());

@@ -411,6 +411,7 @@ private struct ServerNodeRow: View {
             Button("SSH 终端") { appState.addTab(server: server, type: .terminal) }
             Button("SFTP") { appState.addTab(server: server, type: .sftp) }
             Button("监控") { appState.addTab(server: server, type: .monitor) }
+            Button("Docker") { appState.addTab(server: server, type: .docker) }
             Divider()
             Button("编辑") { appState.openDialog(server: server) }
             Button("删除", role: .destructive) { appState.deleteServer(server.id) }

@@ -3,14 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::db::Database;
+use crate::models::{expand_tilde, FileEntry, Server};
+use crate::ssh;
+use crate::transport;
 use anyhow::Result;
 use serde::Serialize;
 use ssh2::Sftp;
-use tracing::{info, error};
-use crate::models::{FileEntry, Server, expand_tilde};
-use crate::db::Database;
-use crate::transport;
-use crate::ssh;
+use tracing::{error, info};
 
 pub type ProgressCallback = Box<dyn Fn(u64, u64) + Send + Sync>;
 
@@ -23,7 +23,12 @@ pub struct TransferProgress {
 pub struct SftpManager;
 
 impl SftpManager {
-    fn with_sftp<F, T>(pool: &transport::SessionPool, server: &Server, db: &Database, f: F) -> Result<T>
+    fn with_sftp<F, T>(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        f: F,
+    ) -> Result<T>
     where
         F: FnOnce(&Sftp) -> Result<T>,
     {
@@ -46,7 +51,12 @@ impl SftpManager {
         new_pct > old_pct
     }
 
-    pub fn list_dir_full(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str) -> Result<Vec<FileEntry>> {
+    pub fn list_dir_full(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        path: &str,
+    ) -> Result<Vec<FileEntry>> {
         let escaped = path.replace("'", "'\\''");
         let cmd = format!(
             "find '{}' -maxdepth 1 -mindepth 1 -printf '%y\\t%f\\t%s\\t%T@\\t%m\\n' 2>/dev/null",
@@ -56,14 +66,19 @@ impl SftpManager {
         let mut entries = Vec::new();
         for line in output.lines() {
             let parts: Vec<&str> = line.splitn(5, '\t').collect();
-            if parts.len() < 5 { continue; }
+            if parts.len() < 5 {
+                continue;
+            }
             let type_char = parts[0];
             let name = parts[1].to_string();
-            if name.is_empty() || name == "." || name == ".." { continue; }
+            if name.is_empty() || name == "." || name == ".." {
+                continue;
+            }
             let is_dir = type_char == "d";
             let size: u64 = parts[2].parse().unwrap_or(0);
             let mtime_str = parts[3];
-            let mtime_epoch: i64 = mtime_str.split('.')
+            let mtime_epoch: i64 = mtime_str
+                .split('.')
                 .next()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
@@ -113,13 +128,17 @@ impl SftpManager {
             let mut last_time = Instant::now();
             loop {
                 let n = remote_file.read(&mut buf)?;
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 local_file.write_all(&buf[..n])?;
                 transferred += n as u64;
                 if let Some(cb) = progress_cb {
                     let now = Instant::now();
                     let elapsed = now.duration_since(last_time).as_millis() as u64;
-                    if (elapsed >= 300 || transferred == total) && Self::should_report(&last_reported, transferred, total) {
+                    if (elapsed >= 300 || transferred == total)
+                        && Self::should_report(&last_reported, transferred, total)
+                    {
                         last_reported.store(transferred, Ordering::Relaxed);
                         last_time = now;
                         cb(transferred, total);
@@ -164,13 +183,17 @@ impl SftpManager {
             let mut last_time = Instant::now();
             loop {
                 let n = local_file.read(&mut buf)?;
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 remote_file.write_all(&buf[..n])?;
                 transferred += n as u64;
                 if let Some(cb) = progress_cb {
                     let now = Instant::now();
                     let elapsed = now.duration_since(last_time).as_millis() as u64;
-                    if (elapsed >= 300 || transferred == total) && Self::should_report(&last_reported, transferred, total) {
+                    if (elapsed >= 300 || transferred == total)
+                        && Self::should_report(&last_reported, transferred, total)
+                    {
                         last_reported.store(transferred, Ordering::Relaxed);
                         last_time = now;
                         cb(transferred, total);
@@ -190,21 +213,42 @@ impl SftpManager {
         result
     }
 
-    pub fn mkdir(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str) -> Result<()> {
+    pub fn mkdir(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        path: &str,
+    ) -> Result<()> {
         Self::with_sftp(pool, server, db, |sftp| {
             sftp.mkdir(std::path::Path::new(path), 0o755)?;
             Ok(())
         })
     }
 
-    pub fn remove(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str, is_dir: bool) -> Result<()> {
+    pub fn remove(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        path: &str,
+        is_dir: bool,
+    ) -> Result<()> {
         Self::with_sftp(pool, server, db, |sftp| {
-            if is_dir { sftp.rmdir(std::path::Path::new(path))?; } else { sftp.unlink(std::path::Path::new(path))?; }
+            if is_dir {
+                sftp.rmdir(std::path::Path::new(path))?;
+            } else {
+                sftp.unlink(std::path::Path::new(path))?;
+            }
             Ok(())
         })
     }
 
-    pub fn read_text_file(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str, max_size: u64) -> Result<String> {
+    pub fn read_text_file(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        path: &str,
+        max_size: u64,
+    ) -> Result<String> {
         info!(target: "orbit::sftp", server = %server.name, path, max_size, "🔵 read_text_file 开始");
         let escaped = path.replace("'", "'\\''");
         let size_cmd = format!("stat -c%s '{}' 2>/dev/null || echo 0", escaped);
@@ -217,7 +261,11 @@ impl SftpManager {
         info!(target: "orbit::sftp", server = %server.name, path, size, "stat 结果");
         if size > max_size {
             error!(target: "orbit::sftp", server = %server.name, path, size, max_size, "文件过大");
-            return Err(anyhow::anyhow!("文件过大 ({} 字节)，超过限制 ({} 字节)", size, max_size));
+            return Err(anyhow::anyhow!(
+                "文件过大 ({} 字节)，超过限制 ({} 字节)",
+                size,
+                max_size
+            ));
         }
         let read_cmd = format!("head -c {} '{}' 2>/dev/null", max_size, escaped);
         info!(target: "orbit::sftp", server = %server.name, path, cmd = %read_cmd, "执行 head 命令");
@@ -230,7 +278,13 @@ impl SftpManager {
         Ok(content)
     }
 
-    pub fn write_text_file(pool: &transport::SessionPool, server: &Server, db: &Database, path: &str, content: &str) -> Result<()> {
+    pub fn write_text_file(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        path: &str,
+        content: &str,
+    ) -> Result<()> {
         info!(target: "orbit::sftp", server = %server.name, path, content_len = content.len(), "🔵 write_text_file 开始");
         let escaped = path.replace("'", "'\\''");
         let encoded = shell_encode(content);
@@ -244,7 +298,13 @@ impl SftpManager {
         Ok(())
     }
 
-    pub fn rename(pool: &transport::SessionPool, server: &Server, db: &Database, old_path: &str, new_path: &str) -> Result<()> {
+    pub fn rename(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<()> {
         info!(target: "orbit::sftp", server = %server.name, old_path, new_path, "🔵 rename 开始");
         let escaped_old = old_path.replace("'", "'\\''");
         let escaped_new = new_path.replace("'", "'\\''");
@@ -260,6 +320,5 @@ impl SftpManager {
 }
 
 fn shell_encode(s: &str) -> String {
-    s.replace('\'', "'\\''")
-        .replace('%', "%%")
+    s.replace('\'', "'\\''").replace('%', "%%")
 }

@@ -1,9 +1,9 @@
+use crate::crypto;
+use crate::models::*;
 use anyhow::Result;
 use rusqlite::Connection;
 use std::sync::Mutex;
-use tracing::{info, debug};
-use crate::models::*;
-use crate::crypto;
+use tracing::{debug, info};
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -42,7 +42,7 @@ impl Database {
                 key_passphrase TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            );"
+            );",
         )?;
 
         let migrations = [
@@ -68,7 +68,8 @@ impl Database {
         let mut encrypted_count = 0;
 
         let servers: Vec<(String, String, String, String)> = {
-            let mut stmt = conn.prepare("SELECT id, password, private_key, key_passphrase FROM servers")?;
+            let mut stmt =
+                conn.prepare("SELECT id, password, private_key, key_passphrase FROM servers")?;
             let rows = stmt.query_map([], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?;
@@ -82,9 +83,21 @@ impl Database {
             if !needs_update {
                 continue;
             }
-            let enc_pw = if crypto::is_encrypted(password) { password.clone() } else { crypto::encrypt(password) };
-            let enc_key = if crypto::is_encrypted(private_key) { private_key.clone() } else { crypto::encrypt(private_key) };
-            let enc_pp = if crypto::is_encrypted(key_passphrase) { key_passphrase.clone() } else { crypto::encrypt(key_passphrase) };
+            let enc_pw = if crypto::is_encrypted(password) {
+                password.clone()
+            } else {
+                crypto::encrypt(password)
+            };
+            let enc_key = if crypto::is_encrypted(private_key) {
+                private_key.clone()
+            } else {
+                crypto::encrypt(private_key)
+            };
+            let enc_pp = if crypto::is_encrypted(key_passphrase) {
+                key_passphrase.clone()
+            } else {
+                crypto::encrypt(key_passphrase)
+            };
             conn.execute(
                 "UPDATE servers SET password=?1, private_key=?2, key_passphrase=?3 WHERE id=?4",
                 rusqlite::params![enc_pw, enc_key, enc_pp, id],
@@ -97,7 +110,9 @@ impl Database {
         }
 
         let groups: Vec<(String, String, String, String)> = {
-            let mut stmt = conn.prepare("SELECT id, password, private_key, key_passphrase FROM credential_groups")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, password, private_key, key_passphrase FROM credential_groups",
+            )?;
             let rows = stmt.query_map([], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?;
@@ -111,9 +126,21 @@ impl Database {
             if !needs_update {
                 continue;
             }
-            let enc_pw = if crypto::is_encrypted(password) { password.clone() } else { crypto::encrypt(password) };
-            let enc_key = if crypto::is_encrypted(private_key) { private_key.clone() } else { crypto::encrypt(private_key) };
-            let enc_pp = if crypto::is_encrypted(key_passphrase) { key_passphrase.clone() } else { crypto::encrypt(key_passphrase) };
+            let enc_pw = if crypto::is_encrypted(password) {
+                password.clone()
+            } else {
+                crypto::encrypt(password)
+            };
+            let enc_key = if crypto::is_encrypted(private_key) {
+                private_key.clone()
+            } else {
+                crypto::encrypt(private_key)
+            };
+            let enc_pp = if crypto::is_encrypted(key_passphrase) {
+                key_passphrase.clone()
+            } else {
+                crypto::encrypt(key_passphrase)
+            };
             conn.execute(
                 "UPDATE credential_groups SET password=?1, private_key=?2, key_passphrase=?3 WHERE id=?4",
                 rusqlite::params![enc_pw, enc_key, enc_pp, id],
@@ -156,9 +183,12 @@ impl Database {
     pub fn list_servers(&self) -> Result<Vec<Server>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM servers ORDER BY group_name, name", Self::SERVER_COLUMNS
+            "SELECT {} FROM servers ORDER BY group_name, name",
+            Self::SERVER_COLUMNS
         ))?;
-        let servers = stmt.query_map([], |row| Self::row_to_server(row))?.collect::<Result<Vec<_>, _>>()?;
+        let servers = stmt
+            .query_map([], |row| Self::row_to_server(row))?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(servers)
     }
 
@@ -198,14 +228,27 @@ impl Database {
         };
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            &format!("INSERT INTO servers ({}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", Self::SERVER_COLUMNS),
+            &format!(
+                "INSERT INTO servers ({}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                Self::SERVER_COLUMNS
+            ),
             rusqlite::params![
-                server.id, server.name, server.host, server.port,
-                server.group_name, server.auth_type, server.username,
-                enc_password, enc_private_key, server.key_source,
-                server.key_file_path, enc_key_passphrase,
-                server.credential_group_id, server.jump_server_id,
-                server.created_at, server.updated_at,
+                server.id,
+                server.name,
+                server.host,
+                server.port,
+                server.group_name,
+                server.auth_type,
+                server.username,
+                enc_password,
+                enc_private_key,
+                server.key_source,
+                server.key_file_path,
+                enc_key_passphrase,
+                server.credential_group_id,
+                server.jump_server_id,
+                server.created_at,
+                server.updated_at,
             ],
         )?;
         Ok(server)
@@ -264,16 +307,22 @@ impl Database {
     pub fn list_credential_groups(&self) -> Result<Vec<CredentialGroup>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM credential_groups ORDER BY name", Self::CG_COLUMNS
+            "SELECT {} FROM credential_groups ORDER BY name",
+            Self::CG_COLUMNS
         ))?;
-        let groups = stmt.query_map([], |row| Self::row_to_credential_group(row))?.collect::<Result<Vec<_>, _>>()?;
+        let groups = stmt
+            .query_map([], |row| Self::row_to_credential_group(row))?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(groups)
     }
 
     pub fn get_credential_group(&self, id: &str) -> Result<CredentialGroup> {
         let conn = self.conn.lock().unwrap();
         let group = conn.query_row(
-            &format!("SELECT {} FROM credential_groups WHERE id = ?1", Self::CG_COLUMNS),
+            &format!(
+                "SELECT {} FROM credential_groups WHERE id = ?1",
+                Self::CG_COLUMNS
+            ),
             [id],
             |row| Self::row_to_credential_group(row),
         )?;
@@ -301,18 +350,32 @@ impl Database {
         };
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            &format!("INSERT INTO credential_groups ({}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)", Self::CG_COLUMNS),
+            &format!(
+                "INSERT INTO credential_groups ({}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                Self::CG_COLUMNS
+            ),
             rusqlite::params![
-                &group.id, &group.name, &group.auth_type, &group.username,
-                enc_password, enc_private_key, &group.key_source,
-                &group.key_file_path, enc_key_passphrase,
-                &group.created_at, &group.updated_at,
+                &group.id,
+                &group.name,
+                &group.auth_type,
+                &group.username,
+                enc_password,
+                enc_private_key,
+                &group.key_source,
+                &group.key_file_path,
+                enc_key_passphrase,
+                &group.created_at,
+                &group.updated_at,
             ],
         )?;
         Ok(group)
     }
 
-    pub fn update_credential_group(&self, id: &str, input: &CredentialGroupInput) -> Result<CredentialGroup> {
+    pub fn update_credential_group(
+        &self,
+        id: &str,
+        input: &CredentialGroupInput,
+    ) -> Result<CredentialGroup> {
         let now = chrono::Utc::now().to_rfc3339();
         let enc_password = crypto::encrypt(&input.password.as_deref().unwrap_or(""));
         let enc_private_key = crypto::encrypt(&input.private_key.as_deref().unwrap_or(""));
@@ -338,7 +401,10 @@ impl Database {
     pub fn delete_credential_group(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM credential_groups WHERE id = ?1", [id])?;
-        conn.execute("UPDATE servers SET credential_group_id = '' WHERE credential_group_id = ?1", [id])?;
+        conn.execute(
+            "UPDATE servers SET credential_group_id = '' WHERE credential_group_id = ?1",
+            [id],
+        )?;
         Ok(())
     }
 }

@@ -11,6 +11,16 @@ struct SessionToolDockView: View {
             dockButton(.snippets, symbol: "text.insert", title: "Snippets")
             dockButton(.logs, symbol: "list.bullet.rectangle", title: "Logs")
 
+            Button(action: openDockerTab) {
+                Image(systemName: "shippingbox")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.plain)
+            .disabled(activeServer() == nil)
+            .foregroundStyle(activeServer() == nil ? Color.secondary.opacity(0.35) : Color.secondary)
+            .help(activeServer() == nil ? "选择远端服务器后可用 Docker" : "Docker")
+
             Button(action: openDatabaseTab) {
                 Image(systemName: "cylinder.split.1x2")
                     .font(.system(size: 14, weight: .semibold))
@@ -57,6 +67,16 @@ struct SessionToolDockView: View {
         .disabled(disabledReason != nil)
         .foregroundStyle(disabledReason == nil ? (isActive ? Color.accentColor : Color.secondary) : Color.secondary.opacity(0.35))
         .help(disabledReason ?? title)
+    }
+
+    private func activeServer() -> Server? {
+        guard let serverId = appState.activeSessionContext.serverId, serverId != "local" else { return nil }
+        return appState.servers.first(where: { $0.id == serverId })
+    }
+
+    private func openDockerTab() {
+        guard let server = activeServer() else { return }
+        appState.addTab(server: server, type: .docker)
     }
 
     private func openDatabaseTab() {

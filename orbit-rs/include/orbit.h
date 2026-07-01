@@ -75,6 +75,14 @@ ORBIT_API int32_t orbit_get_server_home(struct OrbitApp *app, const char *server
 
 ORBIT_API int32_t orbit_get_server_processes(struct OrbitApp *app, const char *server_id, char **out_json);
 
+ORBIT_API int32_t orbit_docker_list_containers(struct OrbitApp *app, const char *server_id, char **out_json);
+
+ORBIT_API int32_t orbit_docker_stats(struct OrbitApp *app, const char *server_id, char **out_json);
+
+ORBIT_API int32_t orbit_docker_logs(struct OrbitApp *app, const char *server_id, const char *container_id, uint32_t tail, char **out_logs);
+
+ORBIT_API int32_t orbit_docker_action(struct OrbitApp *app, const char *server_id, const char *container_id, const char *action, char **out_output);
+
 ORBIT_API void orbit_shutdown_pool(struct OrbitApp *app);
 
 ORBIT_API void orbit_free_string(char *s);

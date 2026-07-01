@@ -1,7 +1,7 @@
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
-use aes_gcm::{Aes256Gcm, AeadCore, Nonce};
-use base64::{Engine, engine::general_purpose::STANDARD};
-use sha2::{Sha256, Digest};
+use aes_gcm::{AeadCore, Aes256Gcm, Nonce};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use sha2::{Digest, Sha256};
 
 const SALT: &[u8] = b"orbit-credential-encryption-salt-v1";
 
@@ -67,6 +67,7 @@ pub fn is_encrypted(value: &str) -> bool {
         return false;
     }
     STANDARD.decode(value).map_or(false, |bytes| {
-        bytes.len() >= ENCRYPTION_PREFIX.len() + 12 && &bytes[..ENCRYPTION_PREFIX.len()] == ENCRYPTION_PREFIX
+        bytes.len() >= ENCRYPTION_PREFIX.len() + 12
+            && &bytes[..ENCRYPTION_PREFIX.len()] == ENCRYPTION_PREFIX
     })
 }

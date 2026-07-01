@@ -95,6 +95,45 @@ enum TabType: String, CaseIterable {
     case sftp
     case monitor
     case database
+    case docker
+}
+
+struct DockerContainer: Codable, Identifiable {
+    let id: String
+    let name: String
+    let image: String
+    let command: String
+    let status: String
+    let state: String
+    let ports: String
+    let created: String
+    let running_for: String
+    let size: String
+
+    var shortId: String { String(id.prefix(12)) }
+    var isRunning: Bool { state.lowercased() == "running" || status.lowercased().hasPrefix("up") }
+}
+
+struct DockerContainerStats: Codable, Identifiable {
+    let id: String
+    let name: String
+    let cpu_percent: String
+    let memory_usage: String
+    let memory_percent: String
+    let network_io: String
+    let block_io: String
+    let pids: String
+}
+
+struct DockerPanelSnapshot {
+    var containers: [DockerContainer] = []
+    var statsById: [String: DockerContainerStats] = [:]
+    var selectedContainerId: String?
+    var logs: String = ""
+    var query: String = ""
+    var logQuery: String = ""
+    var error: String?
+    var lastUpdated: Date?
 }
 
 enum AppTheme: String, CaseIterable {
@@ -145,6 +184,7 @@ struct TabItem: Identifiable {
     var sessionId: String?
     var paneTree: PaneNode?
     var focusedChannelId: String?
+    var initialCommand: String?
 }
 
 enum SplitDirection: String, Codable {

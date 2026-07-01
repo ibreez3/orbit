@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use ssh2::Session;
-use tracing::{debug, info, warn, error, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::db::Database;
 use crate::models::{CredentialGroup, ResolvedAuth, Server};
@@ -65,11 +65,14 @@ fn authenticate_session(server: &Server, db: &Database, session: &mut Session) -
 
 #[instrument(skip(db), fields(host = %server.host, port = server.port))]
 fn create_direct_session(server: &Server, db: &Database) -> Result<SessionGuard> {
-    let tcp = TcpStream::connect((server.host.as_str(), server.port))
-        .map_err(|e| {
-            error!(error = %e, "TCP 连接失败");
-            anyhow!("连接失败 {}:{} - 请检查主机地址和端口是否正确，以及网络是否可达", server.host, server.port)
-        })?;
+    let tcp = TcpStream::connect((server.host.as_str(), server.port)).map_err(|e| {
+        error!(error = %e, "TCP 连接失败");
+        anyhow!(
+            "连接失败 {}:{} - 请检查主机地址和端口是否正确，以及网络是否可达",
+            server.host,
+            server.port
+        )
+    })?;
     tcp.set_nonblocking(false)?;
     let mut session = Session::new()?;
     session.set_tcp_stream(tcp);
@@ -79,22 +82,28 @@ fn create_direct_session(server: &Server, db: &Database) -> Result<SessionGuard>
     })?;
     authenticate_session(server, db, &mut session)?;
     info!("直连会话建立成功");
-    Ok(SessionGuard { session, _proxy: None })
+    Ok(SessionGuard {
+        session,
+        _proxy: None,
+    })
 }
 
 #[instrument(skip(db), fields(host = %server.host, port = server.port))]
 fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
-    let jump_server = db.get_server(&server.jump_server_id)
-        .map_err(|e| {
-            error!(jump_id = %server.jump_server_id, error = %e, "跳板机服务器不存在");
-            anyhow!("跳板机服务器不存在 (id: {})", server.jump_server_id)
-        })?;
+    let jump_server = db.get_server(&server.jump_server_id).map_err(|e| {
+        error!(jump_id = %server.jump_server_id, error = %e, "跳板机服务器不存在");
+        anyhow!("跳板机服务器不存在 (id: {})", server.jump_server_id)
+    })?;
 
     info!(jump_host = %jump_server.host, jump_port = jump_server.port, "连接跳板机");
-    let jump_tcp = TcpStream::connect((jump_server.host.as_str(), jump_server.port))
-        .map_err(|e| {
+    let jump_tcp =
+        TcpStream::connect((jump_server.host.as_str(), jump_server.port)).map_err(|e| {
             error!(jump_host = %jump_server.host, error = %e, "跳板机 TCP 连接失败");
-            anyhow!("跳板机连接失败 {}:{} - 请检查跳板机地址和网络", jump_server.host, jump_server.port)
+            anyhow!(
+                "跳板机连接失败 {}:{} - 请检查跳板机地址和网络",
+                jump_server.host,
+                jump_server.port
+            )
         })?;
     jump_tcp.set_nonblocking(false)?;
     let mut jump_session = Session::new()?;
@@ -106,7 +115,10 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
     authenticate_session(&jump_server, db, &mut jump_session)?;
     jump_session.set_blocking(true);
 
-    info!(target = format!("{}:{}", server.host, server.port), "建立 TCP 转发隧道");
+    info!(
+        target = format!("{}:{}", server.host, server.port),
+        "建立 TCP 转发隧道"
+    );
     let tunnel = jump_session.channel_direct_tcpip(
         server.host.as_str(), server.port, None,
     ).map_err(|e| {
@@ -139,17 +151,21 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
     let (proxy_port, proxy_handle, proxy_running) = start_local_proxy(tunnel, jump_session);
     debug!(proxy_port, "本地代理已启动");
 
-    let tcp = TcpStream::connect(("127.0.0.1", proxy_port))
-        .map_err(|e| {
-            error!(proxy_port, error = %e, "连接本地代理失败");
-            anyhow!("连接本地代理失败: {}", e)
-        })?;
+    let tcp = TcpStream::connect(("127.0.0.1", proxy_port)).map_err(|e| {
+        error!(proxy_port, error = %e, "连接本地代理失败");
+        anyhow!("连接本地代理失败: {}", e)
+    })?;
     tcp.set_nonblocking(false)?;
     let mut session = Session::new()?;
     session.set_tcp_stream(tcp);
     session.handshake().map_err(|e| {
         error!(error = %e, "目标服务器握手失败");
-        anyhow!("目标服务器握手失败 - 请确认跳板机能够访问 {}:{} ({})", server.host, server.port, e)
+        anyhow!(
+            "目标服务器握手失败 - 请确认跳板机能够访问 {}:{} ({})",
+            server.host,
+            server.port,
+            e
+        )
     })?;
     authenticate_session(server, db, &mut session)?;
 
@@ -163,7 +179,10 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
     })
 }
 
-fn start_local_proxy(tunnel: ssh2::Channel, keep_alive: Session) -> (u16, std::thread::JoinHandle<()>, std::sync::Arc<AtomicBool>) {
+fn start_local_proxy(
+    tunnel: ssh2::Channel,
+    keep_alive: Session,
+) -> (u16, std::thread::JoinHandle<()>, std::sync::Arc<AtomicBool>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("无法绑定本地代理端口");
     let proxy_port = listener.local_addr().unwrap().port();
     let running = std::sync::Arc::new(AtomicBool::new(true));
@@ -317,7 +336,8 @@ impl SessionPool {
         let entry = {
             let pool = self.inner.lock().map_err(|_| anyhow!("连接池锁定失败"))?;
             pool.get(server_id).cloned()
-        }.ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
+        }
+        .ok_or_else(|| anyhow!("连接池中无此服务器会话"))?;
         let mut g = entry.guard.lock().map_err(|_| anyhow!("会话锁定失败"))?;
         f(&mut g.session)
     }

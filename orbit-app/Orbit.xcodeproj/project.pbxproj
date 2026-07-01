@@ -50,6 +50,7 @@
 		D48895C458D1C1630C41D403 /* tokyo-night.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 5A58E42EA49E82B92FA0F9F1 /* tokyo-night.orbit-theme */; };
 		D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452C79E5111500BF24C41C53 /* SpotlightView.swift */; };
 		DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */; };
+		DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1530B85453C445BFC0E5E860 /* DockerView.swift */; };
 		DAE7F6E609EA79B75390ABD6 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64825B472441C790427EFF55 /* AppState.swift */; };
 		E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E812A16C099009B7BB010371 /* ServerDialog.swift */; };
 		EE85C664EE48A8EE1FC69A4E /* catppuccin-mocha.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */; };
@@ -62,6 +63,7 @@
 		0773DA574B3B4BD620488CE0 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		08F1ADE58D311170A9C63C4E /* MonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorView.swift; sourceTree = "<group>"; };
 		0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialGroupDialog.swift; sourceTree = "<group>"; };
+		1530B85453C445BFC0E5E860 /* DockerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockerView.swift; sourceTree = "<group>"; };
 		1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditorView.swift; sourceTree = "<group>"; };
 		1E3983C4735026A30426864D /* DatabaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseView.swift; sourceTree = "<group>"; };
 		1E6CC1F2F6074726A3E3D401 /* gruvbox-dark.orbit-theme */ = {isa = PBXFileReference; path = "gruvbox-dark.orbit-theme"; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */,
 				0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */,
 				1E3983C4735026A30426864D /* DatabaseView.swift */,
+				1530B85453C445BFC0E5E860 /* DockerView.swift */,
 				3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */,
 				495DCA72659439056D676B45 /* HomeView.swift */,
 				20E9630F023416DA2028BB98 /* MainView.swift */,
@@ -320,6 +323,7 @@
 				C785EF55D48C3015D138C8FA /* BatchExecutionView.swift in Sources */,
 				C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */,
 				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
+				DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */,
 				DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */,
 				0B108A04325E375330215A8F /* HomeView.swift in Sources */,
 				9864F6FA7399046CFED1A7AB /* KeyBindings.swift in Sources */,

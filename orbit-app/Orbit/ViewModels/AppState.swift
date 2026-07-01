@@ -48,6 +48,7 @@ class AppState: ObservableObject {
     @Published var auditEventsByContext: [String: [AuditEvent]] = [:]
     @Published var activeSftpTransferTabIds: Set<String> = []
     @Published var databaseAIContexts: [String: DatabaseAIContext] = [:]
+    @Published var dockerPanelSnapshots: [String: DockerPanelSnapshot] = [:]
     @Published var assetTreeWidth: CGFloat = 220
     @Published var recentServers: [String] = []     // 最多 6 个 serverId
     @Published var assetTreeSearchQuery: String = ""
@@ -206,11 +207,15 @@ class AppState: ObservableObject {
                 try bridge.deleteServer(id: id)
                 await MainActor.run {
                     let tabsToRemove = tabs.filter { $0.serverId == id }
+                    let dockerTabIdsToRemove = Set(tabsToRemove.filter { $0.type == .docker }.map(\.id))
                     for tab in tabsToRemove {
                         disconnectAllChannels(tab: tab)
                     }
                     servers.removeAll { $0.id == id }
                     tabs.removeAll { $0.serverId == id }
+                    for tabId in dockerTabIdsToRemove {
+                        dockerPanelSnapshots.removeValue(forKey: tabId)
+                    }
                     if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
                         closeSessionScopedTools()
                         activeTabId = tabs.last?.id
@@ -275,8 +280,8 @@ class AppState: ObservableObject {
     }
 
     func addTab(server: Server, type: TabType) {
-        if type == .monitor {
-            if let existing = tabs.first(where: { $0.type == .monitor && $0.serverId == server.id }) {
+        if type == .monitor || type == .docker {
+            if let existing = tabs.first(where: { $0.type == type && $0.serverId == server.id }) {
                 requestActivateTab(existing.id)
                 return
             }
@@ -286,6 +291,8 @@ class AppState: ObservableObject {
             .terminal: "SSH: \(server.name)",
             .sftp: "SFTP: \(server.name)",
             .monitor: "Monitor: \(server.name)",
+            .docker: "Docker: \(server.name)",
+            .database: "Database: \(server.name)",
         ]
         var tab = TabItem(id: id, type: type, serverId: server.id, serverName: server.name, title: titles[type] ?? "")
         if type == .terminal {
@@ -294,6 +301,29 @@ class AppState: ObservableObject {
         tabs.append(tab)
         trackRecentServer(server.id)
         requestActivateTab(id)
+    }
+
+    func addTerminalTab(server: Server, title: String? = nil, initialCommand: String? = nil) {
+        let id = "terminal-\(server.id)-\(Int(Date().timeIntervalSince1970 * 1000))"
+        var tab = TabItem(
+            id: id,
+            type: .terminal,
+            serverId: server.id,
+            serverName: server.name,
+            title: title ?? "SSH: \(server.name)",
+            initialCommand: initialCommand
+        )
+        tab.paneTree = nil
+        tabs.append(tab)
+        trackRecentServer(server.id)
+        requestActivateTab(id)
+    }
+
+    func consumeInitialCommand(tabId: String) -> String? {
+        guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
+        let command = tabs[idx].initialCommand
+        tabs[idx].initialCommand = nil
+        return command
     }
 
     @discardableResult
@@ -365,6 +395,14 @@ class AppState: ObservableObject {
             sqlText: sqlText,
             resultSummary: resultSummary
         )
+    }
+
+    func saveDockerPanelSnapshot(_ snapshot: DockerPanelSnapshot, for tabId: String) {
+        dockerPanelSnapshots[tabId] = snapshot
+    }
+
+    func dockerPanelSnapshot(for tabId: String) -> DockerPanelSnapshot? {
+        dockerPanelSnapshots[tabId]
     }
 
     func openTool(_ tool: SessionTool, presentation: ToolPresentation = .floating) {
@@ -653,6 +691,7 @@ class AppState: ObservableObject {
         if let tab = tabs.first(where: { $0.id == id }) {
             disconnectAllChannels(tab: tab)
         }
+        dockerPanelSnapshots.removeValue(forKey: id)
         tabs.removeAll { $0.id == id }
         if activeTabId == id {
             closeSessionScopedTools()

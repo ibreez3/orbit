@@ -194,6 +194,9 @@ struct MainView: View {
         case .database:
             DatabaseView(tab: tab)
                 .id(tab.id)
+        case .docker:
+            DockerView(tab: tab)
+                .id(tab.id)
         }
     }
 

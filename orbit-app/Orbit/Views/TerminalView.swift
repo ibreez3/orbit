@@ -388,6 +388,7 @@ struct TerminalView: NSViewRepresentable {
                 } else {
                     shell.start()
                 }
+                self.scheduleInitialCommandForLocalShell()
             }
         }
 
@@ -407,12 +408,35 @@ struct TerminalView: NSViewRepresentable {
                             let term = tv.getTerminal()
                             do { try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(connect) failed: \(error)") }
                         }
+                        self.scheduleInitialCommandForSSH(sessionId: sid)
                     }
                 } catch {
                     guard alive else { return }
                     await MainActor.run {
                         terminalView?.feed(text: "\u{1b}[31m连接失败: \(error)\u{1b}[0m\r\n")
                     }
+                }
+            }
+        }
+
+        private func scheduleInitialCommandForLocalShell() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.alive, let shell = self.localShell else { return }
+                guard let command = self.appState.consumeInitialCommand(tabId: self.tabId),
+                      !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                shell.write(Data((command + "\r").utf8))
+            }
+        }
+
+        private func scheduleInitialCommandForSSH(sessionId: String) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.alive else { return }
+                guard let command = self.appState.consumeInitialCommand(tabId: self.tabId),
+                      !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                do {
+                    try OrbitBridge.shared.writeSSH(sessionId: sessionId, data: Data((command + "\r").utf8))
+                } catch {
+                    print("[Orbit] initial command failed for session \(sessionId): \(error)")
                 }
             }
         }

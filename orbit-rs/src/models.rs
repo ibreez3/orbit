@@ -103,6 +103,32 @@ pub struct ProcessInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DockerContainer {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    pub command: String,
+    pub status: String,
+    pub state: String,
+    pub ports: String,
+    pub created: String,
+    pub running_for: String,
+    pub size: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DockerContainerStats {
+    pub id: String,
+    pub name: String,
+    pub cpu_percent: String,
+    pub memory_usage: String,
+    pub memory_percent: String,
+    pub network_io: String,
+    pub block_io: String,
+    pub pids: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileEntryStat {
     pub path: String,
     pub size: u64,
@@ -191,7 +217,8 @@ impl ResolvedAuth {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(&tmp_key, std::fs::Permissions::from_mode(0o600));
+                    let _ =
+                        std::fs::set_permissions(&tmp_key, std::fs::Permissions::from_mode(0o600));
                 }
                 let result = session.userauth_pubkey_file(
                     &self.username,

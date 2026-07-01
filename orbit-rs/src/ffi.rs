@@ -1,14 +1,15 @@
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
-use crate::{OrbitApp, init_logging};
+use crate::docker;
 use crate::models::*;
-use crate::ssh;
-use crate::sftp;
 use crate::monitor;
+use crate::sftp;
 use crate::sftp::SftpManager;
-use tracing::{info, error};
+use crate::ssh;
+use crate::{init_logging, OrbitApp};
+use tracing::{error, info};
 
 pub type OrbitDataCallback = extern "C" fn(*const c_char, *const u8, usize, *mut c_void);
 pub type OrbitClosedCallback = extern "C" fn(*const c_char, *mut c_void);
@@ -55,7 +56,11 @@ pub extern "C" fn orbit_list_servers(app: *mut OrbitApp, out_json: *mut *mut c_c
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_add_server(app: *mut OrbitApp, json_input: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_add_server(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || json_input.is_null() || out_json.is_null() {
         return -1;
     }
@@ -71,7 +76,12 @@ pub extern "C" fn orbit_add_server(app: *mut OrbitApp, json_input: *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_update_server(app: *mut OrbitApp, id: *const c_char, json_input: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_update_server(
+    app: *mut OrbitApp,
+    id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || id.is_null() || json_input.is_null() || out_json.is_null() {
         return -1;
     }
@@ -108,7 +118,10 @@ pub extern "C" fn orbit_delete_server(app: *mut OrbitApp, id: *const c_char) -> 
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_list_credential_groups(app: *mut OrbitApp, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_list_credential_groups(
+    app: *mut OrbitApp,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || out_json.is_null() {
         return -1;
     }
@@ -120,7 +133,11 @@ pub extern "C" fn orbit_list_credential_groups(app: *mut OrbitApp, out_json: *mu
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_add_credential_group(app: *mut OrbitApp, json_input: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_add_credential_group(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || json_input.is_null() || out_json.is_null() {
         return -1;
     }
@@ -136,7 +153,12 @@ pub extern "C" fn orbit_add_credential_group(app: *mut OrbitApp, json_input: *co
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_update_credential_group(app: *mut OrbitApp, id: *const c_char, json_input: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_update_credential_group(
+    app: *mut OrbitApp,
+    id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || id.is_null() || json_input.is_null() || out_json.is_null() {
         return -1;
     }
@@ -200,7 +222,13 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
         updated_at: String::new(),
     };
     match crate::transport::create_session(&server, &app.db) {
-        Ok(guard) => if guard.session.authenticated() { 1 } else { 0 },
+        Ok(guard) => {
+            if guard.session.authenticated() {
+                1
+            } else {
+                0
+            }
+        }
         Err(_) => 0,
     }
 }
@@ -277,13 +305,25 @@ pub extern "C" fn orbit_connect_ssh(
 
         match channel_result {
             Ok(channel) => {
-                match ssh::spawn_channel_reader(&session_id, channel, data_cb, closed_cb, session_lock.clone()) {
+                match ssh::spawn_channel_reader(
+                    &session_id,
+                    channel,
+                    data_cb,
+                    closed_cb,
+                    session_lock.clone(),
+                ) {
                     Ok(active_channel) => {
                         let mut mgr = match app.ssh.lock() {
                             Ok(m) => m,
                             Err(_) => return -4,
                         };
-                        mgr.register_session(&session_id, sid_str, guard, active_channel, session_lock);
+                        mgr.register_session(
+                            &session_id,
+                            sid_str,
+                            guard,
+                            active_channel,
+                            session_lock,
+                        );
                         let c_id = CString::new(sid_for_cb).unwrap_or_default();
                         unsafe { *out_session_id = c_id.into_raw() };
                         return 0;
@@ -336,7 +376,11 @@ pub extern "C" fn orbit_connect_ssh(
 
     let session_lock = std::sync::Arc::new(std::sync::Mutex::new(()));
     let active_channel = match ssh::spawn_channel_reader(
-        &session_id, channel, data_cb, closed_cb, session_lock.clone(),
+        &session_id,
+        channel,
+        data_cb,
+        closed_cb,
+        session_lock.clone(),
     ) {
         Ok(ac) => ac,
         Err(_) => return -9,
@@ -404,7 +448,12 @@ pub extern "C" fn orbit_spawn_channel(
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_write_ssh(app: *mut OrbitApp, session_id: *const c_char, data: *const u8, data_len: usize) -> i32 {
+pub extern "C" fn orbit_write_ssh(
+    app: *mut OrbitApp,
+    session_id: *const c_char,
+    data: *const u8,
+    data_len: usize,
+) -> i32 {
     if app.is_null() || session_id.is_null() || data.is_null() {
         return -1;
     }
@@ -425,7 +474,12 @@ pub extern "C" fn orbit_write_ssh(app: *mut OrbitApp, session_id: *const c_char,
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_resize_ssh(app: *mut OrbitApp, session_id: *const c_char, cols: u32, rows: u32) -> i32 {
+pub extern "C" fn orbit_resize_ssh(
+    app: *mut OrbitApp,
+    session_id: *const c_char,
+    cols: u32,
+    rows: u32,
+) -> i32 {
     if app.is_null() || session_id.is_null() {
         return -1;
     }
@@ -465,7 +519,12 @@ pub extern "C" fn orbit_disconnect_ssh(app: *mut OrbitApp, session_id: *const c_
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_get_ssh_traffic(app: *mut OrbitApp, session_id: *const c_char, out_read: *mut u64, out_written: *mut u64) -> i32 {
+pub extern "C" fn orbit_get_ssh_traffic(
+    app: *mut OrbitApp,
+    session_id: *const c_char,
+    out_read: *mut u64,
+    out_written: *mut u64,
+) -> i32 {
     if app.is_null() || session_id.is_null() {
         return -1;
     }
@@ -493,7 +552,12 @@ pub extern "C" fn orbit_get_ssh_traffic(app: *mut OrbitApp, session_id: *const c
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_sftp_list_full(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_sftp_list_full(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    path: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || server_id.is_null() || path.is_null() || out_json.is_null() {
         return -1;
     }
@@ -597,7 +661,11 @@ pub extern "C" fn orbit_sftp_upload(
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_sftp_mkdir(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char) -> i32 {
+pub extern "C" fn orbit_sftp_mkdir(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    path: *const c_char,
+) -> i32 {
     if app.is_null() || server_id.is_null() || path.is_null() {
         return -1;
     }
@@ -621,7 +689,12 @@ pub extern "C" fn orbit_sftp_mkdir(app: *mut OrbitApp, server_id: *const c_char,
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_sftp_remove(app: *mut OrbitApp, server_id: *const c_char, path: *const c_char, is_dir: bool) -> i32 {
+pub extern "C" fn orbit_sftp_remove(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    path: *const c_char,
+    is_dir: bool,
+) -> i32 {
     if app.is_null() || server_id.is_null() || path.is_null() {
         return -1;
     }
@@ -788,7 +861,11 @@ pub extern "C" fn orbit_sftp_rename(
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_get_server_stats(app: *mut OrbitApp, server_id: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_get_server_stats(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || server_id.is_null() || out_json.is_null() {
         return -1;
     }
@@ -801,7 +878,8 @@ pub extern "C" fn orbit_get_server_stats(app: *mut OrbitApp, server_id: *const c
         Ok(s) => s,
         Err(_) => return -3,
     };
-    match ssh::SshManager::exec_command(&app.pool, &server, &app.db, monitor::get_monitor_script()) {
+    match ssh::SshManager::exec_command(&app.pool, &server, &app.db, monitor::get_monitor_script())
+    {
         Ok(output) => match monitor::collect_stats(&output) {
             Ok(stats) => json_to_out(&stats, out_json),
             Err(_) => -5,
@@ -811,7 +889,11 @@ pub extern "C" fn orbit_get_server_stats(app: *mut OrbitApp, server_id: *const c
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_get_server_home(app: *mut OrbitApp, server_id: *const c_char, out_home: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_get_server_home(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    out_home: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || server_id.is_null() || out_home.is_null() {
         return -1;
     }
@@ -836,7 +918,11 @@ pub extern "C" fn orbit_get_server_home(app: *mut OrbitApp, server_id: *const c_
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_get_server_processes(app: *mut OrbitApp, server_id: *const c_char, out_json: *mut *mut c_char) -> i32 {
+pub extern "C" fn orbit_get_server_processes(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
     if app.is_null() || server_id.is_null() || out_json.is_null() {
         return -1;
     }
@@ -849,7 +935,8 @@ pub extern "C" fn orbit_get_server_processes(app: *mut OrbitApp, server_id: *con
         Ok(s) => s,
         Err(_) => return -3,
     };
-    match ssh::SshManager::exec_command(&app.pool, &server, &app.db, monitor::get_process_script()) {
+    match ssh::SshManager::exec_command(&app.pool, &server, &app.db, monitor::get_process_script())
+    {
         Ok(output) => {
             let processes = monitor::parse_processes(&output);
             json_to_out(&processes, out_json)
@@ -859,8 +946,147 @@ pub extern "C" fn orbit_get_server_processes(app: *mut OrbitApp, server_id: *con
 }
 
 #[no_mangle]
+pub extern "C" fn orbit_docker_list_containers(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    match docker::DockerManager::list_containers(&app.pool, &server, &app.db) {
+        Ok(containers) => json_to_out(&containers, out_json),
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, error = %e, "Docker 容器列表获取失败");
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_docker_stats(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    match docker::DockerManager::stats(&app.pool, &server, &app.db) {
+        Ok(stats) => json_to_out(&stats, out_json),
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, error = %e, "Docker stats 获取失败");
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_docker_logs(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    container_id: *const c_char,
+    tail: u32,
+    out_logs: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || container_id.is_null() || out_logs.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let cid = match unsafe { CStr::from_ptr(container_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    match docker::DockerManager::logs(&app.pool, &server, &app.db, cid, tail) {
+        Ok(logs) => {
+            let c_logs = CString::new(logs).unwrap_or_default();
+            unsafe { *out_logs = c_logs.into_raw() };
+            0
+        }
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, container_id = %cid, error = %e, "Docker logs 获取失败");
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_docker_action(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    container_id: *const c_char,
+    action: *const c_char,
+    out_output: *mut *mut c_char,
+) -> i32 {
+    if app.is_null()
+        || server_id.is_null()
+        || container_id.is_null()
+        || action.is_null()
+        || out_output.is_null()
+    {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let cid = match unsafe { CStr::from_ptr(container_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let action_str = match unsafe { CStr::from_ptr(action) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    match docker::DockerManager::action(&app.pool, &server, &app.db, cid, action_str) {
+        Ok(output) => {
+            let c_output = CString::new(output).unwrap_or_default();
+            unsafe { *out_output = c_output.into_raw() };
+            0
+        }
+        Err(e) => {
+            error!(target: "orbit::ffi", server_id = %sid, container_id = %cid, action = %action_str, error = %e, "Docker 操作失败");
+            -4
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn orbit_shutdown_pool(app: *mut OrbitApp) {
-    if app.is_null() { return; }
+    if app.is_null() {
+        return;
+    }
     let app = unsafe { &*app };
     if let Ok(mut mgr) = app.ssh.lock() {
         mgr.shutdown();

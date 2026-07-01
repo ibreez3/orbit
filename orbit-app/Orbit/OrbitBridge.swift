@@ -477,6 +477,84 @@ class OrbitBridge {
         defer { orbit_free_string(json) }
         return try JSONDecoder().decode([ServerProcess].self, from: String(cString: json).data(using: .utf8)!)
     }
+
+    // MARK: - Docker
+
+    func listDockerContainersAsync(serverId: String) async throws -> [DockerContainer] {
+        try await runOffThread { try self.listDockerContainers(serverId: serverId) }
+    }
+
+    func listDockerContainers(serverId: String) throws -> [DockerContainer] {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            orbit_docker_list_containers(app, sidPtr, &outJson)
+        }
+        guard rc == 0, let json = outJson else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(json) }
+        return try JSONDecoder().decode([DockerContainer].self, from: String(cString: json).data(using: .utf8)!)
+    }
+
+    func getDockerStatsAsync(serverId: String) async throws -> [DockerContainerStats] {
+        try await runOffThread { try self.getDockerStats(serverId: serverId) }
+    }
+
+    func getDockerStats(serverId: String) throws -> [DockerContainerStats] {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            orbit_docker_stats(app, sidPtr, &outJson)
+        }
+        guard rc == 0, let json = outJson else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(json) }
+        return try JSONDecoder().decode([DockerContainerStats].self, from: String(cString: json).data(using: .utf8)!)
+    }
+
+    func getDockerLogsAsync(serverId: String, containerId: String, tail: UInt32 = 200) async throws -> String {
+        try await runOffThread { try self.getDockerLogs(serverId: serverId, containerId: containerId, tail: tail) }
+    }
+
+    func getDockerLogs(serverId: String, containerId: String, tail: UInt32 = 200) throws -> String {
+        try ensureInitialized()
+        var outLogs: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            containerId.withCString { cidPtr in
+                orbit_docker_logs(app, sidPtr, cidPtr, tail, &outLogs)
+            }
+        }
+        guard rc == 0, let logs = outLogs else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(logs) }
+        return String(cString: logs)
+    }
+
+    @discardableResult
+    func dockerActionAsync(serverId: String, containerId: String, action: String) async throws -> String {
+        try await runOffThread { try self.dockerAction(serverId: serverId, containerId: containerId, action: action) }
+    }
+
+    @discardableResult
+    func dockerAction(serverId: String, containerId: String, action: String) throws -> String {
+        try ensureInitialized()
+        var outOutput: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            containerId.withCString { cidPtr in
+                action.withCString { actionPtr in
+                    orbit_docker_action(app, sidPtr, cidPtr, actionPtr, &outOutput)
+                }
+            }
+        }
+        guard rc == 0, let output = outOutput else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(output) }
+        return String(cString: output)
+    }
 }
 
 enum OrbitError: LocalizedError {

@@ -1,5 +1,6 @@
 mod crypto;
 mod db;
+mod docker;
 mod ffi;
 mod models;
 mod monitor;
@@ -27,15 +28,13 @@ impl OrbitApp {
 }
 
 fn init_logging(app_dir: &str) {
-    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::Layer;
 
-    let file_appender = tracing_appender::rolling::never(
-        std::path::Path::new(app_dir),
-        "orbit.log",
-    );
+    let file_appender =
+        tracing_appender::rolling::never(std::path::Path::new(app_dir), "orbit.log");
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
 
     let file_layer = tracing_subscriber::fmt::layer()

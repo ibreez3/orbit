@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [v0.0.5-pre.2] - 2026-07-01
+
+### Added
+- Docker management panel for remote servers over the existing Orbit SSH connection.
+- Container list with status, image, CPU, memory, ports, metadata, and search.
+- Container lifecycle actions: start, stop, restart, and remove.
+- One-click streaming terminal actions for `docker exec -it` shell access and `docker logs -f`.
+- Docker log loading with keyword filtering and matched-line counts.
+
+### Changed
+- Docker tabs now preserve their current view state when switching between tabs.
+- Docker refresh keeps the previous container list visible while new data is loading.
+- Docker panel state is cleaned up when its tab or parent server is removed.
+
 ### Added
 - Spotlight command palette (⌘K) for quick server/database access
 - Safari-style tab bar with connection status indicators
