@@ -9,7 +9,9 @@ class OpenAIService: ObservableObject {
     func cancel() {
         streamTask?.cancel()
         streamTask = nil
-        isLoading = false
+        Task { @MainActor [weak self] in
+            self?.isLoading = false
+        }
     }
 
     private var agentTask: Task<Void, Never>?
@@ -19,7 +21,9 @@ class OpenAIService: ObservableObject {
         agentTask = nil
         streamTask?.cancel()
         streamTask = nil
-        isLoading = false
+        Task { @MainActor [weak self] in
+            self?.isLoading = false
+        }
     }
 
     // MARK: - Agent Loop (single-shot: call AI → extract ```execute → callback)
@@ -33,11 +37,17 @@ class OpenAIService: ObservableObject {
         onComplete: @escaping (Result<String, Error>) -> Void
     ) {
         cancelAgent()
-        isLoading = true
 
-        agentTask = Task { @MainActor [weak self] in
+        agentTask = Task { [weak self] in
             guard let self = self else { return }
-            defer { self.isLoading = false }
+            await MainActor.run {
+                self.isLoading = true
+            }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.isLoading = false
+                }
+            }
 
             // Build API messages
             var apiMessages: [[String: String]] = []
@@ -52,7 +62,9 @@ class OpenAIService: ObservableObject {
             if Task.isCancelled { return }
 
             if let error = content.error {
-                onComplete(.failure(error))
+                await MainActor.run {
+                    onComplete(.failure(error))
+                }
                 return
             }
 
@@ -60,10 +72,14 @@ class OpenAIService: ObservableObject {
             let commands = self.extractExecutes(from: fullContent)
 
             if commands.isEmpty {
-                onComplete(.success(fullContent))
+                await MainActor.run {
+                    onComplete(.success(fullContent))
+                }
             } else {
                 // Notify caller about commands, caller re-enters after execution
-                onCommands(commands)
+                await MainActor.run {
+                    onCommands(commands)
+                }
             }
         }
     }
@@ -88,7 +104,6 @@ class OpenAIService: ObservableObject {
         let error: Error?
     }
 
-    @MainActor
     private func callAndCollect(
         messages: [[String: String]],
         config: AIConfig,
@@ -125,6 +140,7 @@ class OpenAIService: ObservableObject {
 
         var fullContent = ""
         var lineData = Data()
+        var tokenBatcher = TokenBatcher()
 
         do {
             for try await byte in bytes {
@@ -150,7 +166,7 @@ class OpenAIService: ObservableObject {
                         if let delta = choice["delta"] as? [String: Any],
                            let content = delta["content"] as? String {
                             fullContent += content
-                            onToken(content)
+                            await tokenBatcher.append(content, onToken: onToken)
                         }
                     }
                 }
@@ -161,6 +177,7 @@ class OpenAIService: ObservableObject {
             }
         }
 
+        await tokenBatcher.flush(onToken: onToken)
         return AgentCallResult(text: fullContent, error: nil)
     }
 
@@ -173,8 +190,6 @@ class OpenAIService: ObservableObject {
         onToken: @escaping (String) -> Void,
         onComplete: @escaping (Result<String, Error>) -> Void
     ) {
-        isLoading = true
-
         let endpoint = config.endpoint.hasSuffix("/v1")
             ? config.endpoint + "/chat/completions"
             : config.endpoint + "/v1/chat/completions"
@@ -218,9 +233,16 @@ class OpenAIService: ObservableObject {
             return
         }
 
-        streamTask = Task { @MainActor [weak self] in
+        streamTask = Task { [weak self] in
             guard let self = self else { return }
-            defer { self.isLoading = false }
+            await MainActor.run {
+                self.isLoading = true
+            }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.isLoading = false
+                }
+            }
 
             let bytes: URLSession.AsyncBytes
             let response: URLResponse
@@ -234,7 +256,9 @@ class OpenAIService: ObservableObject {
             }
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                onComplete(.failure(NSError(domain: "AIService", code: -2, userInfo: [NSLocalizedDescriptionKey: "无效响应"])))
+                await MainActor.run {
+                    onComplete(.failure(NSError(domain: "AIService", code: -2, userInfo: [NSLocalizedDescriptionKey: "无效响应"])))
+                }
                 return
             }
 
@@ -248,7 +272,9 @@ class OpenAIService: ObservableObject {
                 } else {
                     message = "HTTP \(httpResponse.statusCode)"
                 }
-                onComplete(.failure(NSError(domain: "AIService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message])))
+                await MainActor.run {
+                    onComplete(.failure(NSError(domain: "AIService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message])))
+                }
                 return
             }
 
@@ -264,14 +290,14 @@ class OpenAIService: ObservableObject {
 
     // MARK: - SSE Parser
 
-    @MainActor
     private func parseSSE(
         bytes: URLSession.AsyncBytes,
-        onToken: (String) -> Void,
-        onComplete: (Result<String, Error>) -> Void
+        onToken: @escaping (String) -> Void,
+        onComplete: @escaping (Result<String, Error>) -> Void
     ) async {
         var fullContent = ""
         var lineData = Data()
+        var tokenBatcher = TokenBatcher()
 
         do {
             for try await byte in bytes {
@@ -291,7 +317,11 @@ class OpenAIService: ObservableObject {
                     let dataStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
 
                     if dataStr == "[DONE]" {
-                        onComplete(.success(fullContent))
+                        await tokenBatcher.flush(onToken: onToken)
+                        let completedContent = fullContent
+                        await MainActor.run {
+                            onComplete(.success(completedContent))
+                        }
                         return
                     }
 
@@ -305,28 +335,37 @@ class OpenAIService: ObservableObject {
                         if let delta = choice["delta"] as? [String: Any],
                            let content = delta["content"] as? String {
                             fullContent += content
-                            onToken(content)
+                            await tokenBatcher.append(content, onToken: onToken)
                         }
                     }
                 }
             }
 
-            onComplete(.success(fullContent))
+            await tokenBatcher.flush(onToken: onToken)
+            let completedContent = fullContent
+            await MainActor.run {
+                onComplete(.success(completedContent))
+            }
         } catch {
+            await tokenBatcher.flush(onToken: onToken)
             if !fullContent.isEmpty {
-                onComplete(.success(fullContent))
+                let completedContent = fullContent
+                await MainActor.run {
+                    onComplete(.success(completedContent))
+                }
             } else {
-                onComplete(.failure(error))
+                await MainActor.run {
+                    onComplete(.failure(error))
+                }
             }
         }
     }
 
     // MARK: - Buffered JSON fallback
 
-    @MainActor
     private func parseBufferedJSON(
         bytes: URLSession.AsyncBytes,
-        onComplete: (Result<String, Error>) -> Void
+        onComplete: @escaping (Result<String, Error>) -> Void
     ) async {
         var data = Data()
         do {
@@ -339,12 +378,18 @@ class OpenAIService: ObservableObject {
                   let first = choices.first,
                   let message = first["message"] as? [String: Any],
                   let content = message["content"] as? String else {
-                onComplete(.failure(NSError(domain: "AIService", code: -3, userInfo: [NSLocalizedDescriptionKey: "解析响应失败"])))
+                await MainActor.run {
+                    onComplete(.failure(NSError(domain: "AIService", code: -3, userInfo: [NSLocalizedDescriptionKey: "解析响应失败"])))
+                }
                 return
             }
-            onComplete(.success(content))
+            await MainActor.run {
+                onComplete(.success(content))
+            }
         } catch {
-            onComplete(.failure(error))
+            await MainActor.run {
+                onComplete(.failure(error))
+            }
         }
     }
 
@@ -453,6 +498,35 @@ class OpenAIService: ObservableObject {
             // ignore read errors
         }
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private struct TokenBatcher {
+        private static let flushIntervalNanos: UInt64 = 75_000_000
+        private static let flushCharacterCount = 96
+
+        private var buffer = ""
+        private var lastFlushNanos = DispatchTime.now().uptimeNanoseconds
+
+        mutating func append(_ token: String, onToken: @escaping (String) -> Void) async {
+            buffer += token
+
+            let now = DispatchTime.now().uptimeNanoseconds
+            if buffer.count >= Self.flushCharacterCount || now - lastFlushNanos >= Self.flushIntervalNanos {
+                await flush(onToken: onToken, now: now)
+            }
+        }
+
+        mutating func flush(onToken: @escaping (String) -> Void, now: UInt64 = DispatchTime.now().uptimeNanoseconds) async {
+            guard !buffer.isEmpty else { return }
+
+            let chunk = buffer
+            buffer.removeAll(keepingCapacity: true)
+            lastFlushNanos = now
+
+            await MainActor.run {
+                onToken(chunk)
+            }
+        }
     }
 }
 

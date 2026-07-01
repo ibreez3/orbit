@@ -4,26 +4,25 @@ struct StatusBarView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
+        let context = appState.activeSessionContext
+
         HStack(spacing: 8) {
             Circle()
-                .fill(statusColor)
+                .fill(statusColor(for: context))
                 .frame(width: 6, height: 6)
 
-            if let activeTab = activeTab {
-                Text(activeTab.serverName)
-                    .lineLimit(1)
-                if activeTab.type == .database {
-                    Text("· 只读")
-                        .foregroundStyle(.tertiary)
-                }
-            } else {
-                Text("无连接")
+            Text(context.serverName ?? "无活动会话")
+                .lineLimit(1)
+
+            if let tool = appState.activeTool?.tool {
+                Text("· \(tool.rawValue)")
+                    .foregroundStyle(.tertiary)
             }
 
             Spacer()
 
             Text("⌘K 搜索")
-            Text("⌘, 设置")
+            Text("Dock 工具绑定当前会话")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
@@ -32,15 +31,18 @@ struct StatusBarView: View {
         .background(.ultraThinMaterial)
     }
 
-    private var activeTab: TabItem? {
-        appState.tabs.first(where: { $0.id == appState.activeTabId })
-    }
-
-    private var statusColor: Color {
-        guard let tab = activeTab else { return .secondary }
-        if tab.type == .terminal || tab.type == .sftp {
-            return tab.sessionId != nil ? .green : .secondary
+    private func statusColor(for context: ActiveSessionContext) -> Color {
+        switch context.connectionStatus {
+        case .connected:
+            return .green
+        case .connecting:
+            return .orange
+        case .failed:
+            return .red
+        case .closing:
+            return .yellow
+        case .disconnected:
+            return .secondary
         }
-        return .green
     }
 }

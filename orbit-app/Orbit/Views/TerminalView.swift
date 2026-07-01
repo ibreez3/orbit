@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftTerm
 import AppKit
-import CoreText
 
 final class TerminalOutputPump {
     private static let defaultMaxBufferedBytes = 2 * 1024 * 1024
@@ -153,7 +152,7 @@ enum KeywordInjector {
     }
 
     private static func hexToAnsi(_ hex: String) -> String {
-        var hexStr = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        let hexStr = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         guard hexStr.count == 6,
               let r = Int(hexStr.prefix(2), radix: 16),
               let g = Int(hexStr.dropFirst(2).prefix(2), radix: 16),
@@ -173,61 +172,7 @@ struct TerminalView: NSViewRepresentable {
     @EnvironmentObject var appState: AppState
 
     private static func applySettings(_ tv: OrbitTerminalView, theme: AppTheme) {
-        let tc = ThemeColors.colors(for: theme)
-        let colors = tc.ansi.map { SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue) }
-        tv.installColors(colors)
-
-        let bgColor = NSColor(red: tc.background.red, green: tc.background.green, blue: tc.background.blue, alpha: 1)
-        tv.nativeBackgroundColor = bgColor
-        tv.nativeForegroundColor = NSColor(red: tc.foreground.red, green: tc.foreground.green, blue: tc.foreground.blue, alpha: 1)
-
-        // Font with ligatures
-        let fontSize = UserDefaults.standard.double(forKey: "fontSize")
-        let fontFamily = UserDefaults.standard.string(forKey: "fontFamily") ?? "Menlo"
-        let useLigatures = UserDefaults.standard.bool(forKey: "fontLigatures")
-        let size = fontSize > 0 ? fontSize : 14
-        var font = NSFont(name: fontFamily, size: size) ?? NSFont(name: "Menlo", size: size)!
-
-        if useLigatures {
-            let descriptor = font.fontDescriptor.addingAttributes([
-                .featureSettings: [
-                    // Common ligatures (liga): fi, fl, ff, ffi, ffl
-                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
-                     kCTFontFeatureSelectorIdentifierKey: 2], // kCommonLigaturesOnSelector
-                    // Discretionary ligatures (dlig): font-specific decorative ligatures
-                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
-                     kCTFontFeatureSelectorIdentifierKey: 3], // kRareLigaturesOnSelector
-                    // Contextual alternates (calt): -> => != === etc.
-                    [kCTFontFeatureTypeIdentifierKey: 35,  // kContextualAlternatesType
-                     kCTFontFeatureSelectorIdentifierKey: 2], // kContextualAlternatesOnSelector
-                ]
-            ])
-            if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
-                font = ligatureFont
-            }
-        }
-        tv.font = font
-
-        // Cursor style
-        let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "bar"
-        if let term = tv.getTerminal() as? Terminal {
-            switch cursorStyle {
-            case "block":
-                term.setCursorStyle(.steadyBlock)
-            case "underline":
-                term.setCursorStyle(.steadyUnderline)
-            default:
-                term.setCursorStyle(.steadyBar)
-            }
-        }
-
-        // Scrollback buffer limit (default 10000 lines, configurable)
-        let scrollback = UserDefaults.standard.object(forKey: "scrollbackLines") as? Int ?? 10000
-        tv.changeScrollback(scrollback)
-
-        // URL hover highlighting — always show underline on hover (no modifier needed)
-        tv.linkReporting = .implicit
-        tv.linkHighlightMode = .hover
+        tv.configureRenderSettings(theme: theme)
     }
 
     func makeNSView(context: Context) -> OrbitTerminalView {
@@ -239,9 +184,8 @@ struct TerminalView: NSViewRepresentable {
             context.coordinator.registerHandlers()
             Self.applySettings(cached, theme: appState.theme)
             cached.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
-            if let term = cached.getTerminal() as? Terminal {
-                do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
-            }
+            let term = cached.getTerminal()
+            do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
             return cached
         }
 
@@ -259,9 +203,8 @@ struct TerminalView: NSViewRepresentable {
             context.coordinator.sessionId = cid
             OrbitBridge.shared.terminalViewCache[cid] = tv
             context.coordinator.registerHandlers()
-            if let term = tv.getTerminal() as? Terminal {
-                do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
-            }
+            let term = tv.getTerminal()
+            do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
         } else {
             context.coordinator.connect()
         }

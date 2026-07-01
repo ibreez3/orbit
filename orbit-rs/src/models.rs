@@ -73,6 +73,9 @@ pub struct ServerStats {
     pub disk_total: String,
     pub disk_used: String,
     pub disk_percent: f64,
+    pub net_rx_kbps: f64,
+    pub net_tx_kbps: f64,
+    pub net_interface: String,
     pub uptime: String,
     pub load_avg: String,
 }

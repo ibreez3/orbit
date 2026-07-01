@@ -10,6 +10,9 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
     let mut disk_total = String::new();
     let mut disk_used = String::new();
     let mut disk_percent = 0.0;
+    let mut net_rx_kbps = 0.0;
+    let mut net_tx_kbps = 0.0;
+    let mut net_interface = String::new();
     let mut uptime = String::new();
     let mut load_avg = String::new();
 
@@ -31,6 +34,12 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
             disk_used = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
         } else if line.starts_with("DISK_PERCENT:") {
             disk_percent = line.splitn(2, ':').nth(1).unwrap_or("0").trim().parse().unwrap_or(0.0);
+        } else if line.starts_with("NET_RX_KBPS:") {
+            net_rx_kbps = line.splitn(2, ':').nth(1).unwrap_or("0").trim().parse().unwrap_or(0.0);
+        } else if line.starts_with("NET_TX_KBPS:") {
+            net_tx_kbps = line.splitn(2, ':').nth(1).unwrap_or("0").trim().parse().unwrap_or(0.0);
+        } else if line.starts_with("NET_IFACE:") {
+            net_interface = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
         } else if line.starts_with("UPTIME:") {
             uptime = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
         } else if line.starts_with("LOAD:") {
@@ -46,6 +55,9 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
         disk_total,
         disk_used,
         disk_percent,
+        net_rx_kbps,
+        net_tx_kbps,
+        net_interface,
         uptime,
         load_avg,
     })
@@ -73,6 +85,38 @@ DISK_PERCENT=$(echo $DISK_INFO | awk '{print $5}' | tr -d '%')
 echo "DISK_TOTAL:$DISK_TOTAL"
 echo "DISK_USED:$DISK_USED"
 echo "DISK_PERCENT:$DISK_PERCENT"
+
+NET_IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
+if [ -z "$NET_IFACE" ]; then
+    NET_IFACE=$(awk '$1 != "Inter-|" && $1 != "face" {
+        iface=$1; gsub(":", "", iface);
+        if (iface != "lo") { print iface; exit }
+    }' /proc/net/dev 2>/dev/null)
+fi
+
+read_net_bytes() {
+    local iface="$1"
+    if [ -n "$iface" ] && [ -r "/sys/class/net/$iface/statistics/rx_bytes" ]; then
+        local rx=$(cat "/sys/class/net/$iface/statistics/rx_bytes" 2>/dev/null || echo 0)
+        local tx=$(cat "/sys/class/net/$iface/statistics/tx_bytes" 2>/dev/null || echo 0)
+        echo "$rx $tx"
+        return
+    fi
+    awk -v iface="$iface" -F'[: ]+' '$2 == iface { print $3, $11; exit }' /proc/net/dev 2>/dev/null
+}
+
+NET_SAMPLE_1=$(read_net_bytes "$NET_IFACE")
+sleep 1
+NET_SAMPLE_2=$(read_net_bytes "$NET_IFACE")
+NET_RX_1=$(echo "$NET_SAMPLE_1" | awk '{print $1 + 0}')
+NET_TX_1=$(echo "$NET_SAMPLE_1" | awk '{print $2 + 0}')
+NET_RX_2=$(echo "$NET_SAMPLE_2" | awk '{print $1 + 0}')
+NET_TX_2=$(echo "$NET_SAMPLE_2" | awk '{print $2 + 0}')
+NET_RX_KBPS=$(awk -v a="$NET_RX_1" -v b="$NET_RX_2" 'BEGIN { if (b >= a) printf "%.1f", (b - a) / 1024; else printf "0.0" }')
+NET_TX_KBPS=$(awk -v a="$NET_TX_1" -v b="$NET_TX_2" 'BEGIN { if (b >= a) printf "%.1f", (b - a) / 1024; else printf "0.0" }')
+echo "NET_IFACE:$NET_IFACE"
+echo "NET_RX_KBPS:$NET_RX_KBPS"
+echo "NET_TX_KBPS:$NET_TX_KBPS"
 
 UPTIME_STR=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')
 echo "UPTIME:$UPTIME_STR"
@@ -104,7 +148,7 @@ pub fn parse_processes(output: &str) -> Vec<ProcessInfo> {
         if line.is_empty() || !line.starts_with('{') {
             continue;
         }
-        if let Ok(mut p) = serde_json::from_str::<serde_json::Value>(line) {
+        if let Ok(p) = serde_json::from_str::<serde_json::Value>(line) {
             processes.push(ProcessInfo {
                 pid: p.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 user: p.get("user").and_then(|v| v.as_str()).unwrap_or("").to_string(),

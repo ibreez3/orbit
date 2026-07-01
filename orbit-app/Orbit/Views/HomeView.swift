@@ -7,16 +7,15 @@ struct HomeView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // Logo and title
             VStack(spacing: 12) {
                 Image(systemName: "bolt.circle.fill")
                     .font(.system(size: 48))
                     .foregroundStyle(.blue)
 
-                Text("欢迎回来")
+                Text("SSH 工作台")
                     .font(.system(size: 24, weight: .semibold))
 
-                Text("选择一个服务器开始工作")
+                Text("选择一台服务器，或打开本地终端开始工作")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }

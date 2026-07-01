@@ -3,7 +3,6 @@ import SwiftUI
 struct TabBarView: View {
     @EnvironmentObject var appState: AppState
     @State private var hoveredTabId: String? = nil
-    @State private var pendingCloseTab: TabItem? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -42,55 +41,6 @@ struct TabBarView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(.ultraThinMaterial)
-        .overlay {
-            if let tab = pendingCloseTab {
-                ZStack {
-                    Color.black.opacity(0.2)
-                        .ignoresSafeArea()
-                        .onTapGesture { pendingCloseTab = nil }
-
-                    VStack(spacing: 16) {
-                        Image(systemName: "xmark.circle")
-                            .font(.system(size: 28))
-                            .foregroundStyle(.orange)
-
-                        Text("关闭终端")
-                            .font(.system(size: 14, weight: .semibold))
-
-                        Text("\"\(tab.title)\" 的连接将被断开。")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        HStack(spacing: 12) {
-                            Button("取消") { pendingCloseTab = nil }
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 6)
-                                .background(Color.primary.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                            Button("关闭") {
-                                appState.removeTab(tab.id)
-                                pendingCloseTab = nil
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                            .background(Color.orange.opacity(0.85))
-                            .foregroundStyle(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                    }
-                    .padding(20)
-                    .frame(width: 260)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
     }
 
     // MARK: - Network status indicator
@@ -145,7 +95,11 @@ struct TabBarView: View {
                 .lineLimit(1)
 
             if showSftp {
-                Button(action: { appState.toggleSftpDrawer(for: tab.id) }) {
+                Button(action: {
+                    if appState.requestActivateTab(tab.id) {
+                        appState.openTool(.sftp)
+                    }
+                }) {
                     Image(systemName: "folder")
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
@@ -154,7 +108,7 @@ struct TabBarView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .help("打开 SFTP 抽屉")
+                .help("打开 SFTP")
             }
 
             if showClose {
@@ -177,10 +131,12 @@ struct TabBarView: View {
         .onHover { hovering in
             hoveredTabId = hovering ? tab.id : nil
         }
-        .onTapGesture { appState.activeTabId = tab.id }
+        .onTapGesture { appState.requestActivateTab(tab.id) }
         .onTapGesture(count: 2) {
             if tab.type == .terminal {
-                appState.toggleSftpDrawer(for: tab.id)
+                if appState.requestActivateTab(tab.id) {
+                    appState.openTool(.sftp)
+                }
             }
         }
     }
@@ -191,11 +147,7 @@ struct TabBarView: View {
     }
 
     private func closeTab(_ tab: TabItem) {
-        if tab.type == .terminal, tab.sessionId != nil {
-            pendingCloseTab = tab
-        } else {
-            appState.removeTab(tab.id)
-        }
+        appState.requestCloseTab(tab)
     }
 }
 

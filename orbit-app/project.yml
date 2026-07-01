@@ -10,6 +10,9 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     from: "1.13.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: "2.9.3"
 
 settings:
   base:
@@ -41,10 +44,14 @@ targets:
           - "**/.DS_Store"
     dependencies:
       - package: SwiftTerm
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal
-        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
+        MARKETING_VERSION: "0.0.5"
+        CURRENT_PROJECT_VERSION: "5"
+        INFOPLIST_FILE: Orbit/Info.plist
         PRODUCT_NAME: Orbit
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -69,7 +76,6 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: "Orbit/Orbit-Bridging-Header.h"
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: true
       configs:
         Debug:
           ONLY_ACTIVE_ARCH: true

@@ -19,6 +19,7 @@ class AppState: ObservableObject {
 
     @Published var showQuitConfirmation: Bool = false
     private var pendingQuitTabId: String? = nil
+    @Published var pendingCloseTabId: String? = nil
 
     @Published var alertMessage: String? = nil
     @Published var alertTitle: String = ""
@@ -38,7 +39,15 @@ class AppState: ObservableObject {
     @Published var aiPanelOpen: Bool = false
     @Published var aiLoading: Bool = false
     @Published var aiPanelWidth: CGFloat = 280
-    @Published var aiPendingConfirmation: (command: String, sessionId: String, tabId: String)? = nil
+    @Published var aiPendingConfirmation: PendingAICommand? = nil
+    @Published var activeTool: BoundToolState? = nil
+    @Published var floatingToolWidth: CGFloat = 390
+    @Published var floatingToolHeight: CGFloat = 460
+    @Published var pendingContextSwitchTabId: String? = nil
+    @Published var pendingContextSwitchMessage: String? = nil
+    @Published var auditEventsByContext: [String: [AuditEvent]] = [:]
+    @Published var activeSftpTransferTabIds: Set<String> = []
+    @Published var databaseAIContexts: [String: DatabaseAIContext] = [:]
     @Published var assetTreeWidth: CGFloat = 220
     @Published var recentServers: [String] = []     // 最多 6 个 serverId
     @Published var assetTreeSearchQuery: String = ""
@@ -50,6 +59,74 @@ class AppState: ObservableObject {
 
     let bridge = OrbitBridge.shared
     let textEditorWC = TextEditorWindowController()
+
+    var activeSessionContext: ActiveSessionContext {
+        guard let activeTabId,
+              let tab = tabs.first(where: { $0.id == activeTabId }) else {
+            return .empty
+        }
+
+        let focusedSessionId = tab.focusedChannelId ?? tab.sessionId
+
+        if tab.type == .database {
+            return ActiveSessionContext(
+                kind: .database,
+                tabId: tab.id,
+                paneId: nil,
+                sessionId: nil,
+                serverId: tab.serverId,
+                serverName: tab.serverName,
+                host: nil,
+                username: nil,
+                port: nil,
+                connectionStatus: .connected,
+                workingDirectory: nil,
+                capabilities: [.ai, .logs]
+            )
+        }
+
+        if tab.serverId == "local" {
+            return ActiveSessionContext(
+                kind: .localShell,
+                tabId: tab.id,
+                paneId: focusedSessionId,
+                sessionId: focusedSessionId,
+                serverId: tab.serverId,
+                serverName: tab.serverName,
+                host: nil,
+                username: NSUserName(),
+                port: nil,
+                connectionStatus: focusedSessionId == nil ? .disconnected : .connected,
+                workingDirectory: nil,
+                capabilities: [.ai, .logs, .snippets]
+            )
+        }
+
+        let server = servers.first(where: { $0.id == tab.serverId })
+        let status: ConnectionStatus
+        if focusedSessionId != nil {
+            status = .connected
+        } else if tab.type == .terminal {
+            status = .connecting
+        } else {
+            status = .disconnected
+        }
+
+        return ActiveSessionContext(
+            kind: tab.type == .terminal ? .terminal : .none,
+            tabId: tab.id,
+            paneId: focusedSessionId,
+            sessionId: focusedSessionId,
+            serverId: tab.serverId,
+            serverName: tab.serverName,
+            host: server?.host,
+            username: server?.username,
+            port: server?.port,
+            connectionStatus: status,
+            workingDirectory: nil,
+            capabilities: tab.type == .terminal ? [.ai, .sftp, .monitor, .logs, .snippets] : [.logs]
+        )
+    }
 
     init() {
         let savedTheme = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
@@ -135,6 +212,7 @@ class AppState: ObservableObject {
                     servers.removeAll { $0.id == id }
                     tabs.removeAll { $0.serverId == id }
                     if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
+                        closeSessionScopedTools()
                         activeTabId = tabs.last?.id
                     }
                 }
@@ -193,13 +271,13 @@ class AppState: ObservableObject {
         let id = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
         let tab = TabItem(id: id, type: .terminal, serverId: "local", serverName: "本地", title: "本地终端")
         tabs.append(tab)
-        activeTabId = id
+        requestActivateTab(id)
     }
 
     func addTab(server: Server, type: TabType) {
         if type == .monitor {
             if let existing = tabs.first(where: { $0.type == .monitor && $0.serverId == server.id }) {
-                activeTabId = existing.id
+                requestActivateTab(existing.id)
                 return
             }
         }
@@ -215,7 +293,177 @@ class AppState: ObservableObject {
         }
         tabs.append(tab)
         trackRecentServer(server.id)
-        activeTabId = id
+        requestActivateTab(id)
+    }
+
+    @discardableResult
+    func requestActivateTab(_ tabId: String) -> Bool {
+        guard tabId != activeTabId else { return true }
+        if let currentTabId = activeTabId,
+           activeSftpTransferTabIds.contains(currentTabId) {
+            pendingContextSwitchTabId = tabId
+            pendingContextSwitchMessage = "当前 SFTP 传输仍在进行。切换会关闭当前会话工具，确认要切换吗？"
+            return false
+        }
+        activateTab(tabId)
+        return true
+    }
+
+    private func activateTab(_ tabId: String) {
+        closeSessionScopedTools()
+        activeTabId = tabId
+    }
+
+    func confirmPendingContextSwitch() {
+        guard let tabId = pendingContextSwitchTabId else { return }
+        pendingContextSwitchTabId = nil
+        pendingContextSwitchMessage = nil
+        activateTab(tabId)
+    }
+
+    func cancelPendingContextSwitch() {
+        pendingContextSwitchTabId = nil
+        pendingContextSwitchMessage = nil
+    }
+
+    func requestFocusPane(tabId: String, paneId: String) {
+        guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        if tabs[idx].focusedChannelId != paneId {
+            closeSessionScopedTools()
+        }
+        tabs[idx].focusedChannelId = paneId
+    }
+
+    func closeSessionScopedTools() {
+        if let pending = aiPendingConfirmation {
+            appendAuditEvent(
+                category: .aiAction,
+                action: "command_confirmation",
+                target: pending.command,
+                result: .canceled,
+                summary: "会话上下文切换，已取消待确认的 AI 命令"
+            )
+        }
+        aiPendingConfirmation = nil
+        activeTool = nil
+        if aiPanelOpen {
+            aiPanelOpen = false
+        }
+    }
+
+    func setSftpTransferActive(_ active: Bool, for tabId: String) {
+        if active {
+            activeSftpTransferTabIds.insert(tabId)
+        } else {
+            activeSftpTransferTabIds.remove(tabId)
+        }
+    }
+
+    func updateDatabaseAIContext(tabId: String, selectedTable: String?, sqlText: String, resultSummary: String) {
+        databaseAIContexts[tabId] = DatabaseAIContext(
+            selectedTable: selectedTable,
+            sqlText: sqlText,
+            resultSummary: resultSummary
+        )
+    }
+
+    func openTool(_ tool: SessionTool, presentation: ToolPresentation = .floating) {
+        let context = activeSessionContext
+        guard canOpenTool(tool, in: context) == nil else { return }
+
+        if tool == .ai {
+            activeTool = BoundToolState(tool: tool, presentation: .pinned, boundContext: context)
+            aiPanelOpen = true
+            return
+        }
+
+        activeTool = BoundToolState(tool: tool, presentation: presentation, boundContext: context)
+    }
+
+    func closeOverlayTool() {
+        if activeTool?.tool != .ai {
+            activeTool = nil
+        }
+    }
+
+    func toggleAIDrawerForCurrentContext() {
+        if aiPanelOpen {
+            aiPanelOpen = false
+            if activeTool?.tool == .ai {
+                activeTool = nil
+            }
+        } else {
+            openTool(.ai, presentation: .pinned)
+        }
+    }
+
+    func canOpenTool(_ tool: SessionTool, in context: ActiveSessionContext? = nil) -> String? {
+        let context = context ?? activeSessionContext
+        if context.kind == .none {
+            return "当前没有活动会话"
+        }
+        if tool == .sftp || tool == .monitor {
+            if context.kind != .terminal || context.sessionId == nil || context.connectionStatus != .connected {
+                return tool == .sftp ? "SSH 连接建立后可用 SFTP" : "SSH 连接建立后可用监控"
+            }
+        }
+        if tool == .snippets {
+            if (context.kind == .terminal || context.kind == .localShell) && context.sessionId == nil {
+                return "终端会话建立后可插入片段"
+            }
+        }
+        if tool == .ai {
+            if (context.kind == .terminal || context.kind == .localShell) && context.sessionId == nil {
+                return "终端会话建立后可使用 AI"
+            }
+        }
+        if !context.capabilities.contains(capability(for: tool)) {
+            return disabledReason(for: tool, context: context)
+        }
+        return nil
+    }
+
+    private func capability(for tool: SessionTool) -> SessionCapabilities {
+        switch tool {
+        case .ai: return .ai
+        case .sftp: return .sftp
+        case .monitor: return .monitor
+        case .logs: return .logs
+        case .snippets: return .snippets
+        }
+    }
+
+    private func disabledReason(for tool: SessionTool, context: ActiveSessionContext) -> String {
+        switch tool {
+        case .sftp:
+            return context.kind == .localShell ? "本地终端不支持 SFTP" : "当前会话不支持 SFTP"
+        case .monitor:
+            return context.kind == .localShell ? "本地终端不支持远端监控" : "当前会话不支持监控"
+        default:
+            return "当前会话不支持该工具"
+        }
+    }
+
+    func appendAuditEvent(category: AuditCategory, action: String, target: String? = nil, result: AuditResult, summary: String) {
+        let context = activeSessionContext
+        let event = AuditEvent(
+            id: UUID().uuidString,
+            timestamp: Date(),
+            contextId: context.identity,
+            tabId: context.tabId,
+            sessionId: context.sessionId,
+            serverId: context.serverId,
+            category: category,
+            action: action,
+            target: target,
+            result: result,
+            summary: summary
+        )
+        auditEventsByContext[context.identity, default: []].append(event)
+    }
+
+    func auditEvents(for context: ActiveSessionContext) -> [AuditEvent] {
+        auditEventsByContext[context.identity] ?? []
     }
 
     func splitCurrentPane(direction: SplitDirection) {
@@ -259,7 +507,7 @@ class AppState: ObservableObject {
                     tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
                                                  first: .leaf(channelId: existingChannelId), second: newLeaf)
                 }
-                tabs[idx].focusedChannelId = newChannelId
+                requestFocusPane(tabId: tabId, paneId: newChannelId)
             }
 
             // Focus the new terminal after SwiftUI creates it
@@ -290,12 +538,18 @@ class AppState: ObservableObject {
         if let newTree = tree.removing(channelId: focused) {
             if case .leaf(let remaining) = newTree {
                 tabs[tabIdx].paneTree = nil
+                if tabs[tabIdx].focusedChannelId != nil {
+                    closeSessionScopedTools()
+                }
                 tabs[tabIdx].focusedChannelId = nil
                 if tabs[tabIdx].sessionId == focused {
                     tabs[tabIdx].sessionId = remaining
                 }
             } else {
                 tabs[tabIdx].paneTree = newTree
+                if tabs[tabIdx].focusedChannelId != newTree.channelIds.first {
+                    closeSessionScopedTools()
+                }
                 tabs[tabIdx].focusedChannelId = newTree.channelIds.first
                 if tabs[tabIdx].sessionId == focused {
                     tabs[tabIdx].sessionId = newTree.channelIds.first
@@ -312,7 +566,7 @@ class AppState: ObservableObject {
               let tree = tabs[tabIdx].paneTree,
               let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
               let next = tree.findAdjacent(channelId: focused, forward: forward) else { return }
-        tabs[tabIdx].focusedChannelId = next
+        requestFocusPane(tabId: active, paneId: next)
         if let tv = OrbitBridge.shared.terminalViewCache[next] as? OrbitTerminalView {
             tv.window?.makeFirstResponder(tv)
         }
@@ -357,6 +611,29 @@ class AppState: ObservableObject {
         performRemoveTab(id)
     }
 
+    var pendingCloseTab: TabItem? {
+        guard let pendingCloseTabId else { return nil }
+        return tabs.first(where: { $0.id == pendingCloseTabId })
+    }
+
+    func requestCloseTab(_ tab: TabItem) {
+        if tab.type == .terminal, tab.sessionId != nil {
+            pendingCloseTabId = tab.id
+        } else {
+            performRemoveTab(tab.id)
+        }
+    }
+
+    func confirmCloseTab() {
+        guard let tabId = pendingCloseTabId else { return }
+        pendingCloseTabId = nil
+        performRemoveTab(tabId)
+    }
+
+    func cancelCloseTab() {
+        pendingCloseTabId = nil
+    }
+
     func confirmQuit() {
         if let tabId = pendingQuitTabId {
             performRemoveTab(tabId)
@@ -372,13 +649,14 @@ class AppState: ObservableObject {
     }
 
     private func performRemoveTab(_ id: String) {
+        let removedIndex = tabs.firstIndex(where: { $0.id == id }) ?? 0
         if let tab = tabs.first(where: { $0.id == id }) {
             disconnectAllChannels(tab: tab)
         }
         tabs.removeAll { $0.id == id }
         if activeTabId == id {
-            let idx = tabs.firstIndex(where: { $0.id == id }) ?? 0
-            activeTabId = tabs.isEmpty ? nil : tabs[min(idx, tabs.count - 1)].id
+            closeSessionScopedTools()
+            activeTabId = tabs.isEmpty ? nil : tabs[min(removedIndex, tabs.count - 1)].id
         }
     }
 
@@ -386,6 +664,9 @@ class AppState: ObservableObject {
         if let idx = tabs.firstIndex(where: { $0.id == tabId }) {
             tabs[idx].sessionId = sessionId
             if tabs[idx].focusedChannelId == nil {
+                if tabs[idx].id == activeTabId {
+                    closeSessionScopedTools()
+                }
                 tabs[idx].focusedChannelId = sessionId
             }
         }
@@ -447,15 +728,22 @@ class AppState: ObservableObject {
             if let newTree = tree.removing(channelId: channelId) {
                 if case .leaf(let remaining) = newTree {
                     tabs[tabIdx].paneTree = nil
+                    if tab.id == activeTabId, tabs[tabIdx].focusedChannelId != nil {
+                        closeSessionScopedTools()
+                    }
                     tabs[tabIdx].focusedChannelId = nil
                     if tabs[tabIdx].sessionId == channelId {
                         tabs[tabIdx].sessionId = remaining
                     }
                 } else {
                     tabs[tabIdx].paneTree = newTree
-                    tabs[tabIdx].focusedChannelId = tab.focusedChannelId == channelId
+                    let nextFocusedChannelId = tab.focusedChannelId == channelId
                         ? newTree.channelIds.first
                         : tab.focusedChannelId
+                    if tab.id == activeTabId, tabs[tabIdx].focusedChannelId != nextFocusedChannelId {
+                        closeSessionScopedTools()
+                    }
+                    tabs[tabIdx].focusedChannelId = nextFocusedChannelId
                     if tabs[tabIdx].sessionId == channelId {
                         tabs[tabIdx].sessionId = newTree.channelIds.first
                     }
@@ -481,7 +769,9 @@ class AppState: ObservableObject {
     }
 
     func toggleSftpDrawer(for tabId: String) {
-        sftpDrawer.toggle(for: tabId)
+        if requestActivateTab(tabId) {
+            openTool(.sftp)
+        }
     }
 
     func setTheme(_ newTheme: AppTheme) {
@@ -500,6 +790,9 @@ class AppState: ObservableObject {
             bridge.terminalViewCache.removeValue(forKey: oldSid)
         }
         tabs[tabIdx].sessionId = nil
+        if tabId == activeTabId, tabs[tabIdx].focusedChannelId != nil {
+            closeSessionScopedTools()
+        }
         tabs[tabIdx].focusedChannelId = nil
         tabs[tabIdx].paneTree = nil
 
@@ -569,8 +862,15 @@ class AppState: ObservableObject {
 
     func insertSnippetCommand(_ command: String, into terminalView: OrbitTerminalView?) {
         guard let tv = terminalView else { return }
-        var arr = Array(command.utf8)
-        tv.feed(byteArray: ArraySlice(arr))
+        tv.insertInputText(command)
+    }
+
+    func sendTerminalInput(_ input: String, sessionId: String) throws {
+        if let terminalView = bridge.terminalViewCache[sessionId] as? OrbitTerminalView {
+            terminalView.insertInputText(input)
+            return
+        }
+        try bridge.writeSSH(sessionId: sessionId, data: Data(input.utf8))
     }
 
     // MARK: - Keyword Highlighting
@@ -666,7 +966,7 @@ class AppState: ObservableObject {
     }
 
     func toggleAIPanel() {
-        aiPanelOpen.toggle()
+        toggleAIDrawerForCurrentContext()
     }
 
     func submitAIQuestion(_ question: String) {
@@ -912,17 +1212,23 @@ class AppState: ObservableObject {
             "> ", ">>",
         ]
 
+        static func riskReason(command: String) -> String? {
+            let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !trimmed.isEmpty else { return "空命令" }
+            if trimmed.contains("sudo") { return "包含 sudo 权限提升" }
+            for pattern in dangerousPatterns {
+                if trimmed.contains(pattern.lowercased()) {
+                    return "包含高风险片段: \(pattern.trimmingCharacters(in: .whitespaces))"
+                }
+            }
+            return nil
+        }
+
         static func isSafe(command: String) -> Bool {
             let trimmed = command.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return false }
 
-            for pattern in dangerousPatterns {
-                if trimmed.lowercased().contains(pattern.lowercased()) {
-                    return false
-                }
-            }
-
-            if trimmed.lowercased().contains("sudo") { return false }
+            if riskReason(command: command) != nil { return false }
 
             for prefix in safePrefixes {
                 if trimmed.lowercased().hasPrefix(prefix.lowercased()) {

@@ -79,44 +79,9 @@ class QuickTerminalController: NSObject {
         tv.frame = NSRect(x: 0, y: 0, width: width, height: height)
         tv.autoresizingMask = [.width, .height]
 
-        // Apply theme
         let themeStr = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
         let theme = AppTheme(rawValue: themeStr) ?? .catppuccinMocha
-        let tc = ThemeColors.colors(for: theme)
-        tv.nativeBackgroundColor = NSColor(red: tc.background.red, green: tc.background.green, blue: tc.background.blue, alpha: 0.95)
-        tv.nativeForegroundColor = NSColor(red: tc.foreground.red, green: tc.foreground.green, blue: tc.foreground.blue, alpha: 1)
-
-        // Font with ligatures
-        let fontSize = UserDefaults.standard.double(forKey: "fontSize")
-        let fontFamily = UserDefaults.standard.string(forKey: "fontFamily") ?? "Menlo"
-        let useLigatures = UserDefaults.standard.bool(forKey: "fontLigatures")
-        let size = fontSize > 0 ? fontSize : 14
-        var font = NSFont(name: fontFamily, size: size) ?? NSFont(name: "Menlo", size: size)!
-
-        if useLigatures {
-            let descriptor = font.fontDescriptor.addingAttributes([
-                .featureSettings: [
-                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
-                     kCTFontFeatureSelectorIdentifierKey: 2], // kCommonLigaturesOnSelector
-                    [kCTFontFeatureTypeIdentifierKey: 1,   // kLigaturesType
-                     kCTFontFeatureSelectorIdentifierKey: 3], // kRareLigaturesOnSelector
-                    [kCTFontFeatureTypeIdentifierKey: 35,  // kContextualAlternatesType
-                     kCTFontFeatureSelectorIdentifierKey: 2], // kContextualAlternatesOnSelector
-                ]
-            ])
-            if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
-                font = ligatureFont
-            }
-        }
-        tv.font = font
-
-        // Scrollback buffer
-        let scrollback = UserDefaults.standard.object(forKey: "scrollbackLines") as? Int ?? 10000
-        tv.changeScrollback(scrollback)
-
-        // URL highlighting
-        tv.linkReporting = .implicit
-        tv.linkHighlightMode = .hover
+        tv.configureRenderSettings(theme: theme, backgroundAlpha: 0.95)
 
         // Background blur behind panel
         let blur = NSVisualEffectView()
@@ -142,7 +107,8 @@ class QuickTerminalController: NSObject {
                 tv.feed(text: "\r\n\u{1b}[33m--- 快速终端已退出 ---\u{1b}[0m\r\n")
             }
         }
-        shell.start(cols: UInt16(Int(width / (size * 0.6))), rows: UInt16(Int(height / (size * 1.4))))
+        let fontSize = TerminalRenderSettings.configuredFontSize
+        shell.start(cols: UInt16(Int(width / (fontSize * 0.6))), rows: UInt16(Int(height / (fontSize * 1.4))))
 
         self.window = panel
     }

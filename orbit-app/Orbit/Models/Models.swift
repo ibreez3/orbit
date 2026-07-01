@@ -72,6 +72,9 @@ struct ServerStats: Codable {
     let disk_total: String
     let disk_used: String
     let disk_percent: Double
+    let net_rx_kbps: Double?
+    let net_tx_kbps: Double?
+    let net_interface: String?
     let uptime: String
     let load_avg: String
 }

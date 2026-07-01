@@ -46,6 +46,10 @@ struct OrbitCommands: Commands {
             }
             .keyboardShortcut(",", modifiers: .command)
 
+            Button("检查更新...") {
+                NotificationCenter.default.post(name: .checkForUpdates, object: nil)
+            }
+
             Button("Reconnect Session") {
                 NotificationCenter.default.post(name: .reconnectSession, object: nil)
             }
@@ -145,4 +149,5 @@ extension Notification.Name {
     static let toggleAIPanel = Notification.Name("toggleAIPanel")
     static let openBatchExecution = Notification.Name("openBatchExecution")
     static let askAI = Notification.Name("askAI")
+    static let checkForUpdates = Notification.Name("checkForUpdates")
 }

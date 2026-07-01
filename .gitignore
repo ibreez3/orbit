@@ -18,6 +18,7 @@ orbit-app/Orbit.xcodeproj/project.xcworkspace/xcuserdata/
 
 # Node (legacy, keep for safety)
 node_modules/
+package-lock.json
 dist/
 Orbit.app/
 release/
@@ -25,3 +26,7 @@ release/
 build/
 *.dmg
 *.zip
+
+# Legacy/prototype artifacts
+src-tauri/
+bg/

@@ -1,9 +1,149 @@
 import SwiftTerm
 import AppKit
+import CoreText
+
+enum TerminalRenderSettings {
+    static let preferredFontNames = [
+        "MesloLGS NF",
+        "MesloLGS Nerd Font Mono",
+        "JetBrainsMono Nerd Font Mono",
+        "Hack Nerd Font Mono",
+        "FiraCode Nerd Font Mono",
+        "CaskaydiaCove Nerd Font Mono",
+        "SauceCodePro Nerd Font Mono",
+        "SF Mono",
+        "Menlo"
+    ]
+
+    static var defaultFontName: String {
+        preferredFontNames.first(where: { isFontAvailable($0) }) ?? "Menlo"
+    }
+
+    static var configuredFontSize: CGFloat {
+        let fontSize = UserDefaults.standard.double(forKey: "fontSize")
+        return CGFloat(fontSize > 0 ? fontSize : 14)
+    }
+
+    static func availableTerminalFonts() -> [String] {
+        var names = Set<String>()
+        for family in NSFontManager.shared.availableFontFamilies {
+            let members = NSFontManager.shared.availableMembers(ofFontFamily: family)
+            var hasFixedPitchMember = false
+            for member in (members ?? []) {
+                guard member.count >= 1, let name = member[0] as? String else { continue }
+                if NSFont(name: name, size: 14)?.isFixedPitch == true {
+                    names.insert(name)
+                    hasFixedPitchMember = true
+                }
+            }
+            if hasFixedPitchMember {
+                names.insert(family)
+            }
+        }
+
+        names.insert(defaultFontName)
+        let preferred = preferredFontNames.filter { names.contains($0) || isFontAvailable($0) }
+        let remaining = names.subtracting(preferred).sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+
+        var ordered: [String] = []
+        for name in preferred + remaining where !ordered.contains(name) {
+            ordered.append(name)
+        }
+        return ordered
+    }
+
+    static func apply(to terminalView: OrbitTerminalView, theme: AppTheme, backgroundAlpha: CGFloat = 1) {
+        let tc = ThemeColors.colors(for: theme)
+        let colors = tc.ansi.map { SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue) }
+        terminalView.installColors(colors)
+
+        terminalView.nativeBackgroundColor = NSColor(
+            red: tc.background.red,
+            green: tc.background.green,
+            blue: tc.background.blue,
+            alpha: backgroundAlpha
+        )
+        terminalView.nativeForegroundColor = NSColor(
+            red: tc.foreground.red,
+            green: tc.foreground.green,
+            blue: tc.foreground.blue,
+            alpha: 1
+        )
+
+        terminalView.font = makeFont()
+
+        let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "bar"
+        let term = terminalView.getTerminal()
+        switch cursorStyle {
+        case "block":
+            term.setCursorStyle(.steadyBlock)
+        case "underline":
+            term.setCursorStyle(.steadyUnderline)
+        default:
+            term.setCursorStyle(.steadyBar)
+        }
+
+        let scrollback = UserDefaults.standard.object(forKey: "scrollbackLines") as? Int ?? 10000
+        terminalView.changeScrollback(scrollback)
+        terminalView.linkReporting = .implicit
+        terminalView.linkHighlightMode = .hover
+    }
+
+    private static func makeFont() -> NSFont {
+        let configuredName = UserDefaults.standard.string(forKey: "fontFamily")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fontName = configuredName?.isEmpty == false ? configuredName! : defaultFontName
+        let size = configuredFontSize
+        var font = resolveFont(name: fontName, size: size)
+            ?? resolveFont(name: defaultFontName, size: size)
+            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+
+        if UserDefaults.standard.bool(forKey: "fontLigatures") {
+            let descriptor = font.fontDescriptor.addingAttributes([
+                .featureSettings: [
+                    [kCTFontFeatureTypeIdentifierKey: 1, kCTFontFeatureSelectorIdentifierKey: 2],
+                    [kCTFontFeatureTypeIdentifierKey: 1, kCTFontFeatureSelectorIdentifierKey: 3],
+                    [kCTFontFeatureTypeIdentifierKey: 35, kCTFontFeatureSelectorIdentifierKey: 2],
+                ]
+            ])
+            if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
+                font = ligatureFont
+            }
+        }
+
+        return font
+    }
+
+    private static func isFontAvailable(_ name: String) -> Bool {
+        resolveFont(name: name, size: 14) != nil
+    }
+
+    private static func resolveFont(name: String, size: CGFloat) -> NSFont? {
+        if let font = NSFont(name: name, size: size) {
+            return font
+        }
+        return NSFontManager.shared.font(
+            withFamily: name,
+            traits: .fixedPitchFontMask,
+            weight: 5,
+            size: size
+        ) ?? NSFontManager.shared.font(
+            withFamily: name,
+            traits: [],
+            weight: 5,
+            size: size
+        )
+    }
+}
 
 class OrbitTerminalView: SwiftTerm.TerminalView {
     var tabId: String?
     weak var appState: AppState?
+    private var renderTheme: AppTheme = .catppuccinMocha
+    private var renderBackgroundAlpha: CGFloat = 1
+    private var settingsObserver: NSObjectProtocol?
 
     // Pending paste text after confirmation
     private var pendingPasteText: String?
@@ -14,6 +154,7 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     // MARK: - Blur background
 
     func setupBlur() {
+        guard blurView == nil else { return }
         guard UserDefaults.standard.bool(forKey: "backgroundBlur") else { return }
         let blur = NSVisualEffectView()
         blur.wantsLayer = true
@@ -43,6 +184,13 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         }
     }
 
+    func configureRenderSettings(theme: AppTheme, backgroundAlpha: CGFloat = 1) {
+        renderTheme = theme
+        renderBackgroundAlpha = backgroundAlpha
+        TerminalRenderSettings.apply(to: self, theme: theme, backgroundAlpha: backgroundAlpha)
+        updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
+    }
+
     // MARK: - Keyboard & Mouse event monitors
 
     private var keyMonitor: Any?
@@ -51,6 +199,7 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
+            startSettingsObserver()
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self = self,
                       self.window?.firstResponder == self else { return event }
@@ -76,10 +225,35 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
                 return event
             }
         } else {
+            stopSettingsObserver()
             if let m = keyMonitor { NSEvent.removeMonitor(m) }
             if let m = mouseMonitor { NSEvent.removeMonitor(m) }
             keyMonitor = nil
             mouseMonitor = nil
+        }
+    }
+
+    deinit {
+        stopSettingsObserver()
+    }
+
+    private func startSettingsObserver() {
+        guard settingsObserver == nil else { return }
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.configureRenderSettings(theme: self.renderTheme, backgroundAlpha: self.renderBackgroundAlpha)
+            self.needsDisplay = true
+        }
+    }
+
+    private func stopSettingsObserver() {
+        if let observer = settingsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            settingsObserver = nil
         }
     }
 
@@ -125,6 +299,10 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         }
     }
 
+    func insertInputText(_ text: String) {
+        insertText(text as NSString, replacementRange: NSRange(location: 0, length: 0))
+    }
+
     private func showPasteConfirmation(lineCount: Int) {
         let alert = NSAlert()
         alert.messageText = "粘贴多行内容"
@@ -159,7 +337,9 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
 
     @objc private func openSftpDrawer(_ sender: Any) {
         guard let tid = tabId, let state = appState else { return }
-        state.toggleSftpDrawer(for: tid)
+        if state.requestActivateTab(tid) {
+            state.openTool(.sftp)
+        }
     }
 
     @objc private func reconnectSession(_ sender: Any) {

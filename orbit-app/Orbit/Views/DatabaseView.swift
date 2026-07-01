@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DatabaseView: View {
     let tab: TabItem
+    @EnvironmentObject var appState: AppState
     @State private var selectedTable: String? = nil
     @State private var sqlText: String = "SELECT * FROM orders LIMIT 100;"
     @State private var tableSearchQuery: String = ""
@@ -11,6 +12,9 @@ struct DatabaseView: View {
             tableListPanel
             editorAndResultsPanel
         }
+        .onAppear { publishAIContext() }
+        .onChange(of: selectedTable) { _ in publishAIContext() }
+        .onChange(of: sqlText) { _ in publishAIContext() }
     }
 
     private var tableListPanel: some View {
@@ -123,6 +127,21 @@ struct DatabaseView: View {
         let q = tableSearchQuery.lowercased()
         if q.isEmpty { return all }
         return all.filter { $0.contains(q) }
+    }
+
+    private func publishAIContext() {
+        let summary: String
+        if selectedTable != nil {
+            summary = mockResults.map { "\($0.status): \($0.cnt)" }.joined(separator: ", ")
+        } else {
+            summary = "尚未执行查询"
+        }
+        appState.updateDatabaseAIContext(
+            tabId: tab.id,
+            selectedTable: selectedTable,
+            sqlText: sqlText,
+            resultSummary: summary
+        )
     }
 }
 
