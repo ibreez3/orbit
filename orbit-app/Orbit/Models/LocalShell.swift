@@ -34,7 +34,7 @@ class LocalShell {
         var ws = winsize()
         ws.ws_col = cols
         ws.ws_row = rows
-        ioctl(slave, TIOCSWINSZ, &ws)
+        _ = ioctl(slave, TIOCSWINSZ, &ws)
 
         // Use posix_spawn instead of forkpty (safe in multi-threaded process)
         var fileActions: posix_spawn_file_actions_t? = nil
@@ -129,7 +129,7 @@ class LocalShell {
         var ws = winsize()
         ws.ws_col = cols
         ws.ws_row = rows
-        ioctl(masterFd, TIOCSWINSZ, &ws)
+        _ = ioctl(masterFd, TIOCSWINSZ, &ws)
     }
 
     private func cleanup() {

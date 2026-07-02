@@ -41,6 +41,8 @@ ORBIT_API int32_t orbit_test_connection(struct OrbitApp *app, const char *json_i
 
 ORBIT_API int32_t orbit_connect_ssh(struct OrbitApp *app, const char *server_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);
 
+ORBIT_API int32_t orbit_get_last_error(struct OrbitApp *app, char **out_error);
+
 ORBIT_API int32_t orbit_spawn_channel(struct OrbitApp *app, const char *existing_session_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_channel_id);
 
 ORBIT_API int32_t orbit_write_ssh(struct OrbitApp *app, const char *session_id, const uint8_t *data, size_t data_len);
@@ -84,6 +86,16 @@ ORBIT_API int32_t orbit_docker_logs(struct OrbitApp *app, const char *server_id,
 ORBIT_API int32_t orbit_docker_action(struct OrbitApp *app, const char *server_id, const char *container_id, const char *action, char **out_output);
 
 ORBIT_API void orbit_shutdown_pool(struct OrbitApp *app);
+
+ORBIT_API int32_t orbit_exec_command(struct OrbitApp *app, const char *server_id, const char *command, uint32_t timeout_ms, char **out_output);
+
+ORBIT_API int32_t orbit_start_port_forward(struct OrbitApp *app, const char *forwarding_id, const char *server_id, uint16_t local_port, const char *remote_host, uint16_t remote_port, uint16_t *out_local_port);
+
+ORBIT_API int32_t orbit_stop_port_forward(struct OrbitApp *app, const char *forwarding_id);
+
+ORBIT_API int32_t orbit_export_config(struct OrbitApp *app, char **out_json);
+
+ORBIT_API int32_t orbit_import_config(struct OrbitApp *app, const char *json_input, int32_t strategy, int32_t *out_count);
 
 ORBIT_API void orbit_free_string(char *s);
 

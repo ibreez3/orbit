@@ -74,6 +74,8 @@ struct ServerStats: Codable {
     let disk_percent: Double
     let net_rx_kbps: Double?
     let net_tx_kbps: Double?
+    let net_rx_bytes: UInt64?
+    let net_tx_bytes: UInt64?
     let net_interface: String?
     let uptime: String
     let load_avg: String
@@ -302,6 +304,25 @@ struct CommandSnippet: Codable, Identifiable, Equatable {
     var updatedAt: Date
 
     static func == (lhs: CommandSnippet, rhs: CommandSnippet) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+// MARK: - Port Forwarding
+
+struct PortForwardRule: Codable, Identifiable, Equatable {
+    let id: String
+    let serverId: String
+    let localPort: UInt16
+    let remoteHost: String
+    let remotePort: UInt16
+    var enabled: Bool
+
+    var description: String {
+        "127.0.0.1:\(localPort) → \(remoteHost):\(remotePort)"
+    }
+
+    static func == (lhs: PortForwardRule, rhs: PortForwardRule) -> Bool {
         lhs.id == rhs.id
     }
 }

@@ -1,65 +1,218 @@
 import SwiftUI
 
 class AppState: ObservableObject {
-    @Published var servers: [Server] = []
-    @Published var credentialGroups: [CredentialGroup] = []
-    @Published var tabs: [TabItem] = []
-    @Published var activeTabId: String? = nil
-    @Published var spotlightOpen: Bool = false
-    @Published var spotlightQuery: String = ""
-    @Published var theme: AppTheme = .catppuccinMocha
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
+    let tabState = TabState()
+    let uiState = UIState()
+    let themeState = ThemeState()
+    let inventoryState = InventoryState()
+    let snippetState = SnippetState()
+    let toolState = ToolState()
+    let aiState = AIState()
+
     let sftpDrawer = SftpDrawerState()
 
-    @Published var dialogOpen: Bool = false
-    @Published var editingServer: Server? = nil
-    @Published var dialogDefaults: ServerInput? = nil
-
-    @Published var cgDialogOpen: Bool = false
-    @Published var editingCg: CredentialGroup? = nil
-
-    @Published var showQuitConfirmation: Bool = false
     private var pendingQuitTabId: String? = nil
-    @Published var pendingCloseTabId: String? = nil
 
-    @Published var alertMessage: String? = nil
-    @Published var alertTitle: String = ""
 
-    // Command snippets
-    @Published var snippets: [CommandSnippet] = []
-    @Published var snippetEditorOpen: Bool = false
-    @Published var editingSnippet: CommandSnippet? = nil
 
-    // Keyword highlighting
-    @Published var keywordHighlights: [KeywordHighlight] = KeywordHighlight.defaults
+    var tabs: [TabItem] {
+        get { tabState.tabs }
+        set { tabState.tabs = newValue }
+    }
 
-    // AI Assistant — Session-based
-    @Published var aiConfig: AIConfig = .defaults
-    @Published var aiSessions: [String: [AISession]] = [:]       // serverId → sessions
-    @Published var activeAISessionId: [String: String] = [:]     // tabId → sessionId
-    @Published var aiPanelOpen: Bool = false
-    @Published var aiLoading: Bool = false
-    @Published var aiPanelWidth: CGFloat = 280
-    @Published var aiPendingConfirmation: PendingAICommand? = nil
-    @Published var activeTool: BoundToolState? = nil
-    @Published var floatingToolWidth: CGFloat = 390
-    @Published var floatingToolHeight: CGFloat = 460
-    @Published var pendingContextSwitchTabId: String? = nil
-    @Published var pendingContextSwitchMessage: String? = nil
-    @Published var auditEventsByContext: [String: [AuditEvent]] = [:]
-    @Published var activeSftpTransferTabIds: Set<String> = []
-    @Published var databaseAIContexts: [String: DatabaseAIContext] = [:]
-    @Published var dockerPanelSnapshots: [String: DockerPanelSnapshot] = [:]
-    @Published var assetTreeWidth: CGFloat = 220
-    @Published var recentServers: [String] = []     // 最多 6 个 serverId
-    @Published var assetTreeSearchQuery: String = ""
-    @Published var activeTabError: String? = nil
+    var activeTabId: String? {
+        get { tabState.activeTabId }
+        set { tabState.activeTabId = newValue }
+    }
 
-    var showAlert: Binding<Bool> {
-        Binding(get: { self.alertMessage != nil }, set: { if !$0 { self.alertMessage = nil } })
+    var activeTabError: String? {
+        get { tabState.activeTabError }
+        set { tabState.activeTabError = newValue }
+    }
+
+    var spotlightOpen: Bool {
+        get { uiState.spotlightOpen }
+        set { uiState.spotlightOpen = newValue }
+    }
+
+    var spotlightQuery: String {
+        get { uiState.spotlightQuery }
+        set { uiState.spotlightQuery = newValue }
+    }
+
+    var dialogOpen: Bool {
+        get { uiState.dialogOpen }
+        set { uiState.dialogOpen = newValue }
+    }
+
+    var cgDialogOpen: Bool {
+        get { uiState.cgDialogOpen }
+        set { uiState.cgDialogOpen = newValue }
+    }
+
+    var showQuitConfirmation: Bool {
+        get { uiState.showQuitConfirmation }
+        set { uiState.showQuitConfirmation = newValue }
+    }
+
+    var pendingCloseTabId: String? {
+        get { uiState.pendingCloseTabId }
+        set { uiState.pendingCloseTabId = newValue }
+    }
+
+    var assetTreeWidth: CGFloat {
+        get { uiState.assetTreeWidth }
+        set { uiState.assetTreeWidth = newValue }
+    }
+
+    var assetTreeSearchQuery: String {
+        get { uiState.assetTreeSearchQuery }
+        set { uiState.assetTreeSearchQuery = newValue }
+    }
+
+    var recentServers: [String] {
+        get { uiState.recentServers }
+        set { uiState.recentServers = newValue }
+    }
+
+    var theme: AppTheme {
+        get { themeState.theme }
+        set { themeState.theme = newValue }
+    }
+
+    var keywordHighlights: [KeywordHighlight] {
+        get { themeState.keywordHighlights }
+        set { themeState.keywordHighlights = newValue }
+    }
+
+    var showAlert: Binding<Bool> { uiState.showAlert }
+
+    var alertMessage: String? {
+        get { uiState.alertMessage }
+        set { uiState.alertMessage = newValue }
+    }
+    var alertTitle: String {
+        get { uiState.alertTitle }
+        set { uiState.alertTitle = newValue }
     }
 
     let bridge = OrbitBridge.shared
     let textEditorWC = TextEditorWindowController()
+
+    // MARK: - Inventory forwarding
+
+    var servers: [Server] {
+        get { inventoryState.servers }
+        set { inventoryState.servers = newValue }
+    }
+    var credentialGroups: [CredentialGroup] {
+        get { inventoryState.credentialGroups }
+        set { inventoryState.credentialGroups = newValue }
+    }
+    var portForwardRules: [PortForwardRule] {
+        get { inventoryState.portForwardRules }
+        set { inventoryState.portForwardRules = newValue }
+    }
+    var editingServer: Server? {
+        get { inventoryState.editingServer }
+        set { inventoryState.editingServer = newValue }
+    }
+    var dialogDefaults: ServerInput? {
+        get { inventoryState.dialogDefaults }
+        set { inventoryState.dialogDefaults = newValue }
+    }
+    var editingCg: CredentialGroup? {
+        get { inventoryState.editingCg }
+        set { inventoryState.editingCg = newValue }
+    }
+
+    // MARK: - Snippet forwarding
+
+    var snippets: [CommandSnippet] {
+        get { snippetState.snippets }
+        set { snippetState.snippets = newValue }
+    }
+    var snippetEditorOpen: Bool {
+        get { snippetState.snippetEditorOpen }
+        set { snippetState.snippetEditorOpen = newValue }
+    }
+    var editingSnippet: CommandSnippet? {
+        get { snippetState.editingSnippet }
+        set { snippetState.editingSnippet = newValue }
+    }
+
+    // MARK: - Tool forwarding
+
+    var activeTool: BoundToolState? {
+        get { toolState.activeTool }
+        set { toolState.activeTool = newValue }
+    }
+    var floatingToolWidth: CGFloat {
+        get { toolState.floatingToolWidth }
+        set { toolState.floatingToolWidth = newValue }
+    }
+    var floatingToolHeight: CGFloat {
+        get { toolState.floatingToolHeight }
+        set { toolState.floatingToolHeight = newValue }
+    }
+    var pendingContextSwitchTabId: String? {
+        get { toolState.pendingContextSwitchTabId }
+        set { toolState.pendingContextSwitchTabId = newValue }
+    }
+    var pendingContextSwitchMessage: String? {
+        get { toolState.pendingContextSwitchMessage }
+        set { toolState.pendingContextSwitchMessage = newValue }
+    }
+    var activeSftpTransferTabIds: Set<String> {
+        get { toolState.activeSftpTransferTabIds }
+        set { toolState.activeSftpTransferTabIds = newValue }
+    }
+    var dockerPanelSnapshots: [String: DockerPanelSnapshot] {
+        get { toolState.dockerPanelSnapshots }
+        set { toolState.dockerPanelSnapshots = newValue }
+    }
+    var aiPanelOpen: Bool {
+        get { toolState.aiPanelOpen }
+        set { toolState.aiPanelOpen = newValue }
+    }
+
+    // MARK: - AI forwarding
+
+    var aiConfig: AIConfig {
+        get { aiState.aiConfig }
+        set { aiState.aiConfig = newValue }
+    }
+    var aiSessions: [String: [AISession]] {
+        get { aiState.aiSessions }
+        set { aiState.aiSessions = newValue }
+    }
+    var activeAISessionId: [String: String] {
+        get { aiState.activeAISessionId }
+        set { aiState.activeAISessionId = newValue }
+    }
+    var aiLoading: Bool {
+        get { aiState.aiLoading }
+        set { aiState.aiLoading = newValue }
+    }
+    var aiPanelWidth: CGFloat {
+        get { aiState.aiPanelWidth }
+        set { aiState.aiPanelWidth = newValue }
+    }
+    var aiPendingConfirmation: PendingAICommand? {
+        get { aiState.aiPendingConfirmation }
+        set { aiState.aiPendingConfirmation = newValue }
+    }
+    var databaseAIContexts: [String: DatabaseAIContext] {
+        get { aiState.databaseAIContexts }
+        set { aiState.databaseAIContexts = newValue }
+    }
+    var auditEventsByContext: [String: [AuditEvent]] {
+        get { aiState.auditEventsByContext }
+        set { aiState.auditEventsByContext = newValue }
+    }
 
     var activeSessionContext: ActiveSessionContext {
         guard let activeTabId,
@@ -130,10 +283,6 @@ class AppState: ObservableObject {
     }
 
     init() {
-        let savedTheme = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
-        if let t = AppTheme(rawValue: savedTheme) {
-            _theme = Published(initialValue: t)
-        }
         ThemeManager.shared.loadThemes()
         loadServers()
         loadCredentialGroups()
@@ -143,6 +292,7 @@ class AppState: ObservableObject {
         loadAIPanelWidth()
         loadAssetTreeWidth()
         loadRecentServers()
+        loadPortForwardRules()
     }
 
     func loadServers() {
@@ -551,7 +701,7 @@ class AppState: ObservableObject {
             // Focus the new terminal after SwiftUI creates it
             let cid = newChannelId
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                if let tv = OrbitBridge.shared.terminalViewCache[cid] as? OrbitTerminalView {
+                if let tv = OrbitBridge.shared.terminalView(for: cid) as? OrbitTerminalView {
                     tv.window?.makeFirstResponder(tv)
                 }
             }
@@ -570,7 +720,7 @@ class AppState: ObservableObject {
         }
 
         bridge.removeSSHHandlers(sessionId: focused)
-        bridge.terminalViewCache.removeValue(forKey: focused)
+        bridge.removeTerminalView(sessionId: focused)
         Task { try? await bridge.disconnectSSHAsync(sessionId: focused) }
 
         if let newTree = tree.removing(channelId: focused) {
@@ -605,7 +755,7 @@ class AppState: ObservableObject {
               let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
               let next = tree.findAdjacent(channelId: focused, forward: forward) else { return }
         requestFocusPane(tabId: active, paneId: next)
-        if let tv = OrbitBridge.shared.terminalViewCache[next] as? OrbitTerminalView {
+        if let tv = OrbitBridge.shared.terminalView(for: next) as? OrbitTerminalView {
             tv.window?.makeFirstResponder(tv)
         }
     }
@@ -636,7 +786,7 @@ class AppState: ObservableObject {
         }
         for channelId in channelIds {
             bridge.removeSSHHandlers(sessionId: channelId)
-            bridge.terminalViewCache.removeValue(forKey: channelId)
+            bridge.removeTerminalView(sessionId: channelId)
         }
         Task.detached {
             for channelId in channelIds {
@@ -759,7 +909,7 @@ class AppState: ObservableObject {
 
         // Clean up handlers and disconnect the dead channel
         bridge.removeSSHHandlers(sessionId: channelId)
-        bridge.terminalViewCache.removeValue(forKey: channelId)
+        bridge.removeTerminalView(sessionId: channelId)
         Task { try? await bridge.disconnectSSHAsync(sessionId: channelId) }
 
         if let tree = tab.paneTree {
@@ -826,7 +976,7 @@ class AppState: ObservableObject {
         // Clear old session state
         if let oldSid = tab.sessionId {
             bridge.removeSSHHandlers(sessionId: oldSid)
-            bridge.terminalViewCache.removeValue(forKey: oldSid)
+            bridge.removeTerminalView(sessionId: oldSid)
         }
         tabs[tabIdx].sessionId = nil
         if tabId == activeTabId, tabs[tabIdx].focusedChannelId != nil {
@@ -844,7 +994,7 @@ class AppState: ObservableObject {
     func loadSnippets() {
         guard let data = UserDefaults.standard.data(forKey: "commandSnippets") else { return }
         do {
-            snippets = try JSONDecoder().decode([CommandSnippet].self, from: data)
+            snippets = try Self.decoder.decode([CommandSnippet].self, from: data)
         } catch {
             print("[Orbit] Failed to load snippets: \(error)")
         }
@@ -852,7 +1002,7 @@ class AppState: ObservableObject {
 
     func saveSnippets() {
         do {
-            let data = try JSONEncoder().encode(snippets)
+            let data = try Self.encoder.encode(snippets)
             UserDefaults.standard.set(data, forKey: "commandSnippets")
         } catch {
             print("[Orbit] Failed to save snippets: \(error)")
@@ -899,13 +1049,33 @@ class AppState: ObservableObject {
         editingSnippet = nil
     }
 
-    func insertSnippetCommand(_ command: String, into terminalView: OrbitTerminalView?) {
+    func insertSnippetCommand(_ template: String, into terminalView: OrbitTerminalView?) {
         guard let tv = terminalView else { return }
-        tv.insertInputText(command)
+        let resolved = resolveTemplate(template)
+        tv.insertInputText(resolved)
+    }
+
+    func resolveTemplate(_ template: String) -> String {
+        var result = template
+        var server: Server?
+        if let active = activeTabId, let tab = tabs.first(where: { $0.id == active }) {
+            server = servers.first(where: { $0.id == tab.serverId })
+        }
+        let replacements: [(String, String)] = [
+            ("{{host}}", server?.host ?? ""),
+            ("{{user}}", server?.username ?? ""),
+            ("{{port}}", server.map { String($0.port) } ?? ""),
+            ("{{server_name}}", server?.name ?? ""),
+            ("{{group}}", server?.group_name ?? ""),
+        ]
+        for (placeholder, value) in replacements {
+            result = result.replacingOccurrences(of: placeholder, with: value)
+        }
+        return result
     }
 
     func sendTerminalInput(_ input: String, sessionId: String) throws {
-        if let terminalView = bridge.terminalViewCache[sessionId] as? OrbitTerminalView {
+        if let terminalView = bridge.terminalView(for: sessionId) as? OrbitTerminalView {
             terminalView.insertInputText(input)
             return
         }
@@ -917,7 +1087,7 @@ class AppState: ObservableObject {
     func loadKeywords() {
         guard let data = UserDefaults.standard.data(forKey: "keywordHighlights") else { return }
         do {
-            keywordHighlights = try JSONDecoder().decode([KeywordHighlight].self, from: data)
+            keywordHighlights = try Self.decoder.decode([KeywordHighlight].self, from: data)
         } catch {
             print("[Orbit] Failed to load keywords: \(error)")
         }
@@ -925,7 +1095,7 @@ class AppState: ObservableObject {
 
     func saveKeywords() {
         do {
-            let data = try JSONEncoder().encode(keywordHighlights)
+            let data = try Self.encoder.encode(keywordHighlights)
             UserDefaults.standard.set(data, forKey: "keywordHighlights")
         } catch {
             print("[Orbit] Failed to save keywords: \(error)")
@@ -955,7 +1125,7 @@ class AppState: ObservableObject {
     func loadAIConfig() {
         guard let data = UserDefaults.standard.data(forKey: "aiConfig") else { return }
         do {
-            aiConfig = try JSONDecoder().decode(AIConfig.self, from: data)
+            aiConfig = try Self.decoder.decode(AIConfig.self, from: data)
         } catch {
             print("[Orbit] Failed to load AI config: \(error)")
         }
@@ -963,7 +1133,7 @@ class AppState: ObservableObject {
 
     func saveAIConfig() {
         do {
-            let data = try JSONEncoder().encode(aiConfig)
+            let data = try Self.encoder.encode(aiConfig)
             UserDefaults.standard.set(data, forKey: "aiConfig")
         } catch {
             print("[Orbit] Failed to save AI config: \(error)")
@@ -1094,7 +1264,7 @@ class AppState: ObservableObject {
     func loadAISessions(serverId: String) {
         guard let data = UserDefaults.standard.data(forKey: "aiSessions_\(serverId)") else { return }
         do {
-            aiSessions[serverId] = try JSONDecoder().decode([AISession].self, from: data)
+            aiSessions[serverId] = try Self.decoder.decode([AISession].self, from: data)
         } catch {
             print("[Orbit] Failed to load AI sessions for \(serverId): \(error)")
         }
@@ -1103,7 +1273,7 @@ class AppState: ObservableObject {
     func saveAISessions(serverId: String) {
         guard let sessions = aiSessions[serverId] else { return }
         do {
-            let data = try JSONEncoder().encode(sessions)
+            let data = try Self.encoder.encode(sessions)
             UserDefaults.standard.set(data, forKey: "aiSessions_\(serverId)")
         } catch {
             print("[Orbit] Failed to save AI sessions for \(serverId): \(error)")
@@ -1293,15 +1463,84 @@ class AppState: ObservableObject {
     func loadRecentServers() {
         guard let data = UserDefaults.standard.data(forKey: "recentServers") else { return }
         do {
-            recentServers = try JSONDecoder().decode([String].self, from: data)
+            recentServers = try Self.decoder.decode([String].self, from: data)
         } catch {
             print("[Orbit] Failed to load recent servers: \(error)")
         }
     }
 
+    func loadPortForwardRules() {
+        guard let data = UserDefaults.standard.data(forKey: "portForwardRules") else { return }
+        do {
+            portForwardRules = try Self.decoder.decode([PortForwardRule].self, from: data)
+        } catch {
+            print("[Orbit] Failed to load port forward rules: \(error)")
+        }
+    }
+
+    func savePortForwardRules() {
+        do {
+            let data = try Self.encoder.encode(portForwardRules)
+            UserDefaults.standard.set(data, forKey: "portForwardRules")
+        } catch {
+            print("[Orbit] Failed to save port forward rules: \(error)")
+        }
+    }
+
+    func addPortForwardRule(serverId: String, localPort: UInt16, remoteHost: String, remotePort: UInt16) {
+        let id = "pf-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let rule = PortForwardRule(id: id, serverId: serverId, localPort: localPort, remoteHost: remoteHost, remotePort: remotePort, enabled: false)
+        portForwardRules.append(rule)
+        savePortForwardRules()
+    }
+
+    func startPortForward(_ rule: PortForwardRule) {
+        Task {
+            do {
+                let actualPort = try await bridge.startPortForwardAsync(forwardingId: rule.id, serverId: rule.serverId, localPort: rule.localPort, remoteHost: rule.remoteHost, remotePort: rule.remotePort)
+                await MainActor.run {
+                    if let idx = portForwardRules.firstIndex(where: { $0.id == rule.id }) {
+                        portForwardRules[idx].enabled = true
+                        if actualPort != rule.localPort, actualPort != 0 {
+                            portForwardRules[idx] = PortForwardRule(id: rule.id, serverId: rule.serverId, localPort: actualPort, remoteHost: rule.remoteHost, remotePort: rule.remotePort, enabled: true)
+                        }
+                        savePortForwardRules()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "端口转发失败"
+                    alertMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func stopPortForward(_ rule: PortForwardRule) {
+        Task {
+            do {
+                try await bridge.stopPortForwardAsync(forwardingId: rule.id)
+            } catch { }
+            await MainActor.run {
+                if let idx = portForwardRules.firstIndex(where: { $0.id == rule.id }) {
+                    portForwardRules[idx].enabled = false
+                    savePortForwardRules()
+                }
+            }
+        }
+    }
+
+    func removePortForwardRule(_ rule: PortForwardRule) {
+        if rule.enabled {
+            Task { try? await bridge.stopPortForwardAsync(forwardingId: rule.id) }
+        }
+        portForwardRules.removeAll { $0.id == rule.id }
+        savePortForwardRules()
+    }
+
     func saveRecentServers() {
         do {
-            let data = try JSONEncoder().encode(recentServers)
+            let data = try Self.encoder.encode(recentServers)
             UserDefaults.standard.set(data, forKey: "recentServers")
         } catch {
             print("[Orbit] Failed to save recent servers: \(error)")

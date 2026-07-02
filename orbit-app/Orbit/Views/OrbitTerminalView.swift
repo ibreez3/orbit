@@ -2,6 +2,32 @@ import SwiftTerm
 import AppKit
 import CoreText
 
+private var terminalSettingsObservationContext = 0
+
+struct TerminalSettingsSnapshot: Equatable {
+    let fontFamily: String
+    let fontSize: CGFloat
+    let fontLigatures: Bool
+    let cursorStyle: String
+    let scrollbackLines: Int
+    let backgroundBlur: Bool
+
+    static func current() -> TerminalSettingsSnapshot {
+        let defaults = UserDefaults.standard
+        let configuredFontFamily = defaults.string(forKey: "fontFamily")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fontSize = defaults.double(forKey: "fontSize")
+        return TerminalSettingsSnapshot(
+            fontFamily: configuredFontFamily?.isEmpty == false ? configuredFontFamily! : TerminalRenderSettings.defaultFontName,
+            fontSize: CGFloat(fontSize > 0 ? fontSize : 14),
+            fontLigatures: defaults.bool(forKey: "fontLigatures"),
+            cursorStyle: defaults.string(forKey: "cursorStyle") ?? "bar",
+            scrollbackLines: defaults.object(forKey: "scrollbackLines") as? Int ?? 10000,
+            backgroundBlur: defaults.bool(forKey: "backgroundBlur")
+        )
+    }
+}
+
 enum TerminalRenderSettings {
     static let preferredFontNames = [
         "MesloLGS NF",
@@ -23,6 +49,9 @@ enum TerminalRenderSettings {
         let fontSize = UserDefaults.standard.double(forKey: "fontSize")
         return CGFloat(fontSize > 0 ? fontSize : 14)
     }
+
+    private static var cachedFontKey: String?
+    private static var cachedFont: NSFont?
 
     static func availableTerminalFonts() -> [String] {
         var names = Set<String>()
@@ -55,6 +84,7 @@ enum TerminalRenderSettings {
     }
 
     static func apply(to terminalView: OrbitTerminalView, theme: AppTheme, backgroundAlpha: CGFloat = 1) {
+        let snapshot = TerminalSettingsSnapshot.current()
         let tc = ThemeColors.colors(for: theme)
         let colors = tc.ansi.map { SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue) }
         terminalView.installColors(colors)
@@ -74,9 +104,8 @@ enum TerminalRenderSettings {
 
         terminalView.font = makeFont()
 
-        let cursorStyle = UserDefaults.standard.string(forKey: "cursorStyle") ?? "bar"
         let term = terminalView.getTerminal()
-        switch cursorStyle {
+        switch snapshot.cursorStyle {
         case "block":
             term.setCursorStyle(.steadyBlock)
         case "underline":
@@ -85,22 +114,23 @@ enum TerminalRenderSettings {
             term.setCursorStyle(.steadyBar)
         }
 
-        let scrollback = UserDefaults.standard.object(forKey: "scrollbackLines") as? Int ?? 10000
-        terminalView.changeScrollback(scrollback)
+        terminalView.changeScrollback(snapshot.scrollbackLines)
         terminalView.linkReporting = .implicit
         terminalView.linkHighlightMode = .hover
     }
 
     private static func makeFont() -> NSFont {
-        let configuredName = UserDefaults.standard.string(forKey: "fontFamily")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fontName = configuredName?.isEmpty == false ? configuredName! : defaultFontName
-        let size = configuredFontSize
-        var font = resolveFont(name: fontName, size: size)
-            ?? resolveFont(name: defaultFontName, size: size)
-            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        let snapshot = TerminalSettingsSnapshot.current()
+        let cacheKey = "\(snapshot.fontFamily)|\(snapshot.fontSize)|\(snapshot.fontLigatures)"
+        if cachedFontKey == cacheKey, let cachedFont {
+            return cachedFont
+        }
 
-        if UserDefaults.standard.bool(forKey: "fontLigatures") {
+        var font = resolveFont(name: snapshot.fontFamily, size: snapshot.fontSize)
+            ?? resolveFont(name: defaultFontName, size: snapshot.fontSize)
+            ?? NSFont.monospacedSystemFont(ofSize: snapshot.fontSize, weight: .regular)
+
+        if snapshot.fontLigatures {
             let descriptor = font.fontDescriptor.addingAttributes([
                 .featureSettings: [
                     [kCTFontFeatureTypeIdentifierKey: 1, kCTFontFeatureSelectorIdentifierKey: 2],
@@ -108,11 +138,13 @@ enum TerminalRenderSettings {
                     [kCTFontFeatureTypeIdentifierKey: 35, kCTFontFeatureSelectorIdentifierKey: 2],
                 ]
             ])
-            if let ligatureFont = NSFont(descriptor: descriptor, size: size) {
+            if let ligatureFont = NSFont(descriptor: descriptor, size: snapshot.fontSize) {
                 font = ligatureFont
             }
         }
 
+        cachedFontKey = cacheKey
+        cachedFont = font
         return font
     }
 
@@ -143,7 +175,16 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     weak var appState: AppState?
     private var renderTheme: AppTheme = .catppuccinMocha
     private var renderBackgroundAlpha: CGFloat = 1
-    private var settingsObserver: NSObjectProtocol?
+    private var observingSettingsKeys = false
+    private var lastSettingsSnapshot: TerminalSettingsSnapshot?
+    private static let settingsKeys = [
+        "fontFamily",
+        "fontSize",
+        "fontLigatures",
+        "cursorStyle",
+        "scrollbackLines",
+        "backgroundBlur"
+    ]
 
     // Pending paste text after confirmation
     private var pendingPasteText: String?
@@ -189,6 +230,7 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
         renderBackgroundAlpha = backgroundAlpha
         TerminalRenderSettings.apply(to: self, theme: theme, backgroundAlpha: backgroundAlpha)
         updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
+        lastSettingsSnapshot = TerminalSettingsSnapshot.current()
     }
 
     // MARK: - Keyboard & Mouse event monitors
@@ -238,23 +280,56 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     }
 
     private func startSettingsObserver() {
-        guard settingsObserver == nil else { return }
-        settingsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            self.configureRenderSettings(theme: self.renderTheme, backgroundAlpha: self.renderBackgroundAlpha)
-            self.needsDisplay = true
+        guard !observingSettingsKeys else { return }
+        for key in Self.settingsKeys {
+            UserDefaults.standard.addObserver(
+                self,
+                forKeyPath: key,
+                options: [.new],
+                context: &terminalSettingsObservationContext
+            )
         }
+        observingSettingsKeys = true
     }
 
     private func stopSettingsObserver() {
-        if let observer = settingsObserver {
-            NotificationCenter.default.removeObserver(observer)
-            settingsObserver = nil
+        guard observingSettingsKeys else { return }
+        for key in Self.settingsKeys {
+            UserDefaults.standard.removeObserver(
+                self,
+                forKeyPath: key,
+                context: &terminalSettingsObservationContext
+            )
         }
+        observingSettingsKeys = false
+    }
+
+    override func observeValue(
+        forKeyPath keyPath: String?,
+        of object: Any?,
+        change: [NSKeyValueChangeKey: Any]?,
+        context: UnsafeMutableRawPointer?
+    ) {
+        guard context == &terminalSettingsObservationContext else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+            return
+        }
+
+        if Thread.isMainThread {
+            handleTerminalSettingsChange()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleTerminalSettingsChange()
+            }
+        }
+    }
+
+    private func handleTerminalSettingsChange() {
+        let snapshot = TerminalSettingsSnapshot.current()
+        guard snapshot != lastSettingsSnapshot else { return }
+        lastSettingsSnapshot = snapshot
+        configureRenderSettings(theme: renderTheme, backgroundAlpha: renderBackgroundAlpha)
+        needsDisplay = true
     }
 
     // MARK: - Right-click context menu

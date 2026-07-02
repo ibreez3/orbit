@@ -1,208 +1,316 @@
 <div align="center">
 
-<img src="app-icon.png" width="128" height="128" />
+<img src="app-icon.png" width="128" height="128" alt="Orbit app icon" />
 
 # Orbit
 
-原生 macOS SSH 管理终端
+Native macOS SSH workspace for developers and operators.
 
+原生 macOS SSH 管理终端，面向开发者与运维人员。
+
+[![Release](https://img.shields.io/github/v/release/ibreez3/orbit?include_prereleases&label=release)](https://github.com/ibreez3/orbit/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)](#requirements)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black)](#build-from-source)
 
-[功能特性](#功能特性) · [下载安装](#下载安装) · [使用说明](#使用说明) · [快速开始](#快速开始)
+[English](#english) · [中文](#中文)
 
 </div>
 
-## 功能特性
+---
 
-- **SSH 终端** — 基于 SwiftTerm，xterm-256color PTY，Metal GPU 渲染，Catppuccin Mocha 主题
-- **SFTP 文件管理** — 浏览、上传、下载、删除、新建文件夹，右键菜单支持重命名、文本编辑
-- **远程文本编辑** — 双击文本文件直接打开编辑器，修改后一键保存到服务器
-- **资源监控** — CPU / 内存 / 磁盘使用率 + Swift Charts 实时趋势图，支持自动刷新
-- **跳板机代理** — 通过堡垒机连接目标服务器，自动建立 TCP 转发隧道
-- **凭据加密** — AES-256-GCM 加密存储密码和私钥，绑定本机
-- **多 Tab 管理** — 同时打开多个终端、SFTP、监控标签页
-- **服务器分组** — 按分组组织服务器，支持折叠展开
-- **凭据分组** — 共享认证信息，多台服务器复用同一套密码或密钥
-- **多认证方式** — 密码 / 密钥认证（粘贴内容或选择本地文件）
-- **连接测试** — 保存前可一键测试 SSH 连接是否正常
-- **Apple Silicon 原生** — 面向 M 系列芯片构建 arm64 二进制
+## English
 
-## 下载安装
+Orbit is a native macOS SSH manager built with SwiftUI, AppKit, SwiftTerm, and a Rust SSH/SFTP core. It is designed for people who manage multiple Linux servers and want terminal sessions, SFTP, monitoring, snippets, jump hosts, and credentials in one focused desktop app.
 
-### 从 Release 下载（推荐）
+Current preview release: **v0.0.6-pre**
 
-前往 [Releases](https://github.com/ibreez3/orbit/releases) 页面下载最新版本：
+### Features
 
-| 文件 | 说明 |
-|------|------|
-| `Orbit.dmg` | DMG 安装包，双击打开拖拽到 Applications |
-| `Orbit.zip` | ZIP 压缩包，解压后拖拽到 Applications |
+- **SSH terminal**: SwiftTerm-powered `xterm-256color` terminal with split panes, tabs, resize handling, and high-throughput output pumping.
+- **SFTP file manager**: browse, upload, download, delete, rename, drag-and-drop upload, and transfer progress.
+- **Remote text editing**: open common text/config/code files from SFTP and save changes back to the server.
+- **Server monitoring**: CPU, memory, disk, network, process list, and Swift Charts trend views.
+- **Jump host support**: connect through bastion servers with local TCP forwarding.
+- **Credential groups**: reuse credentials across servers and keep passwords/private keys encrypted locally.
+- **Port forwarding**: manage local-to-remote SSH tunnel rules from settings.
+- **Batch execution**: run commands across multiple servers with concurrency, timeout, cancel, and status reporting.
+- **Snippets with variables**: insert command templates with `{{host}}`, `{{user}}`, `{{port}}`, `{{server_name}}`, and `{{group}}`.
+- **Themes and keyword highlights**: built-in themes plus configurable terminal keyword highlighting.
+- **Native Apple Silicon build**: arm64 static Rust library linked into a macOS app.
 
-### 首次打开
+### Screenshots
 
-应用未经过 Apple 公证，首次打开需要：
+Screenshots are not committed yet. Contributions that add representative screenshots or a short demo GIF are welcome.
 
-1. 双击 `Orbit.dmg`，将 Orbit 拖入 Applications
-2. 右键点击 Orbit → 选择「打开」→ 在弹窗中再次点击「打开」
+### Requirements
 
-或者在终端执行：
+For using the app:
+
+- macOS 13.0 or later
+- Apple Silicon Mac is the primary supported target
+- Linux servers for monitoring scripts
+
+For development:
+
+- macOS 13.0 or later
+- Xcode 15 or later
+- Rust 1.77 or later
+- `aarch64-apple-darwin` Rust target
+- XcodeGen (`brew install xcodegen`)
+
+### Install
+
+Download the latest preview from [GitHub Releases](https://github.com/ibreez3/orbit/releases).
+
+| Asset | Description |
+| --- | --- |
+| `Orbit-v*-AppleSilicon.dmg` | Recommended installer for Apple Silicon Macs |
+| `Orbit*.zip` | Archive build when available |
+
+Orbit preview builds are locally signed but not Apple-notarized yet. On first launch, right-click `Orbit.app`, choose **Open**, then confirm. You can also clear quarantine from Terminal:
 
 ```bash
 xattr -cr /Applications/Orbit.app
 ```
 
-## 使用说明
-
-### 1. 添加服务器
-
-1. 点击左上角 **「+ 添加服务器」**
-2. 填写服务器信息：
-   - **名称**：自定义显示名称
-   - **主机地址**：IP 或域名
-   - **端口**：SSH 端口，默认 22
-   - **用户名**：登录用户名
-   - **认证方式**：密码或密钥
-   - **分组**：可选，将服务器归类到不同分组
-3. 点击 **「测试连接」** 验证配置是否正确
-4. 点击 **「保存」**
-
-### 2. SSH 终端
-
-- 在侧栏点击服务器旁的 **终端图标**（或右键 → 打开终端）打开 SSH 连接
-- 支持多个终端 Tab 同时运行
-- 终端使用 Catppuccin Mocha 配色主题
-- 支持常见的终端快捷键操作
-
-### 3. SFTP 文件管理
-
-- 点击服务器旁的 **SFTP 图标** 打开文件浏览器
-- **双击文件夹** 进入目录，点击路径栏的目录名可快速跳转
-- **右键菜单** 操作：
-  - **下载**：将文件下载到本地
-  - **重命名**：修改文件或文件夹名称
-  - **编辑**：打开内置文本编辑器（仅限文本文件）
-  - **删除**：删除文件或文件夹
-- 工具栏按钮支持：上传文件、新建文件夹、删除
-
-### 4. 远程文本编辑
-
-- 在 SFTP 中右键文本文件（如 `.py`、`.json`、`.yaml`、`.sh`、`.conf` 等）选择 **「编辑」**
-- 编辑器在独立窗口中打开，支持：
-  - 等宽字体显示
-  - 修改后点击 **「保存」** 或按 **⌘S** 直接保存到远程服务器
-  - 保存成功后窗口自动关闭
-- 支持的文件类型：60+ 种扩展名，包括常见编程语言、配置文件、Markdown 等
-
-### 5. 资源监控
-
-- 点击服务器旁的 **监控图标** 打开资源面板
-- 显示内容：
-  - **CPU 使用率**：实时百分比
-  - **内存使用**：已用 / 总量 / 百分比
-  - **磁盘使用**：已用 / 总量 / 百分比
-  - **系统信息**：主机名、内核版本、运行时间、负载
-- 开启 **「自动刷新」** 后每 3 秒更新一次数据，并显示趋势图表
-
-### 6. 跳板机连接
-
-1. 先添加跳板机服务器（正常添加，作为独立服务器）
-2. 编辑目标服务器，在 **「跳板机」** 字段选择已添加的跳板机
-3. 连接时自动通过跳板机建立 TCP 转发隧道到达目标服务器
-4. 要求跳板机开启 `AllowTcpForwarding yes`
-
-### 7. 凭据分组
-
-- 点击侧栏底部 **「凭据分组」** 管理共享凭据
-- 创建凭据分组后，多台服务器可以复用同一套密码或密钥
-- 编辑服务器时在「凭据分组」字段选择即可关联
-
-### 8. 快捷操作
-
-| 操作 | 方式 |
-|------|------|
-| 打开终端 | 点击服务器旁终端图标，或右键服务器 |
-| 打开 SFTP | 点击服务器旁 SFTP 图标，或右键服务器 |
-| 打开监控 | 点击服务器旁监控图标，或右键服务器 |
-| 保存文件 | 编辑器中按 ⌘S |
-| 关闭 Tab | 点击 Tab 上的 × 按钮 |
-
-## 技术栈
-
-| 层 | 技术 |
-|---|------|
-| 前端 | SwiftUI · AppKit · SwiftTerm · Swift Charts |
-| 后端 | Rust · ssh2 · rusqlite · aes-gcm |
-| FFI | C ABI (cbindgen) — Rust 编译为静态库供 Swift 调用 |
-
-## 快速开始
-
-### 环境要求
-
-- macOS 14.0+
-- [Xcode](https://developer.apple.com/xcode/) 15+
-- [Rust](https://www.rust-lang.org/tools/install) >= 1.77
-- xcodegen（`brew install xcodegen`）
-
-### 安装 & 运行
+### Build From Source
 
 ```bash
 git clone https://github.com/ibreez3/orbit.git
 cd orbit
 
-# 构建 Rust 静态库（Apple Silicon / arm64）
+# Build the Rust arm64 static libraries.
 ./scripts/build-rust.sh
 
-# 生成 Xcode 工程并运行
-cd orbit-app && xcodegen generate && cd ..
+# Generate the Xcode project, build Release, and verify signing/entitlements.
+make build-app
+
+# Build a local DMG and verify the mounted app bundle.
+make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
+
+# Open the project for development.
 open orbit-app/Orbit.xcodeproj
-# 在 Xcode 中 Cmd+R 运行
 ```
 
-## 项目结构
+Useful commands:
 
+```bash
+cd orbit-app && xcodegen generate && cd ..
+cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -arch arm64 build
+cargo test --manifest-path orbit-rs/Cargo.toml --release --target aarch64-apple-darwin
 ```
-├── orbit-app/                     # SwiftUI 前端
-│   ├── project.yml                # xcodegen 项目配置
+
+### Project Layout
+
+```text
+orbit/
+├── orbit-app/                 # SwiftUI/AppKit macOS app
+│   ├── project.yml            # XcodeGen source of truth
 │   └── Orbit/
-│       ├── OrbitApp.swift         # @main 入口
-│       ├── OrbitBridge.swift      # FFI 桥接层
-│       ├── Models/Models.swift    # 数据模型
-│       ├── ViewModels/AppState.swift  # 全局状态
-│       └── Views/                 # UI 组件
-│           ├── MainView.swift     # 根布局
-│           ├── SidebarView.swift  # 侧栏
-│           ├── TerminalView.swift # SSH 终端
-│           ├── SftpView.swift     # SFTP 文件管理
-│           ├── MonitorView.swift  # 资源监控
-│           ├── TextEditorView.swift # 远程文本编辑器
-│           ├── ServerDialog.swift # 服务器配置弹窗
-│           └── CredentialGroupDialog.swift
-├── orbit-rs/                      # Rust 后端（编译为静态库）
-│   ├── src/ffi.rs                 # C ABI 导出函数
-│   ├── src/ssh.rs                 # SSH 会话管理
-│   ├── src/sftp.rs                # SFTP 文件操作
-│   ├── src/db.rs                  # SQLite CRUD
-│   ├── src/transport.rs           # 连接工厂 + 跳板机
-│   ├── src/crypto.rs              # AES-256-GCM 加密
-│   └── include/orbit.h            # 自动生成的 C 头文件
-├── scripts/build-rust.sh          # Rust 构建脚本
-└── docs/                          # 文档
+│       ├── OrbitApp.swift     # app entry point
+│       ├── OrbitBridge.swift  # Swift/C FFI bridge
+│       ├── Models/            # Swift data models and services
+│       ├── ViewModels/        # split ObservableObject states
+│       └── Views/             # UI views
+├── orbit-rs/                  # Rust core compiled as a static library
+│   ├── src/ffi.rs             # C ABI exports
+│   ├── src/ssh.rs             # SSH session and terminal channel manager
+│   ├── src/sftp.rs            # SFTP operations
+│   ├── src/transport.rs       # direct and jump-host transports
+│   ├── src/db.rs              # SQLite storage
+│   └── include/orbit.h        # generated C header
+├── scripts/                   # build, DMG, and verification scripts
+└── docs/                      # release/appcast and design documents
 ```
 
-## 贡献
+### Release Process
+
+Preview releases use tags such as `v0.0.6-pre`.
+
+1. Update `orbit-app/project.yml` version fields.
+2. Regenerate the Xcode project with `xcodegen generate`.
+3. Run `make build-dmg`.
+4. Commit to `develop`.
+5. Create and push the release tag.
+6. Publish a GitHub prerelease and upload the Apple Silicon DMG.
+
+The release workflow can also build and upload a DMG when a GitHub Release is published.
+
+### Security Notes
+
+- Credentials are encrypted locally with AES-256-GCM.
+- Current encryption is tied to the local machine hostname; moving the database to another Mac requires re-entering credentials.
+- Preview builds are not Apple-notarized yet.
+- Jump hosts require `AllowTcpForwarding yes` on the bastion server.
+
+### Known Limitations
+
+- Monitoring scripts target Linux servers and are not intended for macOS/BSD hosts.
+- The primary packaged build is Apple Silicon arm64.
+- Notarization and Developer ID signing are prepared in CI as placeholders but require Apple developer credentials.
+
+### Contributing
+
+Issues and pull requests are welcome.
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/my-feature`.
+3. Make focused changes and keep `project.yml` as the source of truth for Xcode settings.
+4. Run the relevant build/test commands.
+5. Open a pull request against `develop`.
+
+See [AGENTS.md](AGENTS.md) for architecture notes, FFI conventions, build commands, and development guidelines.
+
+### License
+
+Orbit is released under the [MIT License](LICENSE).
+
+---
+
+## 中文
+
+Orbit 是一款原生 macOS SSH 管理终端，基于 SwiftUI、AppKit、SwiftTerm 和 Rust SSH/SFTP 核心构建。它面向需要管理多台 Linux 服务器的开发者与运维人员，把 SSH 终端、SFTP、资源监控、命令片段、跳板机和凭据管理整合到一个专注的桌面应用里。
+
+当前预览版本：**v0.0.6-pre**
+
+### 功能特性
+
+- **SSH 终端**：基于 SwiftTerm 的 `xterm-256color` 终端，支持标签页、分屏、尺寸同步和高吞吐输出。
+- **SFTP 文件管理**：浏览、上传、下载、删除、重命名、拖拽上传和传输进度。
+- **远程文本编辑**：从 SFTP 打开常见文本、配置、代码文件，修改后保存回服务器。
+- **资源监控**：CPU、内存、磁盘、网络、进程列表和 Swift Charts 趋势图。
+- **跳板机支持**：通过堡垒机连接目标服务器，自动建立本地 TCP 转发。
+- **凭据分组**：多台服务器复用同一套认证信息，密码和私钥本地加密存储。
+- **端口转发**：在设置中管理本地到远端的 SSH 隧道规则。
+- **批量执行**：跨服务器执行命令，支持并发数、超时、取消和结果状态。
+- **片段变量**：命令模板支持 `{{host}}`、`{{user}}`、`{{port}}`、`{{server_name}}`、`{{group}}`。
+- **主题与关键词高亮**：内置多套主题，并支持终端关键词高亮。
+- **Apple Silicon 原生构建**：Rust arm64 静态库直接链接进 macOS App。
+
+### 截图
+
+仓库暂未提交截图。欢迎贡献能展示主要工作流的截图或简短演示 GIF。
+
+### 环境要求
+
+使用应用：
+
+- macOS 13.0 或更高版本
+- 主要支持 Apple Silicon Mac
+- 资源监控脚本面向 Linux 服务器
+
+开发环境：
+
+- macOS 13.0 或更高版本
+- Xcode 15 或更高版本
+- Rust 1.77 或更高版本
+- Rust target：`aarch64-apple-darwin`
+- XcodeGen（`brew install xcodegen`）
+
+### 安装
+
+前往 [GitHub Releases](https://github.com/ibreez3/orbit/releases) 下载最新预览版本。
+
+| 文件 | 说明 |
+| --- | --- |
+| `Orbit-v*-AppleSilicon.dmg` | 推荐的 Apple Silicon 安装包 |
+| `Orbit*.zip` | 可用时提供的压缩包 |
+
+Orbit 预览版已本地签名，但暂未 Apple 公证。首次打开时，请右键点击 `Orbit.app`，选择「打开」，然后确认。也可以在终端执行：
+
+```bash
+xattr -cr /Applications/Orbit.app
+```
+
+### 从源码构建
+
+```bash
+git clone https://github.com/ibreez3/orbit.git
+cd orbit
+
+# 构建 Rust arm64 静态库
+./scripts/build-rust.sh
+
+# 生成 Xcode 工程、构建 Release，并验证签名和关键权限
+make build-app
+
+# 构建本地 DMG，并验证挂载后的 app
+make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
+
+# 打开 Xcode 工程进行开发
+open orbit-app/Orbit.xcodeproj
+```
+
+常用命令：
+
+```bash
+cd orbit-app && xcodegen generate && cd ..
+cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -arch arm64 build
+cargo test --manifest-path orbit-rs/Cargo.toml --release --target aarch64-apple-darwin
+```
+
+### 项目结构
+
+```text
+orbit/
+├── orbit-app/                 # SwiftUI/AppKit macOS 应用
+│   ├── project.yml            # XcodeGen 工程配置源码
+│   └── Orbit/
+│       ├── OrbitApp.swift     # 应用入口
+│       ├── OrbitBridge.swift  # Swift/C FFI 桥接层
+│       ├── Models/            # Swift 数据模型和服务
+│       ├── ViewModels/        # 拆分后的 ObservableObject 状态
+│       └── Views/             # UI 视图
+├── orbit-rs/                  # Rust 核心，编译为静态库
+│   ├── src/ffi.rs             # C ABI 导出函数
+│   ├── src/ssh.rs             # SSH 会话和终端 channel 管理
+│   ├── src/sftp.rs            # SFTP 操作
+│   ├── src/transport.rs       # 直连和跳板机传输层
+│   ├── src/db.rs              # SQLite 存储
+│   └── include/orbit.h        # 生成的 C 头文件
+├── scripts/                   # 构建、DMG、验证脚本
+└── docs/                      # 发布、appcast 和设计文档
+```
+
+### 发布流程
+
+预览版本使用类似 `v0.0.6-pre` 的 tag。
+
+1. 更新 `orbit-app/project.yml` 中的版本字段。
+2. 运行 `xcodegen generate` 重新生成 Xcode 工程。
+3. 运行 `make build-dmg`。
+4. 提交到 `develop`。
+5. 创建并推送 release tag。
+6. 创建 GitHub prerelease，并上传 Apple Silicon DMG。
+
+GitHub Release 发布后，release workflow 也可以构建并上传 DMG。
+
+### 安全说明
+
+- 凭据使用 AES-256-GCM 本地加密。
+- 当前加密密钥绑定本机 hostname；将数据库迁移到其他 Mac 后需要重新输入凭据。
+- 预览版暂未 Apple 公证。
+- 跳板机需要开启 `AllowTcpForwarding yes`。
+
+### 已知限制
+
+- 资源监控脚本面向 Linux 服务器，不适用于 macOS/BSD 主机。
+- 当前主要发布 Apple Silicon arm64 构建。
+- CI 中保留了 Developer ID 签名和公证占位，但需要 Apple Developer 凭据。
+
+### 贡献
 
 欢迎提交 Issue 和 Pull Request。
 
-1. Fork 本仓库
-2. 创建功能分支: `git checkout -b feature/my-feature`
-3. 提交变更: `git commit -m 'Add some feature'`
-4. 推送分支: `git push origin feature/my-feature`
-5. 提交 Pull Request
+1. Fork 本仓库。
+2. 创建功能分支：`git checkout -b feature/my-feature`。
+3. 保持改动聚焦，并以 `project.yml` 作为 Xcode 配置的唯一源码。
+4. 运行相关构建和测试命令。
+5. 向 `develop` 分支提交 Pull Request。
 
-## 开发文档
+架构说明、FFI 规范、构建命令和开发约定请参考 [AGENTS.md](AGENTS.md)。
 
-详细的开发指南请参考 [AGENTS.md](AGENTS.md)，包含架构设计、FFI 通信流程、数据库 Schema、开发规范等。
+### 许可证
 
-## 许可证
-
-[MIT License](LICENSE)
+Orbit 使用 [MIT License](LICENSE) 开源。

@@ -19,8 +19,14 @@ class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let rootView = SettingsView()
-            .environmentObject(appState)
+        let rootView = SettingsView(appState: appState)
+            .environmentObject(appState.tabState)
+            .environmentObject(appState.uiState)
+            .environmentObject(appState.themeState)
+            .environmentObject(appState.inventoryState)
+            .environmentObject(appState.snippetState)
+            .environmentObject(appState.toolState)
+            .environmentObject(appState.aiState)
             .frame(width: 720, height: 520)
 
         let hc = NSHostingController(rootView: rootView)

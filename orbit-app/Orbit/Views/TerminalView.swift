@@ -5,15 +5,20 @@ import AppKit
 final class TerminalOutputPump {
     private static let defaultMaxBufferedBytes = 2 * 1024 * 1024
     private static let defaultChunkBytes = 64 * 1024
+    private static let defaultMaxChunksPerFrame = 4
     static let keywordBypassBacklogBytes = 512 * 1024
 
     private let maxBufferedBytes: Int
     private let chunkBytes: Int
     private let frameInterval: TimeInterval
+    private let maxChunksPerFrame: Int
     private let condition = NSCondition()
     private let handleChunk: (Data, Int) -> Void
 
-    private var pending = Data()
+    private var pendingChunks: [Data] = []
+    private var pendingHeadIndex = 0
+    private var pendingOffset = 0
+    private var pendingBytes = 0
     private var scheduled = false
     private var invalidated = false
 
@@ -21,11 +26,13 @@ final class TerminalOutputPump {
         maxBufferedBytes: Int = TerminalOutputPump.defaultMaxBufferedBytes,
         chunkBytes: Int = TerminalOutputPump.defaultChunkBytes,
         frameInterval: TimeInterval = 1.0 / 120.0,
+        maxChunksPerFrame: Int = TerminalOutputPump.defaultMaxChunksPerFrame,
         handleChunk: @escaping (Data, Int) -> Void
     ) {
         self.maxBufferedBytes = maxBufferedBytes
         self.chunkBytes = chunkBytes
         self.frameInterval = frameInterval
+        self.maxChunksPerFrame = maxChunksPerFrame
         self.handleChunk = handleChunk
     }
 
@@ -35,7 +42,7 @@ final class TerminalOutputPump {
         condition.lock()
         if !Thread.isMainThread {
             let deadline = Date().addingTimeInterval(0.1)
-            while !invalidated && pending.count >= maxBufferedBytes && Date() < deadline {
+            while !invalidated && pendingBytes >= maxBufferedBytes && Date() < deadline {
                 condition.wait(until: min(Date().addingTimeInterval(0.02), deadline))
             }
         }
@@ -45,7 +52,8 @@ final class TerminalOutputPump {
             return
         }
 
-        pending.append(data)
+        pendingChunks.append(data)
+        pendingBytes += data.count
         if !scheduled {
             scheduled = true
             DispatchQueue.main.async { [weak self] in
@@ -59,12 +67,17 @@ final class TerminalOutputPump {
         condition.lock()
         invalidated = true
         scheduled = false
-        pending.removeAll(keepingCapacity: false)
+        pendingChunks.removeAll(keepingCapacity: false)
+        pendingHeadIndex = 0
+        pendingOffset = 0
+        pendingBytes = 0
         condition.broadcast()
         condition.unlock()
     }
 
     private func drainOnMain() {
+        var chunks: [(Data, Int)] = []
+
         condition.lock()
         guard !invalidated else {
             scheduled = false
@@ -73,21 +86,22 @@ final class TerminalOutputPump {
             return
         }
 
-        let take = min(pending.count, chunkBytes)
-        let chunk = take > 0 ? Data(pending.prefix(take)) : Data()
-        if take > 0 {
-            pending.removeFirst(take)
+        var processed = 0
+        while processed < maxChunksPerFrame && pendingBytes > 0 {
+            let take = min(pendingBytes, chunkBytes)
+            let chunk = popPendingBytes(take)
+            chunks.append((chunk, pendingBytes))
+            processed += 1
         }
-        let queuedBytes = pending.count
         condition.broadcast()
         condition.unlock()
 
-        if !chunk.isEmpty {
+        for (chunk, queuedBytes) in chunks where !chunk.isEmpty {
             handleChunk(chunk, queuedBytes)
         }
 
         condition.lock()
-        if invalidated || pending.isEmpty {
+        if invalidated || pendingBytes == 0 {
             scheduled = false
             condition.broadcast()
             condition.unlock()
@@ -100,13 +114,58 @@ final class TerminalOutputPump {
         condition.unlock()
     }
 
+    private func popPendingBytes(_ count: Int) -> Data {
+        var remaining = count
+        var chunk = Data()
+        chunk.reserveCapacity(count)
+
+        while remaining > 0 && pendingHeadIndex < pendingChunks.count {
+            let current = pendingChunks[pendingHeadIndex]
+            let available = current.count - pendingOffset
+            if available <= 0 {
+                pendingHeadIndex += 1
+                pendingOffset = 0
+                continue
+            }
+
+            let take = min(available, remaining)
+            let start = current.index(current.startIndex, offsetBy: pendingOffset)
+            let end = current.index(start, offsetBy: take)
+            chunk.append(contentsOf: current[start..<end])
+            pendingOffset += take
+            pendingBytes -= take
+            remaining -= take
+
+            if pendingOffset >= current.count {
+                pendingHeadIndex += 1
+                pendingOffset = 0
+            }
+        }
+
+        compactPendingChunksIfNeeded()
+        return chunk
+    }
+
+    private func compactPendingChunksIfNeeded() {
+        if pendingBytes == 0 {
+            pendingChunks.removeAll(keepingCapacity: true)
+            pendingHeadIndex = 0
+            pendingOffset = 0
+            return
+        }
+
+        guard pendingHeadIndex > 32 && pendingHeadIndex * 2 >= pendingChunks.count else {
+            return
+        }
+        pendingChunks.removeFirst(pendingHeadIndex)
+        pendingHeadIndex = 0
+    }
+
     static func feed(_ data: Data, to terminalView: SwiftTerm.TerminalView) {
         guard !data.isEmpty else { return }
-        let len = data.count
-        var copy = data
-        copy.withUnsafeMutableBytes { buf in
-            if let base = buf.baseAddress {
-                let slice = ArraySlice(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt8.self), count: len))
+        data.withUnsafeBytes { buf in
+            if let base = buf.bindMemory(to: UInt8.self).baseAddress {
+                let slice = ArraySlice(UnsafeBufferPointer(start: base, count: data.count))
                 terminalView.feed(byteArray: slice)
             }
         }
@@ -117,10 +176,28 @@ final class TerminalOutputPump {
 
 enum KeywordInjector {
     private static let regexCache = NSCache<NSString, NSRegularExpression>()
+    private static let regexMetaCharacters = CharacterSet(charactersIn: #"\\.^$*+?()[]{}|"#)
 
     static func highlight(_ data: Data, keywords: [KeywordHighlight]) -> Data {
-        let enabled = keywords.filter { $0.enabled }
+        let enabled = keywords.filter { $0.enabled && !$0.pattern.isEmpty }
         guard !enabled.isEmpty else { return data }
+
+        var allRulesHaveNeedles = true
+        var hasNeedleMatch = false
+        for rule in enabled {
+            guard let needle = prefilterNeedle(for: rule.pattern) else {
+                allRulesHaveNeedles = false
+                continue
+            }
+            if containsASCII(data, needle: needle) {
+                hasNeedleMatch = true
+                break
+            }
+        }
+        if allRulesHaveNeedles && !hasNeedleMatch {
+            return data
+        }
+
         guard let str = String(data: data, encoding: .utf8) else { return data }
 
         var result = str
@@ -151,6 +228,57 @@ enum KeywordInjector {
         regexCache.removeAllObjects()
     }
 
+    private static func isLiteralPattern(_ pattern: String) -> Bool {
+        pattern.rangeOfCharacter(from: regexMetaCharacters) == nil
+    }
+
+    private static func prefilterNeedle(for pattern: String) -> [UInt8]? {
+        if isLiteralPattern(pattern) {
+            return asciiNeedle(pattern)
+        }
+
+        guard let firstMeta = pattern.firstIndex(where: { character in
+            String(character).rangeOfCharacter(from: regexMetaCharacters) != nil
+        }), pattern[firstMeta] == "(" else {
+            return nil
+        }
+
+        let prefix = String(pattern[..<firstMeta])
+        return asciiNeedle(prefix)
+    }
+
+    private static func asciiNeedle(_ text: String) -> [UInt8]? {
+        let bytes = text.utf8.map { lowercaseASCII($0) }
+        return bytes.isEmpty ? nil : bytes
+    }
+
+    private static func containsASCII(_ data: Data, needle: [UInt8]) -> Bool {
+        guard !needle.isEmpty, data.count >= needle.count else { return false }
+        return data.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                return false
+            }
+            let haystack = UnsafeBufferPointer(start: base, count: data.count)
+            let lastStart = haystack.count - needle.count
+
+            for start in 0...lastStart {
+                var matched = true
+                for offset in 0..<needle.count where lowercaseASCII(haystack[start + offset]) != needle[offset] {
+                    matched = false
+                    break
+                }
+                if matched {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    private static func lowercaseASCII(_ byte: UInt8) -> UInt8 {
+        (65...90).contains(byte) ? byte + 32 : byte
+    }
+
     private static func hexToAnsi(_ hex: String) -> String {
         let hexStr = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         guard hexStr.count == 6,
@@ -169,7 +297,9 @@ struct TerminalView: NSViewRepresentable {
     let channelId: String?
     let serverId: String
     let tabId: String
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var tabState: TabState
+    @EnvironmentObject var themeState: ThemeState
+    let appState: AppState
 
     private static func applySettings(_ tv: OrbitTerminalView, theme: AppTheme) {
         tv.configureRenderSettings(theme: theme)
@@ -177,12 +307,12 @@ struct TerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> OrbitTerminalView {
         // Reuse cached terminal view if available (preserves buffer on pane tree changes)
-        if let cid = channelId, let cached = OrbitBridge.shared.terminalViewCache[cid] as? OrbitTerminalView {
+        if let cid = channelId, let cached = OrbitBridge.shared.terminalView(for: cid) as? OrbitTerminalView {
             context.coordinator.sessionId = cid
             context.coordinator.terminalView = cached
             cached.terminalDelegate = context.coordinator
             context.coordinator.registerHandlers()
-            Self.applySettings(cached, theme: appState.theme)
+            Self.applySettings(cached, theme: themeState.theme)
             cached.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
             let term = cached.getTerminal()
             do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
@@ -192,7 +322,7 @@ struct TerminalView: NSViewRepresentable {
         let tv = OrbitTerminalView()
         tv.tabId = tabId
         tv.appState = appState
-        Self.applySettings(tv, theme: appState.theme)
+        Self.applySettings(tv, theme: themeState.theme)
         tv.terminalDelegate = context.coordinator
         context.coordinator.terminalView = tv
 
@@ -201,7 +331,7 @@ struct TerminalView: NSViewRepresentable {
 
         if let cid = channelId {
             context.coordinator.sessionId = cid
-            OrbitBridge.shared.terminalViewCache[cid] = tv
+            OrbitBridge.shared.cacheTerminalView(tv, sessionId: cid)
             context.coordinator.registerHandlers()
             let term = tv.getTerminal()
             do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
@@ -219,7 +349,7 @@ struct TerminalView: NSViewRepresentable {
         }
         nsView.tabId = tabId
         nsView.appState = appState
-        Self.applySettings(nsView, theme: appState.theme)
+        Self.applySettings(nsView, theme: themeState.theme)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -402,7 +532,9 @@ struct TerminalView: NSViewRepresentable {
                     sessionId = sid
                     OrbitBridge.shared.setSSHHandlers(sessionId: sid, dataHandler: dataHandler, closedHandler: closedHandler)
                     await MainActor.run {
-                        OrbitBridge.shared.terminalViewCache[sid] = self.terminalView
+                        if let terminalView = self.terminalView {
+                            OrbitBridge.shared.cacheTerminalView(terminalView, sessionId: sid)
+                        }
                         appState.updateTabSessionId(tabId, sessionId: sid)
                         if let tv = terminalView {
                             let term = tv.getTerminal()

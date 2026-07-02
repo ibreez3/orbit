@@ -8,17 +8,10 @@ use crate::models::{expand_tilde, FileEntry, Server};
 use crate::ssh;
 use crate::transport;
 use anyhow::Result;
-use serde::Serialize;
 use ssh2::Sftp;
 use tracing::{error, info};
 
 pub type ProgressCallback = Box<dyn Fn(u64, u64) + Send + Sync>;
-
-#[derive(Serialize, Clone)]
-pub struct TransferProgress {
-    pub transferred: u64,
-    pub total: u64,
-}
 
 pub struct SftpManager;
 
@@ -32,12 +25,11 @@ impl SftpManager {
     where
         F: FnOnce(&Sftp) -> Result<T>,
     {
-        pool.acquire(server, db)?;
+        let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let sftp = session.sftp()?;
             f(&sftp)
         });
-        pool.release(&server.id);
         result
     }
 
@@ -113,7 +105,7 @@ impl SftpManager {
         progress_cb: Option<&ProgressCallback>,
     ) -> Result<()> {
         info!(server = %server.name, remote_path, local_path, "开始下载文件");
-        pool.acquire(server, db)?;
+        let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let sftp = session.sftp()?;
             let mut remote_file = sftp.open(std::path::Path::new(remote_path))?;
@@ -151,7 +143,6 @@ impl SftpManager {
             info!(remote_path, transferred, total, "文件下载完成");
             Ok(())
         });
-        pool.release(&server.id);
         if let Err(ref e) = result {
             error!(remote_path, error = %e, "文件下载失败");
         }
@@ -171,7 +162,7 @@ impl SftpManager {
         let total = metadata.len();
         info!(server = %server.name, local_path, remote_path, total, "开始上传文件");
 
-        pool.acquire(server, db)?;
+        let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let sftp = session.sftp()?;
             let mut local_file = std::fs::File::open(&expanded)?;
@@ -206,7 +197,6 @@ impl SftpManager {
             info!(remote_path, transferred, total, "文件上传完成");
             Ok(())
         });
-        pool.release(&server.id);
         if let Err(ref e) = result {
             error!(remote_path, error = %e, "文件上传失败");
         }

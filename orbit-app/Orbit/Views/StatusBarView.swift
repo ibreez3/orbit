@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct StatusBarView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var toolState: ToolState
+    let appState: AppState
 
     var body: some View {
         let context = appState.activeSessionContext
@@ -14,7 +15,7 @@ struct StatusBarView: View {
             Text(context.serverName ?? "无活动会话")
                 .lineLimit(1)
 
-            if let tool = appState.activeTool?.tool {
+            if let tool = toolState.activeTool?.tool {
                 Text("· \(tool.rawValue)")
                     .foregroundStyle(.tertiary)
             }

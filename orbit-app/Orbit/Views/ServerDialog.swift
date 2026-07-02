@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct ServerDialog: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var inventoryState: InventoryState
+    let appState: AppState
     @Environment(\.dismiss) var dismiss
 
     @State private var form = ServerInput(
@@ -27,7 +28,7 @@ struct ServerDialog: View {
         .frame(width: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            if let server = appState.editingServer {
+            if let server = inventoryState.editingServer {
                 form = ServerInput(
                     name: server.name, host: server.host, port: server.port,
                     group_name: server.group_name.isEmpty ? nil : server.group_name,
@@ -40,7 +41,7 @@ struct ServerDialog: View {
                     credential_group_id: server.credential_group_id.isEmpty ? nil : server.credential_group_id,
                     jump_server_id: server.jump_server_id.isEmpty ? nil : server.jump_server_id
                 )
-            } else if let defaults = appState.dialogDefaults {
+            } else if let defaults = inventoryState.dialogDefaults {
                 form = defaults
             }
         }
@@ -48,7 +49,7 @@ struct ServerDialog: View {
 
     private var header: some View {
         HStack {
-            Text(appState.editingServer != nil ? "编辑服务器" : "添加服务器")
+            Text(inventoryState.editingServer != nil ? "编辑服务器" : "添加服务器")
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
             Button(action: { dismiss() }) {
@@ -100,9 +101,9 @@ struct ServerDialog: View {
 
             Spacer()
 
-            if appState.editingServer != nil {
+            if inventoryState.editingServer != nil {
                 Button("删除", role: .destructive) {
-                    if let server = appState.editingServer {
+                    if let server = inventoryState.editingServer {
                         appState.deleteServer(server.id)
                         dismiss()
                     }
@@ -189,8 +190,8 @@ struct ServerDialog: View {
                 }
                 .buttonStyle(toggleButtonStyle(isActive: form.jump_server_id == nil))
                 Button(action: {
-                    if form.jump_server_id == nil, !appState.servers.isEmpty {
-                        form.jump_server_id = appState.servers[0].id
+                    if form.jump_server_id == nil, !inventoryState.servers.isEmpty {
+                        form.jump_server_id = inventoryState.servers[0].id
                     }
                 }) {
                     HStack(spacing: 4) {
@@ -205,7 +206,7 @@ struct ServerDialog: View {
                     get: { form.jump_server_id ?? "" },
                     set: { form.jump_server_id = $0.isEmpty ? nil : $0 }
                 )) {
-                    ForEach(appState.servers) { s in
+                    ForEach(inventoryState.servers) { s in
                         Text("\(s.name) (\(s.host):\(s.port))").tag(s.id)
                     }
                 } label: { EmptyView() }
@@ -222,8 +223,8 @@ struct ServerDialog: View {
                 }
                 .buttonStyle(toggleButtonStyle(isActive: !useCg))
                 Button(action: {
-                    if !useCg, !appState.credentialGroups.isEmpty {
-                        form.credential_group_id = appState.credentialGroups[0].id
+                    if !useCg, !inventoryState.credentialGroups.isEmpty {
+                        form.credential_group_id = inventoryState.credentialGroups[0].id
                     }
                 }) {
                     HStack(spacing: 4) {
@@ -238,7 +239,7 @@ struct ServerDialog: View {
                     get: { form.credential_group_id ?? "" },
                     set: { form.credential_group_id = $0.isEmpty ? nil : $0 }
                 )) {
-                    ForEach(appState.credentialGroups) { g in
+                    ForEach(inventoryState.credentialGroups) { g in
                         Text("\(g.name) (\(g.username))").tag(g.id)
                     }
                 } label: { EmptyView() }
@@ -382,11 +383,11 @@ struct ServerDialog: View {
     private var useCg: Bool { form.credential_group_id != nil }
     private var selectedCg: CredentialGroup? {
         guard let id = form.credential_group_id else { return nil }
-        return appState.credentialGroups.first(where: { $0.id == id })
+        return inventoryState.credentialGroups.first(where: { $0.id == id })
     }
 
     private var existingGroups: [String] {
-        let set = Set(appState.servers.compactMap { $0.group_name.isEmpty ? nil : $0.group_name })
+        let set = Set(inventoryState.servers.compactMap { $0.group_name.isEmpty ? nil : $0.group_name })
         return set.sorted()
     }
 
@@ -409,7 +410,7 @@ struct ServerDialog: View {
         if !useCg && form.username.isEmpty { return }
         saving = true
         Task {
-            if let server = appState.editingServer {
+            if let server = inventoryState.editingServer {
                 appState.updateServer(id: server.id, input: form)
             } else {
                 appState.addServer(form)

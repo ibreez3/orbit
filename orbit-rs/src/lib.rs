@@ -14,6 +14,7 @@ pub struct OrbitApp {
     pub db: db::Database,
     pub ssh: Mutex<ssh::SshManager>,
     pub pool: transport::SessionPool,
+    pub last_error: Mutex<Option<String>>,
 }
 
 impl OrbitApp {
@@ -23,7 +24,24 @@ impl OrbitApp {
             db: database,
             ssh: Mutex::new(ssh::SshManager::new()),
             pool: transport::SessionPool::new(),
+            last_error: Mutex::new(None),
         })
+    }
+
+    pub fn clear_error(&self) {
+        if let Ok(mut last_error) = self.last_error.lock() {
+            *last_error = None;
+        }
+    }
+
+    pub fn set_error(&self, message: impl Into<String>) {
+        if let Ok(mut last_error) = self.last_error.lock() {
+            *last_error = Some(message.into());
+        }
+    }
+
+    pub fn last_error(&self) -> Option<String> {
+        self.last_error.lock().ok().and_then(|e| e.clone())
     }
 }
 

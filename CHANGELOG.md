@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [v0.0.6-pre] - 2026-07-02
+
+### Added
+- Settings controls for SSH timeouts, reconnect behavior, monitor refresh, database defaults, keybinding recording, config import/export, and SFTP drag-and-drop uploads.
+- Snippet template variables for host, user, port, server name, and group.
+- Batch command execution with concurrency, timeout, cancellation, and result status.
+- Local port forwarding rules backed by SSH tunnel start/stop APIs.
+- App entitlement verification and local DMG verification scripts.
+
+### Changed
+- Split the previous monolithic AppState into focused state objects to reduce SwiftUI recomputation.
+- Optimized SSH terminal hot paths with O(1) channel lookup, larger read buffers, batched terminal pumping, and lower idle CPU usage.
+- Improved keyword highlighting with prefilters before UTF-8 decoding and regex injection.
+- Reduced terminal settings, JSON decoding, connection-pool, SFTP, and terminal cache overhead.
+- Updated packaging for Apple Silicon preview builds with consistent macOS deployment target and entitlement checks.
+
+### Fixed
+- Preserved required network and file entitlements in generated Xcode projects.
+- Improved SSH error reporting for failed connection/channel setup paths.
+- Reduced SFTP/exec connection-pool reference leaks by using scoped leases.
+
 ## [v0.0.5-pre.2] - 2026-07-01
 
 ### Added

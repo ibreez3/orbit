@@ -4,13 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 RS_DIR="$ROOT_DIR/orbit-rs"
+DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 
 echo "==> Building orbit-core (Rust static library for Apple Silicon)..."
+echo "    MACOSX_DEPLOYMENT_TARGET=$DEPLOYMENT_TARGET"
 
 cd "$RS_DIR"
 
 echo "  -> aarch64-apple-darwin (arm64)..."
-cargo build --release --target aarch64-apple-darwin
+MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" cargo build --release --target aarch64-apple-darwin
 
 OUTPUT_DIR="$RS_DIR/target/apple-silicon-apple-darwin/release"
 rm -rf "$OUTPUT_DIR"

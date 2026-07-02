@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct SessionToolOverlayView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject private var toolState: ToolState
+    @EnvironmentObject private var inventoryState: InventoryState
 
     var body: some View {
-        if let state = appState.activeTool, state.tool != .ai {
+        if let state = toolState.activeTool, state.tool != .ai {
             FloatingToolCard(
                 title: title(for: state.tool),
                 subtitle: subtitle(for: state.boundContext),
@@ -24,13 +26,13 @@ struct SessionToolOverlayView: View {
     private func content(for state: BoundToolState) -> some View {
         switch state.tool {
         case .sftp:
-            SftpQuickOverlay(context: state.boundContext)
+            SftpQuickOverlay(appState: appState, context: state.boundContext)
         case .monitor:
-            MonitorQuickOverlay(context: state.boundContext)
+            MonitorQuickOverlay(appState: appState, context: state.boundContext)
         case .logs:
             LogsQuickOverlay(context: state.boundContext)
         case .snippets:
-            SnippetsQuickOverlay(context: state.boundContext)
+            SnippetsQuickOverlay(appState: appState, context: state.boundContext)
         case .ai:
             EmptyView()
         }
@@ -59,13 +61,13 @@ struct SessionToolOverlayView: View {
         switch tool {
         case .sftp:
             if let serverId = context.serverId,
-               let server = appState.servers.first(where: { $0.id == serverId }) {
+               let server = inventoryState.servers.first(where: { $0.id == serverId }) {
                 appState.addTab(server: server, type: .sftp)
                 appState.closeOverlayTool()
             }
         case .monitor:
             if let serverId = context.serverId,
-               let server = appState.servers.first(where: { $0.id == serverId }) {
+               let server = inventoryState.servers.first(where: { $0.id == serverId }) {
                 appState.addTab(server: server, type: .monitor)
                 appState.closeOverlayTool()
             }
@@ -76,7 +78,7 @@ struct SessionToolOverlayView: View {
 }
 
 private struct SftpQuickOverlay: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @State private var path = ""
     @State private var pathHistory: [String] = []
     @State private var entries: [FileEntry] = []
@@ -539,7 +541,7 @@ private struct SftpQuickOverlay: View {
 }
 
 private struct MonitorQuickOverlay: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @State private var stats: ServerStats?
     @State private var loading = false
     @State private var error: String?
@@ -825,11 +827,11 @@ private struct MonitorQuickOverlay: View {
 }
 
 private struct LogsQuickOverlay: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject private var aiState: AIState
     let context: ActiveSessionContext
 
     var body: some View {
-        let events = appState.auditEvents(for: context)
+        let events = aiState.auditEventsByContext[context.identity] ?? []
         let recentEvents = Array(events.suffix(8).reversed())
 
         VStack(alignment: .leading, spacing: 12) {
@@ -978,7 +980,8 @@ private struct LogsQuickOverlay: View {
 }
 
 private struct SnippetsQuickOverlay: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject private var snippetState: SnippetState
     let context: ActiveSessionContext
 
     var body: some View {
@@ -986,7 +989,7 @@ private struct SnippetsQuickOverlay: View {
             Text("Command snippets")
                 .font(.system(size: 12, weight: .semibold))
 
-            if appState.snippets.isEmpty {
+            if snippetState.snippets.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("暂无命令片段")
                         .font(.system(size: 11))
@@ -999,7 +1002,7 @@ private struct SnippetsQuickOverlay: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
             } else {
-                ForEach(appState.snippets.prefix(6)) { snippet in
+                ForEach(snippetState.snippets.prefix(6)) { snippet in
                     Button(action: { insert(snippet.command) }) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -1032,7 +1035,7 @@ private struct SnippetsQuickOverlay: View {
 
     private func insert(_ command: String) {
         if let sessionId = context.sessionId,
-           let terminalView = OrbitBridge.shared.terminalViewCache[sessionId] as? OrbitTerminalView {
+           let terminalView = OrbitBridge.shared.terminalView(for: sessionId) as? OrbitTerminalView {
             appState.insertSnippetCommand(command, into: terminalView)
         } else {
             NSPasteboard.general.clearContents()

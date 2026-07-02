@@ -8,12 +8,15 @@ enum MonitorTab: String, CaseIterable {
 
 struct MonitorView: View {
     let tab: TabItem
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var monitorState = MonitorState()
     @State private var selectedTab: MonitorTab = .overview
     @State private var processSearchQuery = ""
     @State private var sortField: ProcessSortField = .cpu
     @State private var sortAscending = false
+    @AppStorage("monitorRefreshInterval") private var monitorRefreshInterval: Double = 3
+    @AppStorage("monitorDiskThreshold") private var monitorDiskThreshold: Double = 80
+    @AppStorage("monitorHistoryPoints") private var monitorHistoryPoints: Double = 60
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,11 +40,14 @@ struct MonitorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
+            applyMonitorSettings()
             monitorState.start(serverId: tab.serverId, bridge: appState.bridge)
         }
         .onDisappear {
             monitorState.stop()
         }
+        .onChange(of: monitorRefreshInterval) { _ in applyMonitorSettings(restartAutoRefresh: true) }
+        .onChange(of: monitorHistoryPoints) { _ in applyMonitorSettings() }
     }
 
     // MARK: - Header
@@ -325,15 +331,26 @@ struct MonitorView: View {
     // MARK: - Stats cards
 
     private func statsCards(_ stats: ServerStats) -> some View {
-        HStack(spacing: 12) {
+        let diskColor: Color = stats.disk_percent >= monitorDiskThreshold ? .red : .yellow
+        return HStack(spacing: 12) {
             metricCard(icon: "cpu", title: "CPU", value: String(format: "%.1f", stats.cpu_usage),
                        unit: "%", color: .cyan, progress: stats.cpu_usage / 100)
             metricCard(icon: "memorychip", title: "内存", value: String(format: "%.1f", stats.mem_percent),
                        unit: "%", color: .purple, progress: stats.mem_percent / 100,
                        detail: "\(formatMB(stats.mem_used_mb)) / \(formatMB(stats.mem_total_mb))")
             metricCard(icon: "harddrive", title: "磁盘", value: String(format: "%.1f", stats.disk_percent),
-                       unit: "%", color: .yellow, progress: stats.disk_percent / 100,
+                       unit: "%", color: diskColor, progress: stats.disk_percent / 100,
                        detail: "\(stats.disk_used) / \(stats.disk_total)")
+        }
+    }
+
+    private func applyMonitorSettings(restartAutoRefresh: Bool = false) {
+        monitorState.configure(
+            interval: Int(monitorRefreshInterval),
+            maxPoints: Int(monitorHistoryPoints)
+        )
+        if restartAutoRefresh, monitorState.autoRefresh {
+            monitorState.toggleAutoRefresh(serverId: tab.serverId, bridge: appState.bridge)
         }
     }
 
@@ -512,27 +529,45 @@ class MonitorState: ObservableObject {
     @Published var autoRefresh = false
     @Published var processes: [ServerProcess] = []
     @Published var processError: String?
-    let interval = 3
+    @Published var interval = 3
 
-    private let maxPoints = 200
+    private var maxPoints = 200
     private var timer: Timer?
+    private var lastNetworkSample: NetworkSample?
+
+    private struct NetworkSample {
+        let serverId: String
+        let interface: String?
+        let rxBytes: UInt64
+        let txBytes: UInt64
+        let timestamp: Date
+    }
+
+    func configure(interval: Int, maxPoints: Int) {
+        self.interval = max(1, interval)
+        self.maxPoints = max(1, maxPoints)
+        if history.count > self.maxPoints {
+            history.removeFirst(history.count - self.maxPoints)
+        }
+    }
 
     func start(serverId: String, bridge: OrbitBridge) {
+        lastNetworkSample = nil
         refresh(serverId: serverId, bridge: bridge)
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        lastNetworkSample = nil
     }
 
     func toggleAutoRefresh(serverId: String, bridge: OrbitBridge) {
         timer?.invalidate()
         timer = nil
         if autoRefresh {
-            weak var weakSelf = self
-            timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(interval), repeats: true) { _ in
-                weakSelf?.refresh(serverId: serverId, bridge: bridge)
+            timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(interval), repeats: true) { [weak self] _ in
+                self?.refresh(serverId: serverId, bridge: bridge)
             }
         }
     }
@@ -552,8 +587,10 @@ class MonitorState: ObservableObject {
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 if let s = s {
-                    self.stats = s.stats
-                    let point = HistoryPoint(date: Date(), cpu: s.stats.cpu_usage, mem: s.stats.mem_percent)
+                    let now = Date()
+                    let stats = self.statsWithComputedNetworkRates(s.stats, serverId: serverId, at: now)
+                    self.stats = stats
+                    let point = HistoryPoint(date: now, cpu: stats.cpu_usage, mem: stats.mem_percent)
                     self.history.append(point)
                     let cutoff = Date().addingTimeInterval(-600)
                     self.history.removeAll { $0.date < cutoff }
@@ -574,12 +611,59 @@ class MonitorState: ObservableObject {
     private struct StatsResult { let stats: ServerStats; let error: String? }
     private struct ProcessesResult { let processes: [ServerProcess]; let error: String? }
 
+    private func statsWithComputedNetworkRates(_ stats: ServerStats, serverId: String, at timestamp: Date) -> ServerStats {
+        var rxKbps = stats.net_rx_kbps
+        var txKbps = stats.net_tx_kbps
+
+        if let rxBytes = stats.net_rx_bytes,
+           let txBytes = stats.net_tx_bytes {
+            if let previous = lastNetworkSample,
+               previous.serverId == serverId,
+               previous.interface == stats.net_interface {
+                let elapsed = max(timestamp.timeIntervalSince(previous.timestamp), 0.001)
+                if rxBytes >= previous.rxBytes {
+                    rxKbps = Double(rxBytes - previous.rxBytes) / 1024.0 / elapsed
+                }
+                if txBytes >= previous.txBytes {
+                    txKbps = Double(txBytes - previous.txBytes) / 1024.0 / elapsed
+                }
+            }
+
+            lastNetworkSample = NetworkSample(
+                serverId: serverId,
+                interface: stats.net_interface,
+                rxBytes: rxBytes,
+                txBytes: txBytes,
+                timestamp: timestamp
+            )
+        } else {
+            lastNetworkSample = nil
+        }
+
+        return ServerStats(
+            cpu_usage: stats.cpu_usage,
+            mem_total_mb: stats.mem_total_mb,
+            mem_used_mb: stats.mem_used_mb,
+            mem_percent: stats.mem_percent,
+            disk_total: stats.disk_total,
+            disk_used: stats.disk_used,
+            disk_percent: stats.disk_percent,
+            net_rx_kbps: rxKbps,
+            net_tx_kbps: txKbps,
+            net_rx_bytes: stats.net_rx_bytes,
+            net_tx_bytes: stats.net_tx_bytes,
+            net_interface: stats.net_interface,
+            uptime: stats.uptime,
+            load_avg: stats.load_avg
+        )
+    }
+
     private func fetchStats(serverId: String, bridge: OrbitBridge) async -> StatsResult? {
         do {
             let result = try await bridge.getServerStatsAsync(serverId: serverId)
             return StatsResult(stats: result, error: nil)
         } catch {
-            return StatsResult(stats: stats ?? ServerStats(cpu_usage: 0, mem_total_mb: 0, mem_used_mb: 0, mem_percent: 0, disk_total: "", disk_used: "", disk_percent: 0, net_rx_kbps: nil, net_tx_kbps: nil, net_interface: nil, uptime: "", load_avg: ""), error: "获取监控数据失败: \(error.localizedDescription)")
+            return StatsResult(stats: stats ?? ServerStats(cpu_usage: 0, mem_total_mb: 0, mem_used_mb: 0, mem_percent: 0, disk_total: "", disk_used: "", disk_percent: 0, net_rx_kbps: nil, net_tx_kbps: nil, net_rx_bytes: nil, net_tx_bytes: nil, net_interface: nil, uptime: "", load_avg: ""), error: "获取监控数据失败: \(error.localizedDescription)")
         }
     }
 

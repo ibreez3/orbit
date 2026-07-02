@@ -59,7 +59,11 @@ pub(crate) fn spawn_channel_reader(
     let lock = session_lock;
 
     let reader_handle = std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
+        let mut buf = [0u8; 65536];
+        let mut idle_sleep = Duration::from_millis(1);
+        const MIN_IDLE_SLEEP: Duration = Duration::from_millis(1);
+        const MAX_IDLE_SLEEP: Duration = Duration::from_millis(10);
+
         while run.load(Ordering::Relaxed) {
             // 锁顺序：先 session_lock 再 channel mutex，与 write/resize 一致
             // 避免 ABBA 死锁
@@ -77,6 +81,7 @@ pub(crate) fn spawn_channel_reader(
 
             match read_result {
                 Ok(n) if n > 0 => {
+                    idle_sleep = MIN_IDLE_SLEEP;
                     let data: &[u8] = &buf[..n];
                     br.fetch_add(n as u64, Ordering::Relaxed);
                     data_cb(&sid, data);
@@ -89,7 +94,8 @@ pub(crate) fn spawn_channel_reader(
                 }
                 Err(e) => {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
-                        std::thread::sleep(Duration::from_millis(5));
+                        std::thread::sleep(idle_sleep);
+                        idle_sleep = std::cmp::min(idle_sleep * 2, MAX_IDLE_SLEEP);
                         continue;
                     }
                     warn!(session_id = %sid, error = %e, "SSH channel 读取错误");
@@ -112,11 +118,22 @@ pub(crate) fn spawn_channel_reader(
 
 pub struct SshManager {
     sessions: HashMap<String, SharedSession>,
+    channel_to_session: HashMap<String, String>,
     idle_pool: HashMap<String, Vec<IdleSession>>,
+    port_forwards: HashMap<String, Arc<AtomicBool>>,
 }
 
 impl SshManager {
-    pub fn register_session(
+    pub fn register_port_forward(&mut self, id: &str, running: Arc<AtomicBool>) {
+        self.port_forwards.insert(id.to_string(), running);
+    }
+
+    pub fn stop_port_forward(&mut self, id: &str) {
+        if let Some(running) = self.port_forwards.remove(id) {
+            running.store(false, Ordering::Relaxed);
+        }
+    }
+    pub(crate) fn register_session(
         &mut self,
         session_id: &str,
         server_id: &str,
@@ -124,6 +141,8 @@ impl SshManager {
         active_channel: ActiveChannel,
         session_lock: Arc<std::sync::Mutex<()>>,
     ) {
+        self.channel_to_session
+            .insert(session_id.to_string(), session_id.to_string());
         self.sessions.insert(
             session_id.to_string(),
             SharedSession {
@@ -153,7 +172,9 @@ impl SshManager {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
+            channel_to_session: HashMap::new(),
             idle_pool: HashMap::new(),
+            port_forwards: HashMap::new(),
         }
     }
 
@@ -183,6 +204,8 @@ impl SshManager {
             session_lock.clone(),
         )?;
 
+        self.channel_to_session
+            .insert(session_id.to_string(), session_id.to_string());
         self.sessions.insert(
             session_id.to_string(),
             SharedSession {
@@ -205,7 +228,9 @@ impl SshManager {
         closed_cb: ClosedCallback,
     ) -> Result<()> {
         let session_key = self
-            .find_session_key(existing_session_id)
+            .channel_to_session
+            .get(existing_session_id)
+            .cloned()
             .ok_or_else(|| anyhow!("源会话不存在: {}", existing_session_id))?;
 
         let session_lock_arc = {
@@ -255,6 +280,7 @@ impl SshManager {
             .sessions
             .get_mut(&session_key)
             .ok_or_else(|| anyhow!("共享会话在添加 channel 前丢失"))?;
+        let session_key_for_index = session_key.clone();
         let active_channel = spawn_channel_reader(
             new_channel_id,
             channel,
@@ -265,87 +291,99 @@ impl SshManager {
         shared
             .channels
             .insert(new_channel_id.to_string(), active_channel);
+        self.channel_to_session
+            .insert(new_channel_id.to_string(), session_key_for_index);
         Ok(())
     }
 
-    fn find_session_key(&self, channel_id: &str) -> Option<String> {
-        if self.sessions.contains_key(channel_id) {
-            return Some(channel_id.to_string());
-        }
-        for (key, shared) in self.sessions.iter() {
-            if shared.channels.contains_key(channel_id) {
-                return Some(key.clone());
-            }
-        }
-        None
-    }
-
     pub fn write(&self, session_id: &str, data: &[u8]) -> Result<()> {
-        for shared in self.sessions.values() {
-            if let Some(ch) = shared.channels.get(session_id) {
-                let _lock = shared
-                    .session_lock
-                    .lock()
-                    .map_err(|_| anyhow!("session lock failed"))?;
-                let mut c = ch.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
-                c.write_all(data)?;
-                ch.bytes_written
-                    .fetch_add(data.len() as u64, Ordering::Relaxed);
-                return Ok(());
-            }
-        }
-        Err(anyhow!("会话不存在"))
+        let session_key = self
+            .channel_to_session
+            .get(session_id)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+        let shared = self
+            .sessions
+            .get(session_key)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+        let ch = shared
+            .channels
+            .get(session_id)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+
+        let _lock = shared
+            .session_lock
+            .lock()
+            .map_err(|_| anyhow!("session lock failed"))?;
+        let mut c = ch.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
+        c.write_all(data)?;
+        ch.bytes_written
+            .fetch_add(data.len() as u64, Ordering::Relaxed);
+        Ok(())
     }
 
     pub fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<()> {
-        for shared in self.sessions.values() {
-            if let Some(ch) = shared.channels.get(session_id) {
-                let _lock = shared
-                    .session_lock
-                    .lock()
-                    .map_err(|_| anyhow!("session lock failed"))?;
-                let mut c = ch.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
-                c.request_pty_size(cols, rows, None, None)?;
-                return Ok(());
-            }
-        }
-        Err(anyhow!("会话不存在"))
+        let session_key = self
+            .channel_to_session
+            .get(session_id)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+        let shared = self
+            .sessions
+            .get(session_key)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+        let ch = shared
+            .channels
+            .get(session_id)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+
+        let _lock = shared
+            .session_lock
+            .lock()
+            .map_err(|_| anyhow!("session lock failed"))?;
+        let mut c = ch.channel.lock().map_err(|_| anyhow!("通道锁定失败"))?;
+        c.request_pty_size(cols, rows, None, None)?;
+        Ok(())
     }
 
     pub fn get_traffic(&self, session_id: &str) -> Result<TrafficStats> {
-        for shared in self.sessions.values() {
-            if let Some(ch) = shared.channels.get(session_id) {
-                return Ok(TrafficStats {
-                    bytes_read: ch.bytes_read.load(Ordering::Relaxed),
-                    bytes_written: ch.bytes_written.load(Ordering::Relaxed),
-                });
-            }
-        }
-        Err(anyhow!("会话不存在"))
+        let session_key = self
+            .channel_to_session
+            .get(session_id)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+        let shared = self
+            .sessions
+            .get(session_key)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+        let ch = shared
+            .channels
+            .get(session_id)
+            .ok_or_else(|| anyhow!("会话不存在"))?;
+
+        Ok(TrafficStats {
+            bytes_read: ch.bytes_read.load(Ordering::Relaxed),
+            bytes_written: ch.bytes_written.load(Ordering::Relaxed),
+        })
     }
 
     pub fn disconnect(&mut self, channel_id: &str) -> Result<()> {
-        let mut pool_key: Option<String> = None;
+        let Some(session_key) = self.channel_to_session.get(channel_id).cloned() else {
+            return Ok(());
+        };
 
-        // First pass: find and clean up the channel
-        for (key, shared) in self.sessions.iter_mut() {
+        let mut should_pool_session = false;
+        if let Some(shared) = self.sessions.get_mut(&session_key) {
             if let Some(mut ch) = shared.channels.remove(channel_id) {
+                self.channel_to_session.remove(channel_id);
                 ch.running.store(false, Ordering::Relaxed);
                 if let Some(h) = ch.reader_handle.take() {
                     let _ = h.join();
                 }
                 info!(channel_id, "SSH channel 已关闭");
-
-                if shared.channels.is_empty() {
-                    pool_key = Some(key.clone());
-                }
-                break;
+                should_pool_session = shared.channels.is_empty();
             }
         }
 
-        // Second pass: remove session and return to pool
-        if let Some(key) = pool_key {
-            if let Some(shared) = self.sessions.remove(&key) {
+        if should_pool_session {
+            if let Some(shared) = self.sessions.remove(&session_key) {
                 let server_id = shared.server_id;
                 self.idle_pool
                     .entry(server_id)
@@ -387,7 +425,7 @@ impl SshManager {
         command: &str,
     ) -> Result<String> {
         debug!(server = %server.name, command, "执行远程命令");
-        pool.acquire(server, db)?;
+        let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let mut channel = session.channel_session()?;
             channel.exec(command)?;
@@ -398,7 +436,6 @@ impl SshManager {
             read_result?;
             Ok(output)
         });
-        pool.release(&server.id);
         if let Err(ref e) = result {
             warn!(server = %server.name, command, error = %e, "远程命令执行失败");
         }

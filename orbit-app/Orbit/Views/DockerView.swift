@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct DockerView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     let tab: TabItem
+    @EnvironmentObject var inventoryState: InventoryState
 
     @State private var containers: [DockerContainer] = []
     @State private var statsById: [String: DockerContainerStats] = [:]
@@ -525,7 +526,7 @@ struct DockerView: View {
     }
 
     private func openExecShell(_ container: DockerContainer) {
-        guard let server = appState.servers.first(where: { $0.id == tab.serverId }) else {
+        guard let server = inventoryState.servers.first(where: { $0.id == tab.serverId }) else {
             error = "无法找到服务器配置"
             return
         }
@@ -535,7 +536,7 @@ struct DockerView: View {
     }
 
     private func openFollowLogs(_ container: DockerContainer) {
-        guard let server = appState.servers.first(where: { $0.id == tab.serverId }) else {
+        guard let server = inventoryState.servers.first(where: { $0.id == tab.serverId }) else {
             error = "无法找到服务器配置"
             return
         }

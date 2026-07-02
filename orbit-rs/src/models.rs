@@ -73,8 +73,10 @@ pub struct ServerStats {
     pub disk_total: String,
     pub disk_used: String,
     pub disk_percent: f64,
-    pub net_rx_kbps: f64,
-    pub net_tx_kbps: f64,
+    pub net_rx_kbps: Option<f64>,
+    pub net_tx_kbps: Option<f64>,
+    pub net_rx_bytes: Option<u64>,
+    pub net_tx_bytes: Option<u64>,
     pub net_interface: String,
     pub uptime: String,
     pub load_avg: String,
@@ -126,14 +128,6 @@ pub struct DockerContainerStats {
     pub network_io: String,
     pub block_io: String,
     pub pids: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FileEntryStat {
-    pub path: String,
-    pub size: u64,
-    pub modified: String,
-    pub permissions: String,
 }
 
 pub struct ResolvedAuth {

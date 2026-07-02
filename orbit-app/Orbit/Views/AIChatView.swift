@@ -2,7 +2,9 @@ import SwiftUI
 import SwiftTerm
 
 struct AIChatView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var aiState: AIState
+    @EnvironmentObject var tabState: TabState
+    let appState: AppState
     @StateObject private var service = OpenAIService()
     @State private var inputText: String = ""
     @State private var scrollProxy: ScrollViewProxy? = nil
@@ -26,11 +28,11 @@ struct AIChatView: View {
                 .gesture(
                     DragGesture()
                         .onChanged { value in
-                            let newWidth = appState.aiPanelWidth - value.translation.width
-                            appState.aiPanelWidth = min(600, max(160, newWidth))
+                            let newWidth = aiState.aiPanelWidth - value.translation.width
+                            aiState.aiPanelWidth = min(600, max(160, newWidth))
                         }
                         .onEnded { _ in
-                            appState.saveAIPanelWidth(appState.aiPanelWidth)
+                            appState.saveAIPanelWidth(aiState.aiPanelWidth)
                         }
                 )
 
@@ -71,7 +73,7 @@ struct AIChatView: View {
             Divider()
 
             // Config warning
-            if appState.aiConfig.apiKey.isEmpty {
+            if aiState.aiConfig.apiKey.isEmpty {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "gearshape")
@@ -97,9 +99,10 @@ struct AIChatView: View {
             } else {
                 // Session picker banner
                 if showSessionPicker {
-                    SessionPickerView(onSelect: { session in
+                    SessionPickerView(appState: appState,
+                        onSelect: { session in
                         guard let tabId = appState.activeTabId else { return }
-                        appState.activeAISessionId[tabId] = session.id
+                        aiState.activeAISessionId[tabId] = session.id
                         showSessionPicker = false
                     }, onDismiss: { showSessionPicker = false })
                     Divider()
@@ -126,18 +129,18 @@ struct AIChatView: View {
                             }
 
                             ForEach(appState.currentMessages) { message in
-                                MessageBubble(message: message)
+                                MessageBubble(message: message, appState: appState)
                             }
 
                             if !service.streamingText.isEmpty {
                                 MessageBubble(message: AIChatMessage(
                                     id: "_streaming", role: "assistant",
                                     content: service.streamingText, timestamp: Date()),
-                                    isStreaming: true)
+                                    isStreaming: true, appState: appState)
                             }
 
                             // Pending command confirmation
-                            if let pending = appState.aiPendingConfirmation {
+                            if let pending = aiState.aiPendingConfirmation {
                                 PendingCommandView(
                                     pending: pending,
                                     onConfirm: {
@@ -151,7 +154,7 @@ struct AIChatView: View {
                                             result: .denied,
                                             summary: "用户拒绝 AI 命令执行"
                                         )
-                                        appState.aiPendingConfirmation = nil
+                                        aiState.aiPendingConfirmation = nil
                                         let rejectMsg = AIChatMessage(
                                             id: UUID().uuidString,
                                             role: "system",
@@ -207,7 +210,7 @@ struct AIChatView: View {
                 .padding(.vertical, 8)
             }
             }
-            .frame(width: appState.aiPanelWidth)
+            .frame(width: aiState.aiPanelWidth)
             .background(Color(NSColor.controlBackgroundColor))
         }
         .onReceive(NotificationCenter.default.publisher(for: .askAI)) { notification in
@@ -291,7 +294,7 @@ struct AIChatView: View {
         service.runAgent(
             messages: appState.currentMessages,
             systemPrompt: systemPrompt,
-            config: appState.aiConfig,
+            config: aiState.aiConfig,
             onToken: { token in
                 self.service.streamingText += token
             },
@@ -398,7 +401,7 @@ struct AIChatView: View {
             return
         }
         let riskReason = AppState.CommandSafety.riskReason(command: command)
-        appState.aiPendingConfirmation = PendingAICommand(
+        aiState.aiPendingConfirmation = PendingAICommand(
             command: command,
             sessionId: sid,
             tabId: tabId,
@@ -452,11 +455,11 @@ struct AIChatView: View {
         }
         // Wait for output to accumulate in terminal
         let capturedTabId = pending.tabId
-        let capturedSessionId = appState.activeAISessionId[capturedTabId]
+        let capturedSessionId = aiState.activeAISessionId[capturedTabId]
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             guard self.appState.activeTabId == pending.tabId,
                   self.appState.activeSessionContext.sessionId == pending.sessionId,
-                  appState.activeAISessionId[capturedTabId] == capturedSessionId else {
+                  aiState.activeAISessionId[capturedTabId] == capturedSessionId else {
                 onDone()
                 return
             }
@@ -479,8 +482,8 @@ struct AIChatView: View {
     }
 
     private func executeConfirmedCommand() {
-        guard let pending = appState.aiPendingConfirmation else { return }
-        appState.aiPendingConfirmation = nil
+        guard let pending = aiState.aiPendingConfirmation else { return }
+        aiState.aiPendingConfirmation = nil
         guard pending.tabId == appState.activeTabId,
               pending.sessionId == appState.activeSessionContext.sessionId,
               pending.contextIdentity == appState.activeSessionContext.identity else {
@@ -545,7 +548,7 @@ struct AIChatView: View {
             return "（无活跃终端会话）"
         }
 
-        guard let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView else {
+        guard let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView else {
             return "（终端会话已连接，暂无输出）"
         }
         let term = tv.getTerminal()
@@ -638,7 +641,9 @@ struct AIChatView: View {
 private struct MessageBubble: View {
     let message: AIChatMessage
     var isStreaming: Bool = false
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var aiState: AIState
+    @EnvironmentObject var tabState: TabState
+    let appState: AppState
 
     var body: some View {
         HStack(alignment: .top) {
@@ -660,10 +665,10 @@ private struct MessageBubble: View {
                     HStack(spacing: 4) {
                         Button("插入") {
                             if let cmd = extractSuggestedCommand(from: message.content) {
-                                if let activeId = appState.activeTabId,
-                                   let tab = appState.tabs.first(where: { $0.id == activeId }),
+                                if let activeId = tabState.activeTabId,
+                                   let tab = tabState.tabs.first(where: { $0.id == activeId }),
                                    let sid = tab.focusedChannelId ?? tab.sessionId,
-                                   let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+                                   let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView {
                                     appState.insertSnippetCommand(cmd, into: tv)
                                     appState.appendAuditEvent(
                                         category: .aiAction,
@@ -779,7 +784,7 @@ private struct MessageBubble: View {
     }
 
     private func requestSuggestedCommandConfirmation(_ command: String) {
-        guard let tabId = appState.activeTabId else {
+        guard let tabId = tabState.activeTabId else {
             appState.appendAuditEvent(
                 category: .aiAction,
                 action: "command_confirmation",
@@ -803,7 +808,7 @@ private struct MessageBubble: View {
         }
 
         let riskReason = AppState.CommandSafety.riskReason(command: command)
-        appState.aiPendingConfirmation = PendingAICommand(
+        aiState.aiPendingConfirmation = PendingAICommand(
             command: command,
             sessionId: sid,
             tabId: tabId,
@@ -827,11 +832,12 @@ private struct MessageBubble: View {
 
 struct AIErrorBanner: View {
     let errorText: String
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var tabState: TabState
+    let appState: AppState
 
     var body: some View {
         Button(action: {
-            appState.activeTabError = nil
+            tabState.activeTabError = nil
             appState.submitAIQuestion("请分析这个错误:\n\(errorText)")
         }) {
             HStack(spacing: 6) {
@@ -842,7 +848,7 @@ struct AIErrorBanner: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.primary)
                 Button(action: {
-                    appState.activeTabError = nil
+                    tabState.activeTabError = nil
                 }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
@@ -868,13 +874,15 @@ struct AIErrorBanner: View {
 // MARK: - Session Picker
 
 private struct SessionPickerView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var aiState: AIState
+    @EnvironmentObject var tabState: TabState
+    let appState: AppState
     let onSelect: (AISession) -> Void
     let onDismiss: () -> Void
 
     var sessions: [AISession] {
         let serverId = appState.currentServerId
-        return appState.aiSessions[serverId] ?? []
+        return aiState.aiSessions[serverId] ?? []
     }
 
     var body: some View {
@@ -907,7 +915,7 @@ private struct SessionPickerView: View {
                             Text(formatDate(session.updatedAt))
                                 .font(.system(size: 9))
                                 .foregroundStyle(.tertiary)
-                            if let activeSessionId = appState.activeAISessionId[appState.activeTabId ?? ""],
+                            if let activeSessionId = aiState.activeAISessionId[appState.activeTabId ?? ""],
                                activeSessionId == session.id {
                                 Circle()
                                     .fill(Color.blue)

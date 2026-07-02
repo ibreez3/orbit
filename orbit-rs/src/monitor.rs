@@ -10,8 +10,10 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
     let mut disk_total = String::new();
     let mut disk_used = String::new();
     let mut disk_percent = 0.0;
-    let mut net_rx_kbps = 0.0;
-    let mut net_tx_kbps = 0.0;
+    let mut net_rx_kbps = None;
+    let mut net_tx_kbps = None;
+    let mut net_rx_bytes = None;
+    let mut net_tx_bytes = None;
     let mut net_interface = String::new();
     let mut uptime = String::new();
     let mut load_avg = String::new();
@@ -65,7 +67,7 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
                 .unwrap_or("0")
                 .trim()
                 .parse()
-                .unwrap_or(0.0);
+                .ok();
         } else if line.starts_with("NET_TX_KBPS:") {
             net_tx_kbps = line
                 .splitn(2, ':')
@@ -73,7 +75,23 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
                 .unwrap_or("0")
                 .trim()
                 .parse()
-                .unwrap_or(0.0);
+                .ok();
+        } else if line.starts_with("NET_RX_BYTES:") {
+            net_rx_bytes = line
+                .splitn(2, ':')
+                .nth(1)
+                .unwrap_or("0")
+                .trim()
+                .parse()
+                .ok();
+        } else if line.starts_with("NET_TX_BYTES:") {
+            net_tx_bytes = line
+                .splitn(2, ':')
+                .nth(1)
+                .unwrap_or("0")
+                .trim()
+                .parse()
+                .ok();
         } else if line.starts_with("NET_IFACE:") {
             net_interface = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
         } else if line.starts_with("UPTIME:") {
@@ -93,6 +111,8 @@ pub fn collect_stats(output: &str) -> Result<ServerStats> {
         disk_percent,
         net_rx_kbps,
         net_tx_kbps,
+        net_rx_bytes,
+        net_tx_bytes,
         net_interface,
         uptime,
         load_avg,
@@ -141,18 +161,12 @@ read_net_bytes() {
     awk -v iface="$iface" -F'[: ]+' '$2 == iface { print $3, $11; exit }' /proc/net/dev 2>/dev/null
 }
 
-NET_SAMPLE_1=$(read_net_bytes "$NET_IFACE")
-sleep 1
-NET_SAMPLE_2=$(read_net_bytes "$NET_IFACE")
-NET_RX_1=$(echo "$NET_SAMPLE_1" | awk '{print $1 + 0}')
-NET_TX_1=$(echo "$NET_SAMPLE_1" | awk '{print $2 + 0}')
-NET_RX_2=$(echo "$NET_SAMPLE_2" | awk '{print $1 + 0}')
-NET_TX_2=$(echo "$NET_SAMPLE_2" | awk '{print $2 + 0}')
-NET_RX_KBPS=$(awk -v a="$NET_RX_1" -v b="$NET_RX_2" 'BEGIN { if (b >= a) printf "%.1f", (b - a) / 1024; else printf "0.0" }')
-NET_TX_KBPS=$(awk -v a="$NET_TX_1" -v b="$NET_TX_2" 'BEGIN { if (b >= a) printf "%.1f", (b - a) / 1024; else printf "0.0" }')
+NET_SAMPLE=$(read_net_bytes "$NET_IFACE")
+NET_RX_BYTES=$(echo "$NET_SAMPLE" | awk '{print $1 + 0}')
+NET_TX_BYTES=$(echo "$NET_SAMPLE" | awk '{print $2 + 0}')
 echo "NET_IFACE:$NET_IFACE"
-echo "NET_RX_KBPS:$NET_RX_KBPS"
-echo "NET_TX_KBPS:$NET_TX_KBPS"
+echo "NET_RX_BYTES:$NET_RX_BYTES"
+echo "NET_TX_BYTES:$NET_TX_BYTES"
 
 UPTIME_STR=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')
 echo "UPTIME:$UPTIME_STR"

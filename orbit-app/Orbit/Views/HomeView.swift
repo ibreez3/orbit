@@ -1,7 +1,10 @@
 import SwiftUI
 
 struct HomeView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var inventoryState: InventoryState
+    @EnvironmentObject var uiState: UIState
+    @EnvironmentObject var tabState: TabState
+    let appState: AppState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,7 +63,7 @@ struct HomeView: View {
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 280))], spacing: 8) {
                         ForEach(recentServerList, id: \.id) { server in
-                            RecentServerCard(server: server)
+                            RecentServerCard(server: server, appState: appState)
                         }
                     }
                 }
@@ -73,8 +76,8 @@ struct HomeView: View {
     }
 
     private var recentServerList: [Server] {
-        appState.recentServers.compactMap { id in
-            appState.servers.first { $0.id == id }
+        uiState.recentServers.compactMap { id in
+            inventoryState.servers.first { $0.id == id }
         }
     }
 }
@@ -110,7 +113,7 @@ private struct QuickActionButton: View {
 
 private struct RecentServerCard: View {
     let server: Server
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
 
     var body: some View {
         Button(action: {

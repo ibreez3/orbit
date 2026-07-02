@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct SnippetEditorView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var snippetState: SnippetState
+    let appState: AppState
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String = ""
@@ -9,7 +10,7 @@ struct SnippetEditorView: View {
     @State private var description: String = ""
     @State private var tagsText: String = ""
 
-    private var isEditing: Bool { appState.editingSnippet != nil }
+    private var isEditing: Bool { snippetState.editingSnippet != nil }
 
     private var input: CommandSnippetInput {
         let tags = tagsText
@@ -18,7 +19,7 @@ struct SnippetEditorView: View {
             .filter { !$0.isEmpty }
         return CommandSnippetInput(
             name: name, command: command, description: description,
-            tags: tags, serverId: appState.editingSnippet?.serverId
+            tags: tags, serverId: snippetState.editingSnippet?.serverId
         )
     }
 
@@ -59,6 +60,24 @@ struct SnippetEditorView: View {
                         .frame(height: 60)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
                         .scrollContentBackground(.hidden)
+
+                    HStack(spacing: 8) {
+                        Text("可用变量:")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                        ForEach(Self.availableVariables, id: \.0) { placeholder, label in
+                            Button(action: { insertVariable(placeholder) }) {
+                                Text("{{\(label)}}")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.primary.opacity(0.06))
+                                    .cornerRadius(3)
+                            }
+                            .buttonStyle(.plain)
+                            .help("插入 \(label) 变量")
+                        }
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -81,7 +100,7 @@ struct SnippetEditorView: View {
             HStack {
                 if isEditing {
                     Button("删除片段") {
-                        if let snippet = appState.editingSnippet {
+                        if let snippet = snippetState.editingSnippet {
                             appState.deleteSnippet(snippet.id)
                         }
                         appState.closeSnippetEditor()
@@ -94,7 +113,7 @@ struct SnippetEditorView: View {
                 Button("取消") { appState.closeSnippetEditor(); dismiss() }
                     .font(.system(size: 12))
                 Button("保存") {
-                    if let snippet = appState.editingSnippet {
+                    if let snippet = snippetState.editingSnippet {
                         appState.updateSnippet(id: snippet.id, input: input)
                     } else {
                         appState.addSnippet(input)
@@ -109,15 +128,27 @@ struct SnippetEditorView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
         }
-        .frame(width: 460, height: 340)
+        .frame(width: 460, height: 360)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
-            if let snippet = appState.editingSnippet {
+            if let snippet = snippetState.editingSnippet {
                 name = snippet.name
                 command = snippet.command
                 description = snippet.description
                 tagsText = snippet.tags.joined(separator: ", ")
             }
         }
+    }
+
+    static let availableVariables: [(String, String)] = [
+        ("{{host}}", "host"),
+        ("{{user}}", "user"),
+        ("{{port}}", "port"),
+        ("{{server_name}}", "server_name"),
+        ("{{group}}", "group"),
+    ]
+
+    private func insertVariable(_ placeholder: String) {
+        command += placeholder
     }
 }

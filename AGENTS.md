@@ -36,6 +36,12 @@ GitHub: https://github.com/ibreez3/orbit
 # 构建 Rust Apple Silicon 静态库（首次或修改 Rust 代码后）
 ./scripts/build-rust.sh
 
+# 构建 Release app，并验证签名与关键权限
+make build-app
+
+# 构建本地 DMG，并验证挂载后的 app
+make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
+
 # 重新生成 Xcode 工程（添加/删除源文件后、修改 project.yml 后）
 cd orbit-app && xcodegen generate && cd ..
 
@@ -56,7 +62,7 @@ orbit/
 ├── AGENTS.md                          # 本文件
 ├── TODO.md                            # 待办事项
 ├── .gitignore
-├── Makefile                           # build-rs / build-app 快捷命令
+├── Makefile                           # build-rs / build-app / build-dmg 快捷命令
 │
 ├── orbit-app/                         # ===== 前端 (Swift/SwiftUI) =====
 │   ├── project.yml                    # xcodegen 项目配置（源码级）

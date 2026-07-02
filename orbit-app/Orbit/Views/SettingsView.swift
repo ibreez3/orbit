@@ -9,17 +9,25 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case keywords = "关键词高亮"
     case ai = "AI 助手"
     case connection = "连接"
+    case monitor = "监控"
+    case database = "数据库"
+    case exportImport = "导入导出"
+    case portForwarding = "端口转发"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .appearance:  return "paintpalette"
-        case .terminal:    return "apple.terminal"
-        case .keybindings: return "keyboard"
-        case .keywords:    return "text.word.spacing"
-        case .ai:          return "sparkles"
-        case .connection:  return "network"
+        case .appearance:    return "paintpalette"
+        case .terminal:      return "apple.terminal"
+        case .keybindings:   return "keyboard"
+        case .keywords:      return "text.word.spacing"
+        case .ai:            return "sparkles"
+        case .connection:    return "network"
+        case .monitor:       return "gauge.with.dots.needle.33percent"
+        case .database:      return "cylinder"
+        case .exportImport:  return "arrow.triangle.pull"
+        case .portForwarding: return "point.topleft.down.to.point.bottomright.curvepath"
         }
     }
 }
@@ -27,7 +35,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 // MARK: - Settings View
 
 struct SettingsView: View {
-    @EnvironmentObject private var appState: AppState
+    let appState: AppState
     @State private var selectedCategory: SettingsCategory = .appearance
 
     var body: some View {
@@ -59,6 +67,8 @@ struct SettingsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(category.rawValue)
+                .accessibilityAddTraits(selectedCategory == category ? .isSelected : [])
             }
             Spacer()
         }
@@ -68,12 +78,16 @@ struct SettingsView: View {
     @ViewBuilder
     private var contentArea: some View {
         switch selectedCategory {
-        case .appearance:  AppearancePane()
-        case .terminal:    TerminalPane()
-        case .keybindings: KeybindingsPane()
-        case .keywords:    KeywordsPane()
-        case .ai:          AIPane()
-        case .connection:  ConnectionPane()
+        case .appearance:    AppearancePane(appState: appState)
+        case .terminal:      TerminalPane()
+        case .keybindings:   KeybindingsPane()
+        case .keywords:      KeywordsPane(appState: appState)
+        case .ai:            AIPane(appState: appState)
+        case .connection:    ConnectionPane()
+        case .monitor:       MonitorPane()
+        case .database:      DatabasePane()
+        case .exportImport:  ExportImportPane(appState: appState)
+        case .portForwarding: PortForwardingPane(appState: appState)
         }
     }
 }
@@ -81,7 +95,8 @@ struct SettingsView: View {
 // MARK: - Appearance Pane
 
 private struct AppearancePane: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject var themeState: ThemeState
 
     var body: some View {
         ScrollView {
@@ -92,7 +107,7 @@ private struct AppearancePane: View {
                     GridItem(.adaptive(minimum: 130, maximum: 160), spacing: 10)
                 ], spacing: 10) {
                     ForEach(displayThemes) { theme in
-                        ThemeCard(theme: theme, isSelected: appState.theme.rawValue == theme.id) {
+                        ThemeCard(theme: theme, isSelected: themeState.theme.rawValue == theme.id) {
                             if let t = AppTheme(rawValue: theme.id) {
                                 appState.setTheme(t)
                             }
@@ -223,24 +238,39 @@ private struct TerminalPane: View {
 // MARK: - Keybindings Pane
 
 private struct KeybindingsPane: View {
+    @State private var recordingAction: String? = nil
+    @State private var recordingKey: String = ""
+    @State private var recordingModifiers: KeyBinding.Modifiers = .init()
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SettingsHeader("快捷键", "自定义键盘操作")
+                SettingsHeader("快捷键", "点击快捷键开始录制新组合键")
+
+                if recordingAction != nil {
+                    recordingOverlay
+                }
 
                 let actions = KeyBindings.shared.allActions()
                 ForEach(actions, id: \.action) { item in
-                    HStack {
-                        Text(actionLabel(for: item.action)).font(.system(size: 13))
-                        Spacer()
-                        Text(item.binding.displayString)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Color.primary.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Button(action: { startRecording(item.action) }) {
+                        HStack {
+                            Text(actionLabel(for: item.action)).font(.system(size: 13))
+                            Spacer()
+                            Text(item.binding.displayString)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(recordingAction == item.action ? Color.accentColor : Color.secondary)
+                                .padding(.horizontal, 8).padding(.vertical, 2)
+                                .background(
+                                    recordingAction == item.action
+                                        ? Color.accentColor.opacity(0.12)
+                                        : Color.primary.opacity(0.06)
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        .padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
+                    .buttonStyle(.plain)
                 }
 
                 Divider()
@@ -248,6 +278,57 @@ private struct KeybindingsPane: View {
                     .font(.system(size: 12))
             }
             .padding(24)
+        }
+        .background(KeyCaptureView { event in
+            guard let action = recordingAction else { return }
+            let mods = KeyBinding.Modifiers(flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+            guard !mods.isEmpty || event.keyCode == 0x35 else { return }
+            let key: String
+            if let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
+                key = chars.lowercased()
+            } else if let special = specialKeyName(event.keyCode) {
+                key = special
+            } else {
+                return
+            }
+            KeyBindings.shared.setBinding(action: action, key: key, modifiers: mods)
+            recordingAction = nil
+        })
+    }
+
+    private var recordingOverlay: some View {
+        return HStack {
+            Image(systemName: "record.circle")
+                .foregroundStyle(.red)
+            Text("正在录制快捷键... 请按下组合键")
+                .font(.system(size: 12))
+            Spacer()
+            Button("取消") { recordingAction = nil }
+                .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(Color.accentColor.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func startRecording(_ action: String) {
+        recordingAction = action
+    }
+
+    private func specialKeyName(_ keyCode: UInt16) -> String? {
+        switch keyCode {
+        case 126: return "\u{1b}" // Up
+        case 125: return "\u{1c}" // Down
+        case 123: return "\u{1d}" // Left
+        case 124: return "\u{1e}" // Right
+        case 0x33: return "\u{7f}" // Delete
+        case 0x24: return "\r"    // Return
+        case 0x30: return "\t"    // Tab
+        case 0x35: return "\u{1b}" // Escape
+        case 0x31: return " "     // Space
+        default: return nil
         }
     }
 
@@ -274,10 +355,40 @@ private struct KeybindingsPane: View {
     }
 }
 
+private struct KeyCaptureView: NSViewRepresentable {
+    let onKeyDown: (NSEvent) -> Void
+
+    func makeNSView(context: Context) -> KeyCaptureNSView {
+        let view = KeyCaptureNSView()
+        view.onKeyDown = onKeyDown
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyCaptureNSView, context: Context) {
+        nsView.onKeyDown = onKeyDown
+    }
+}
+
+private class KeyCaptureNSView: NSView {
+    var onKeyDown: ((NSEvent) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.makeFirstResponder(self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        onKeyDown?(event)
+    }
+}
+
 // MARK: - Keywords Pane
 
 private struct KeywordsPane: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject var themeState: ThemeState
 
     var body: some View {
         ScrollView {
@@ -286,7 +397,7 @@ private struct KeywordsPane: View {
 
                 SettingsGroup("已启用的关键词") {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(appState.keywordHighlights.enumerated()), id: \.element.id) { _, kw in
+                        ForEach(Array(themeState.keywordHighlights.enumerated()), id: \.element.id) { _, kw in
                             HStack {
                                 Circle()
                                     .fill(Color(hex: kw.colorHex) ?? .yellow)
@@ -312,7 +423,7 @@ private struct KeywordsPane: View {
                         .foregroundStyle(.tertiary)
 
                     Button("恢复默认关键词") {
-                        appState.keywordHighlights = KeywordHighlight.defaults
+                        themeState.keywordHighlights = KeywordHighlight.defaults
                         appState.saveKeywords()
                     }
                     .font(.system(size: 11))
@@ -326,7 +437,8 @@ private struct KeywordsPane: View {
 // MARK: - AI Pane
 
 private struct AIPane: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject var aiState: AIState
 
     var body: some View {
         ScrollView {
@@ -336,8 +448,8 @@ private struct AIPane: View {
                 SettingsGroup("基本设置") {
                     LabeledRow("启用 AI 面板") {
                         Toggle("", isOn: Binding(
-                            get: { appState.aiConfig.enabled },
-                            set: { appState.aiConfig.enabled = $0; appState.saveAIConfig() }
+                            get: { aiState.aiConfig.enabled },
+                            set: { aiState.aiConfig.enabled = $0; appState.saveAIConfig() }
                         ))
                         .toggleStyle(.switch)
                     }
@@ -347,8 +459,8 @@ private struct AIPane: View {
                     VStack(alignment: .leading, spacing: 10) {
                         LabeledRow("API 地址") {
                             TextField("https://api.openai.com/v1", text: Binding(
-                                get: { appState.aiConfig.endpoint },
-                                set: { appState.aiConfig.endpoint = $0; appState.saveAIConfig() }
+                                get: { aiState.aiConfig.endpoint },
+                                set: { aiState.aiConfig.endpoint = $0; appState.saveAIConfig() }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -356,8 +468,8 @@ private struct AIPane: View {
                         }
                         LabeledRow("API Key") {
                             SecureField("sk-...", text: Binding(
-                                get: { appState.aiConfig.apiKey },
-                                set: { appState.aiConfig.apiKey = $0; appState.saveAIConfig() }
+                                get: { aiState.aiConfig.apiKey },
+                                set: { aiState.aiConfig.apiKey = $0; appState.saveAIConfig() }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -365,8 +477,8 @@ private struct AIPane: View {
                         }
                         LabeledRow("模型") {
                             TextField("gpt-4o", text: Binding(
-                                get: { appState.aiConfig.model },
-                                set: { appState.aiConfig.model = $0; appState.saveAIConfig() }
+                                get: { aiState.aiConfig.model },
+                                set: { aiState.aiConfig.model = $0; appState.saveAIConfig() }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
@@ -387,24 +499,293 @@ private struct AIPane: View {
 // MARK: - Connection Pane
 
 private struct ConnectionPane: View {
+    @AppStorage("sshTimeout") private var sshTimeout: Double = 10
+    @AppStorage("sshReconnectEnabled") private var sshReconnectEnabled: Bool = true
+    @AppStorage("sshReconnectInterval") private var sshReconnectInterval: Double = 3
+    @AppStorage("sshKeepaliveInterval") private var sshKeepaliveInterval: Double = 30
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 SettingsHeader("连接", "SSH 连接与重连配置")
 
                 SettingsGroup("超时与重连") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        LabeledRow("默认超时") {
-                            Text("10s").font(.system(size: 12))
+                    VStack(alignment: .leading, spacing: 10) {
+                        LabeledRow("连接超时") {
+                            Slider(value: $sshTimeout, in: 3...60, step: 1).frame(width: 160)
+                            Text("\(Int(sshTimeout))s")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
                         }
-                        LabeledRow("重连策略") {
-                            Text("自动重连").font(.system(size: 12))
+                        SettingsToggle("自动重连", isOn: $sshReconnectEnabled)
+                        if sshReconnectEnabled {
+                            LabeledRow("重连间隔") {
+                                Slider(value: $sshReconnectInterval, in: 1...30, step: 1).frame(width: 160)
+                                Text("\(Int(sshReconnectInterval))s")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                SettingsGroup("心跳保活") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        LabeledRow("心跳间隔") {
+                            Slider(value: $sshKeepaliveInterval, in: 0...300, step: 10).frame(width: 160)
+                            Text(sshKeepaliveInterval == 0 ? "关闭" : "\(Int(sshKeepaliveInterval))s")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("0 表示关闭心跳，设置为每 N 秒发送一次 keepalive 包")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+// MARK: - Monitor Pane
+
+private struct MonitorPane: View {
+    @AppStorage("monitorRefreshInterval") private var monitorRefreshInterval: Double = 3
+    @AppStorage("monitorDiskThreshold") private var monitorDiskThreshold: Double = 80
+    @AppStorage("monitorHistoryPoints") private var monitorHistoryPoints: Double = 60
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsHeader("监控", "资源监控采集配置")
+
+                SettingsGroup("采集频率") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        LabeledRow("刷新间隔") {
+                            Slider(value: $monitorRefreshInterval, in: 1...10, step: 1).frame(width: 160)
+                            Text("\(Int(monitorRefreshInterval))s")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("设置 CPU / 内存 / 磁盘 / 网络数据的采集间隔")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+
+                SettingsGroup("告警阈值") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        LabeledRow("磁盘告警") {
+                            Slider(value: $monitorDiskThreshold, in: 50...99, step: 1).frame(width: 160)
+                            Text("\(Int(monitorDiskThreshold))%")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(monitorDiskThreshold >= 90 ? .red : .secondary)
+                        }
+                    }
+                    Text("磁盘使用率超过该值时高亮提示")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+
+                SettingsGroup("趋势图") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        LabeledRow("保留数据点") {
+                            Slider(value: $monitorHistoryPoints, in: 10...300, step: 10).frame(width: 160)
+                            Text("\(Int(monitorHistoryPoints))")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("趋势图中保留的历史数据点数量")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+// MARK: - Database Pane
+
+private struct DatabasePane: View {
+    @AppStorage("dbDefaultLimit") private var dbDefaultLimit: Double = 200
+    @AppStorage("dbQueryTimeout") private var dbQueryTimeout: Double = 30
+    @AppStorage("dbReadOnlyMode") private var dbReadOnlyMode: Bool = false
+    @AppStorage("dbAutoLimit") private var dbAutoLimit: Bool = true
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsHeader("数据库", "SQLite 查询默认值")
+
+                SettingsGroup("查询设置") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SettingsToggle("自动添加 LIMIT", isOn: $dbAutoLimit)
+                        if dbAutoLimit {
+                            LabeledRow("默认 LIMIT") {
+                                Slider(value: $dbDefaultLimit, in: 10...1000, step: 10).frame(width: 160)
+                                Text("\(Int(dbDefaultLimit))")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        LabeledRow("查询超时") {
+                            Slider(value: $dbQueryTimeout, in: 5...120, step: 5).frame(width: 160)
+                            Text("\(Int(dbQueryTimeout))s")
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                SettingsGroup("安全") {
+                    SettingsToggle("只读模式", isOn: $dbReadOnlyMode)
+                    Text("只读模式下禁止执行 INSERT / UPDATE / DELETE 等写操作")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+// MARK: - Export / Import Pane
+
+private struct ExportImportPane: View {
+    let appState: AppState
+    @State private var exportResult: String = ""
+    @State private var importResult: String = ""
+    @State private var strategy: ImportStrategy = .skipExisting
+
+    enum ImportStrategy: String, CaseIterable {
+        case skipExisting = "跳过重复"
+        case overwrite = "覆盖所有"
+
+        var value: Int32 {
+            switch self {
+            case .skipExisting: return 0
+            case .overwrite: return 1
+            }
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsHeader("导入导出", "备份/迁移服务器配置与凭据")
+
+                SettingsGroup("导出配置") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("将当前所有服务器与凭据分组导出为 JSON 文件。密码和私钥以解密后的明文导出，请注意安全保管。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+
+                        HStack {
+                            Button(action: performExport) {
+                                Label("导出配置", systemImage: "square.and.arrow.up")
+                            }
+
+                            if !exportResult.isEmpty {
+                                Text(exportResult)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(exportResult.contains("成功") ? .green : .red)
+                            }
+                        }
+                    }
+                }
+
+                SettingsGroup("导入配置") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("从 JSON 文件导入服务器与凭据分组配置。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledRow("合并策略") {
+                                Picker("", selection: $strategy) {
+                                    ForEach(ImportStrategy.allCases, id: \.rawValue) { s in
+                                        Text(s.rawValue).tag(s)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 180)
+                            }
+                            Text(strategy == .skipExisting
+                                ? "同名主机将被跳过，不覆盖已有配置"
+                                : "同名主机将被新配置覆盖"
+                            )
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                        }
+
+                        HStack {
+                            Button(action: performImport) {
+                                Label("导入配置", systemImage: "square.and.arrow.down")
+                            }
+
+                            if !importResult.isEmpty {
+                                Text(importResult)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(importResult.contains("成功") ? .green : .red)
+                            }
                         }
                     }
                 }
             }
             .padding(24)
         }
+    }
+
+    private func performExport() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "orbit-config-\(isoDateString()).json"
+        panel.beginSheetModal(for: NSApp.keyWindow!) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let json = try appState.bridge.exportConfig()
+                let prettyData = try JSONSerialization.jsonObject(with: Data(json.utf8))
+                let pretty = try JSONSerialization.data(withJSONObject: prettyData, options: [.prettyPrinted, .sortedKeys])
+                try pretty.write(to: url)
+                exportResult = "导出成功"
+            } catch {
+                exportResult = "导出失败: \(error.localizedDescription)"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { exportResult = "" }
+        }
+    }
+
+    private func performImport() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.beginSheetModal(for: NSApp.keyWindow!) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let data = try Data(contentsOf: url)
+                let json = String(decoding: data, as: UTF8.self)
+                let count = try appState.bridge.importConfig(jsonContent: json, strategy: strategy.value)
+                importResult = "导入成功: \(count) 项"
+                appState.loadServers()
+                appState.loadCredentialGroups()
+            } catch {
+                importResult = "导入失败: \(error.localizedDescription)"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { importResult = "" }
+        }
+    }
+
+    private func isoDateString() -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        return f.string(from: Date())
     }
 }
 
@@ -476,6 +857,161 @@ private struct SettingsToggle: View {
             Toggle("", isOn: $isOn).toggleStyle(.switch)
         }
         .frame(height: 24)
+    }
+}
+
+// MARK: - Port Forwarding Pane
+
+private struct PortForwardingPane: View {
+    let appState: AppState
+    @EnvironmentObject var inventoryState: InventoryState
+    @State private var showAddSheet = false
+    @State private var newServerId: String = ""
+    @State private var newLocalPort: String = "8080"
+    @State private var newRemoteHost: String = "127.0.0.1"
+    @State private var newRemotePort: String = "80"
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SettingsHeader("端口转发", "管理本地端口到远端服务的 SSH 隧道 (ssh -L)")
+
+                SettingsGroup("转发规则") {
+                    if inventoryState.portForwardRules.isEmpty {
+                        Text("暂无线口转发规则")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 8)
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(inventoryState.portForwardRules) { rule in
+                                portForwardRow(rule)
+                            }
+                        }
+                    }
+
+                    Button(action: { showAddSheet = true }) {
+                        Label("新增规则", systemImage: "plus")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                    .padding(.top, 4)
+                }
+            }
+            .padding(24)
+        }
+        .sheet(isPresented: $showAddSheet) {
+            addRuleSheet
+        }
+    }
+
+    private func portForwardRow(_ rule: PortForwardRule) -> some View {
+        let serverName = inventoryState.servers.first(where: { $0.id == rule.serverId })?.name ?? rule.serverId
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(rule.enabled ? Color.green : Color.secondary)
+                .frame(width: 7, height: 7)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(rule.description)
+                    .font(.system(size: 11, design: .monospaced))
+                Text(serverName)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if rule.enabled {
+                Button("关闭") { appState.stopPortForward(rule) }
+                    .font(.system(size: 10))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.orange)
+            } else {
+                Button("开启") { appState.startPortForward(rule) }
+                    .font(.system(size: 10))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.green)
+            }
+
+            Button(action: { appState.removePortForwardRule(rule) }) {
+                Image(systemName: "trash")
+                    .font(.system(size: 10))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.red)
+        }
+        .padding(6)
+        .background(Color.primary.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private var addRuleSheet: some View {
+        VStack(spacing: 12) {
+            Text("新增端口转发规则")
+                .font(.system(size: 14, weight: .semibold))
+                .padding(.top, 12)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("服务器").font(.system(size: 10)).foregroundStyle(.secondary)
+                Picker("", selection: $newServerId) {
+                    Text("请选择").tag("")
+                    ForEach(inventoryState.servers, id: \.id) { s in
+                        Text(s.name).tag(s.id)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("本地端口").font(.system(size: 10)).foregroundStyle(.secondary)
+                    TextField("8080", text: $newLocalPort)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                        .frame(width: 100)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("远端地址").font(.system(size: 10)).foregroundStyle(.secondary)
+                    TextField("127.0.0.1", text: $newRemoteHost)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                        .frame(width: 140)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("远端端口").font(.system(size: 10)).foregroundStyle(.secondary)
+                    TextField("80", text: $newRemotePort)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                        .frame(width: 80)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("取消") { showAddSheet = false }
+                    .font(.system(size: 12))
+                Button("添加") {
+                    guard !newServerId.isEmpty,
+                          let localPort = UInt16(newLocalPort),
+                          !newRemoteHost.isEmpty,
+                          let remotePort = UInt16(newRemotePort) else { return }
+                    appState.addPortForwardRule(
+                        serverId: newServerId,
+                        localPort: localPort,
+                        remoteHost: newRemoteHost,
+                        remotePort: remotePort
+                    )
+                    showAddSheet = false
+                    newServerId = ""
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .disabled(newServerId.isEmpty)
+            }
+            .padding(.bottom, 12)
+        }
+        .padding(.horizontal, 24)
+        .frame(width: 420, height: 260)
     }
 }
 

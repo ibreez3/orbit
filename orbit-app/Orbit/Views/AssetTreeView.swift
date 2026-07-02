@@ -1,7 +1,11 @@
 import SwiftUI
 
 struct AssetTreeView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject var uiState: UIState
+    @EnvironmentObject var inventoryState: InventoryState
+    @EnvironmentObject var snippetState: SnippetState
+    @EnvironmentObject var tabState: TabState
 
     @State private var serversExpanded: Bool = true
     @State private var credentialsExpanded: Bool = false
@@ -17,16 +21,18 @@ struct AssetTreeView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                TextField("搜索服务器...", text: $appState.assetTreeSearchQuery)
+                TextField("搜索服务器...", text: $uiState.assetTreeSearchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                if !appState.assetTreeSearchQuery.isEmpty {
-                    Button(action: { appState.assetTreeSearchQuery = "" }) {
+                    .accessibilityLabel("搜索服务器")
+                if !uiState.assetTreeSearchQuery.isEmpty {
+                    Button(action: { uiState.assetTreeSearchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 10))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.tertiary)
+                    .accessibilityLabel("清除搜索")
                 }
             }
             .padding(.horizontal, 12)
@@ -37,7 +43,7 @@ struct AssetTreeView: View {
             // Tree content
             ScrollView {
                 VStack(spacing: 0) {
-                    if appState.assetTreeSearchQuery.isEmpty {
+                    if uiState.assetTreeSearchQuery.isEmpty {
                         categoryServers
                         categoryCredentials
                         categorySnippets
@@ -60,8 +66,9 @@ struct AssetTreeView: View {
                             .font(.system(size: 11))
                     }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("添加服务器")
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -69,9 +76,9 @@ struct AssetTreeView: View {
         }
         .frame(minWidth: 160)
         .background(Color(NSColor.controlBackgroundColor))
-        .sheet(isPresented: $appState.snippetEditorOpen) {
-            SnippetEditorView()
-                .environmentObject(appState)
+        .sheet(isPresented: $snippetState.snippetEditorOpen) {
+            SnippetEditorView(appState: appState)
+                .environmentObject(appState.snippetState)
         }
         .alert("重命名分组", isPresented: Binding(
             get: { renameTarget != nil },
@@ -107,7 +114,7 @@ struct AssetTreeView: View {
                     Text("服务器")
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
-                    Text("\(appState.servers.count)")
+                    Text("\(inventoryState.servers.count)")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -118,7 +125,7 @@ struct AssetTreeView: View {
             .buttonStyle(.plain)
 
             if serversExpanded {
-                let groups = Dictionary(grouping: appState.servers) {
+                let groups = Dictionary(grouping: inventoryState.servers) {
                     $0.group_name.isEmpty ? "默认" : $0.group_name
                 }
                 let sorted = groups.sorted { $0.key < $1.key }
@@ -173,7 +180,7 @@ struct AssetTreeView: View {
 
             if isExpanded {
                 ForEach(servers) { server in
-                    ServerNodeRow(server: server, indent: 40)
+                    ServerNodeRow(server: server, appState: appState, indent: 40)
                 }
             }
         }
@@ -182,7 +189,7 @@ struct AssetTreeView: View {
     // MARK: - Category: Credentials
 
     private var categoryCredentials: some View {
-        let items = appState.credentialGroups
+        let items = inventoryState.credentialGroups
 
         return AnyView(VStack(spacing: 0) {
             Button(action: { withAnimation(.easeInOut(duration: 0.15)) { credentialsExpanded.toggle() } }) {
@@ -254,7 +261,7 @@ struct AssetTreeView: View {
     // MARK: - Category: Snippets
 
     private var categorySnippets: some View {
-        let items = appState.snippets
+        let items = snippetState.snippets
 
         return AnyView(VStack(spacing: 0) {
             Button(action: { withAnimation(.easeInOut(duration: 0.15)) { snippetsExpanded.toggle() } }) {
@@ -320,10 +327,10 @@ struct AssetTreeView: View {
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if let activeId = appState.activeTabId,
-                           let tab = appState.tabs.first(where: { $0.id == activeId }),
+                        if let activeId = tabState.activeTabId,
+                           let tab = tabState.tabs.first(where: { $0.id == activeId }),
                            let sid = tab.focusedChannelId ?? tab.sessionId,
-                           let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+                           let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView {
                             appState.insertSnippetCommand(snippet.command, into: tv)
                         } else {
                             NSPasteboard.general.clearContents()
@@ -332,10 +339,10 @@ struct AssetTreeView: View {
                     }
                     .contextMenu {
                         Button("插入到终端") {
-                            if let activeId = appState.activeTabId,
-                               let tab = appState.tabs.first(where: { $0.id == activeId }),
+                            if let activeId = tabState.activeTabId,
+                               let tab = tabState.tabs.first(where: { $0.id == activeId }),
                                let sid = tab.focusedChannelId ?? tab.sessionId,
-                               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+                               let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView {
                                 appState.insertSnippetCommand(snippet.command, into: tv)
                             } else {
                                 NSPasteboard.general.clearContents()
@@ -356,12 +363,12 @@ struct AssetTreeView: View {
     // MARK: - Search Results
 
     private var searchResults: some View {
-        let q = appState.assetTreeSearchQuery.lowercased()
-        let matched = appState.servers.filter {
+        let q = uiState.assetTreeSearchQuery.lowercased()
+        let matched = inventoryState.servers.filter {
             $0.name.lowercased().contains(q) || $0.host.lowercased().contains(q)
         }
         return ForEach(matched) { server in
-            ServerNodeRow(server: server, indent: 12)
+            ServerNodeRow(server: server, appState: appState, indent: 12)
         }
     }
 }
@@ -370,14 +377,15 @@ struct AssetTreeView: View {
 
 private struct ServerNodeRow: View {
     let server: Server
+    let appState: AppState
     var indent: CGFloat = 12
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var tabState: TabState
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(appState.tabs.contains(where: { $0.serverId == server.id }) ? Color.green : Color.gray)
+                .fill(tabState.tabs.contains(where: { $0.serverId == server.id }) ? Color.green : Color.gray)
                 .frame(width: 6, height: 6)
 
             VStack(alignment: .leading, spacing: 1) {

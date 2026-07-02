@@ -1,14 +1,15 @@
 import SwiftUI
 
 struct TabBarView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject var tabState: TabState
     @State private var hoveredTabId: String? = nil
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    ForEach(appState.tabs) { tab in
+                    ForEach(tabState.tabs) { tab in
                         tabPill(tab)
                     }
                 }
@@ -26,6 +27,7 @@ struct TabBarView: View {
             }
             .buttonStyle(.plain)
             .help("Spotlight (⌘K)")
+            .accessibilityLabel("打开 Spotlight")
 
             networkIndicator
 
@@ -37,6 +39,7 @@ struct TabBarView: View {
             }
             .buttonStyle(.plain)
             .help("Settings (⌘,)")
+            .accessibilityLabel("打开设置")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -46,7 +49,7 @@ struct TabBarView: View {
     // MARK: - Network status indicator
 
     private var networkIndicator: some View {
-        let activeTab = appState.tabs.first(where: { $0.id == appState.activeTabId })
+        let activeTab = tabState.tabs.first(where: { $0.id == tabState.activeTabId })
         let isConnectionTab = activeTab?.type == .terminal || activeTab?.type == .sftp || activeTab?.type == .monitor
 
         guard let tab = activeTab, isConnectionTab else {
@@ -78,7 +81,7 @@ struct TabBarView: View {
     // MARK: - Tab pill
 
     private func tabPill(_ tab: TabItem) -> some View {
-        let isActive = tab.id == appState.activeTabId
+        let isActive = tab.id == tabState.activeTabId
         let isHovered = tab.id == hoveredTabId
         let showClose = isActive || isHovered
         let showSftp = isHovered && tab.type == .terminal

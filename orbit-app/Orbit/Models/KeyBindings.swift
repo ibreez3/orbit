@@ -59,6 +59,8 @@ struct KeyBinding: Codable, Hashable {
 
 final class KeyBindings {
     static let shared = KeyBindings()
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
 
     private var bindings: [String: KeyBinding] = [:]
 
@@ -171,7 +173,7 @@ final class KeyBindings {
 
     private func loadDefaults() {
         guard let data = UserDefaults.standard.data(forKey: storeKey),
-              let decoded = try? JSONDecoder().decode([String: KeyBinding].self, from: data) else {
+              let decoded = try? Self.decoder.decode([String: KeyBinding].self, from: data) else {
             bindings = [:]
             return
         }
@@ -179,7 +181,7 @@ final class KeyBindings {
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(bindings) else { return }
+        guard let data = try? Self.encoder.encode(bindings) else { return }
         UserDefaults.standard.set(data, forKey: storeKey)
     }
 }

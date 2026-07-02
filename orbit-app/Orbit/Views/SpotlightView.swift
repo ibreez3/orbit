@@ -20,7 +20,8 @@ enum SpotlightItem: Identifiable {
 // MARK: - SpotlightView
 
 struct SpotlightView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var uiState: UIState
+    let appState: AppState
     @FocusState private var isSearchFocused: Bool
     @State private var selectedIndex: Int = 0
     @State private var keyMonitor: Any? = nil
@@ -46,7 +47,7 @@ struct SpotlightView: View {
         .onDisappear {
             removeKeyMonitor()
         }
-        .onChange(of: appState.spotlightQuery) { _ in
+        .onChange(of: uiState.spotlightQuery) { _ in
             selectedIndex = 0
         }
     }
@@ -57,7 +58,7 @@ struct SpotlightView: View {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             // Only intercept when spotlight is open
-            guard appState.spotlightOpen else { return event }
+            guard uiState.spotlightOpen else { return event }
             switch event.keyCode {
             case 126: // up arrow
                 moveSelection(-1)
@@ -124,7 +125,10 @@ struct SpotlightView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-            TextField("搜索服务器、数据库、凭证、命令…", text: $appState.spotlightQuery)
+            TextField("搜索服务器、数据库、凭证、命令…", text: Binding(
+                get: { uiState.spotlightQuery },
+                set: { uiState.spotlightQuery = $0 }
+            ))
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($isSearchFocused)
@@ -384,7 +388,7 @@ struct SpotlightView: View {
     // MARK: - Filtering
 
     private var filteredServers: [Server] {
-        let q = appState.spotlightQuery.lowercased()
+        let q = uiState.spotlightQuery.lowercased()
         if q.isEmpty { return appState.servers }
         return appState.servers.filter {
             $0.name.lowercased().contains(q) ||
@@ -394,7 +398,7 @@ struct SpotlightView: View {
     }
 
     private var filteredCredentials: [CredentialGroup] {
-        let q = appState.spotlightQuery.lowercased()
+        let q = uiState.spotlightQuery.lowercased()
         if q.isEmpty { return appState.credentialGroups }
         return appState.credentialGroups.filter {
             $0.name.lowercased().contains(q)

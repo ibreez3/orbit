@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct CredentialGroupDialog: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var inventoryState: InventoryState
+    let appState: AppState
     @Environment(\.dismiss) var dismiss
 
     @State private var form = CredentialGroupInput(
@@ -31,7 +32,7 @@ struct CredentialGroupDialog: View {
         .frame(width: 460)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            if let cg = appState.editingCg {
+            if let cg = inventoryState.editingCg {
                 form = CredentialGroupInput(
                     name: cg.name, auth_type: cg.auth_type, username: cg.username,
                     password: cg.password.isEmpty ? nil : cg.password,
@@ -46,7 +47,7 @@ struct CredentialGroupDialog: View {
 
     private var header: some View {
         HStack {
-            Text(appState.editingCg != nil ? "编辑凭据分组" : "新建凭据分组")
+            Text(inventoryState.editingCg != nil ? "编辑凭据分组" : "新建凭据分组")
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
             Button(action: { dismiss() }) {
@@ -208,7 +209,7 @@ struct CredentialGroupDialog: View {
         guard !form.name.isEmpty, !form.username.isEmpty else { return }
         saving = true
         Task {
-            if let cg = appState.editingCg {
+            if let cg = inventoryState.editingCg {
                 appState.updateCg(id: cg.id, input: form)
             } else {
                 appState.addCg(form)

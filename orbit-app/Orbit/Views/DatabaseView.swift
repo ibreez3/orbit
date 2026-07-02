@@ -2,19 +2,28 @@ import SwiftUI
 
 struct DatabaseView: View {
     let tab: TabItem
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @State private var selectedTable: String? = nil
     @State private var sqlText: String = "SELECT * FROM orders LIMIT 100;"
     @State private var tableSearchQuery: String = ""
+    @AppStorage("dbDefaultLimit") private var dbDefaultLimit: Double = 200
+    @AppStorage("dbQueryTimeout") private var dbQueryTimeout: Double = 30
+    @AppStorage("dbReadOnlyMode") private var dbReadOnlyMode: Bool = false
+    @AppStorage("dbAutoLimit") private var dbAutoLimit: Bool = true
 
     var body: some View {
         HSplitView {
             tableListPanel
             editorAndResultsPanel
         }
-        .onAppear { publishAIContext() }
+        .onAppear {
+            applyDatabaseSettings()
+            publishAIContext()
+        }
         .onChange(of: selectedTable) { _ in publishAIContext() }
         .onChange(of: sqlText) { _ in publishAIContext() }
+        .onChange(of: dbDefaultLimit) { _ in applyDatabaseSettings() }
+        .onChange(of: dbAutoLimit) { _ in applyDatabaseSettings() }
     }
 
     private var tableListPanel: some View {
@@ -84,6 +93,8 @@ struct DatabaseView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+                .disabled(!canExecuteQuery)
+                .opacity(canExecuteQuery ? 1 : 0.5)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -112,6 +123,14 @@ struct DatabaseView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                 Spacer()
+                if dbReadOnlyMode {
+                    Text("只读")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+                Text("\(Int(dbQueryTimeout))s 超时")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
                 Text("⌘Enter 执行")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
@@ -127,6 +146,24 @@ struct DatabaseView: View {
         let q = tableSearchQuery.lowercased()
         if q.isEmpty { return all }
         return all.filter { $0.contains(q) }
+    }
+
+    private var canExecuteQuery: Bool {
+        !dbReadOnlyMode || !isWriteStatement(sqlText)
+    }
+
+    private func applyDatabaseSettings() {
+        guard dbAutoLimit else { return }
+        let defaultSql = "SELECT * FROM orders LIMIT 100;"
+        if sqlText == defaultSql || sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sqlText = "SELECT * FROM orders LIMIT \(Int(dbDefaultLimit));"
+        }
+    }
+
+    private func isWriteStatement(_ sql: String) -> Bool {
+        let trimmed = sql.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["insert", "update", "delete", "drop", "alter", "create", "replace", "truncate"]
+            .contains { trimmed.hasPrefix($0) }
     }
 
     private func publishAIContext() {

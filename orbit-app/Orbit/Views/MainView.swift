@@ -1,8 +1,22 @@
 import SwiftUI
 
 struct MainView: View {
-    @StateObject private var appState = AppState()
+    @StateObject private var appState: AppState
+    @ObservedObject private var tabState: TabState
+    @ObservedObject private var uiState: UIState
+    @ObservedObject private var themeState: ThemeState
+    @ObservedObject private var inventoryState: InventoryState
+    @ObservedObject private var toolState: ToolState
     @State private var batchExecutionVisible: Bool = false
+
+    init(appState: AppState = AppState()) {
+        _appState = StateObject(wrappedValue: appState)
+        _tabState = ObservedObject(wrappedValue: appState.tabState)
+        _uiState = ObservedObject(wrappedValue: appState.uiState)
+        _themeState = ObservedObject(wrappedValue: appState.themeState)
+        _inventoryState = ObservedObject(wrappedValue: appState.inventoryState)
+        _toolState = ObservedObject(wrappedValue: appState.toolState)
+    }
 
     var body: some View {
         let base = ZStack {
@@ -12,32 +26,38 @@ struct MainView: View {
             terminalCloseConfirmationOverlay
         }
         .frame(minWidth: 900, minHeight: 600)
-        .environmentObject(appState)
+        .environmentObject(appState.tabState)
+        .environmentObject(appState.uiState)
+        .environmentObject(appState.themeState)
+        .environmentObject(appState.inventoryState)
+        .environmentObject(appState.snippetState)
+        .environmentObject(appState.toolState)
+        .environmentObject(appState.aiState)
         .environmentObject(appState.sftpDrawer)
         .sheet(isPresented: Binding(
-            get: { appState.dialogOpen },
+            get: { uiState.dialogOpen },
             set: { if !$0 { appState.closeDialog() } }
         )) {
-            ServerDialog()
-                .environmentObject(appState)
+            ServerDialog(appState: appState)
+                .environmentObject(appState.inventoryState)
         }
         .sheet(isPresented: Binding(
-            get: { appState.cgDialogOpen },
+            get: { uiState.cgDialogOpen },
             set: { if !$0 { appState.closeCgDialog() } }
         )) {
-            CredentialGroupDialog()
-                .environmentObject(appState)
+            CredentialGroupDialog(appState: appState)
+                .environmentObject(appState.inventoryState)
         }
         .sheet(isPresented: Binding(
             get: { batchExecutionVisible },
             set: { batchExecutionVisible = $0 }
         )) {
-            BatchExecutionView()
-                .environmentObject(appState)
+            BatchExecutionView(appState: appState)
+                .environmentObject(appState.inventoryState)
         }
-        .modifier(AlertModifier(appState: appState))
+        .modifier(AlertModifier(appState: appState, uiState: uiState))
         .alert("确认切换会话", isPresented: Binding(
-            get: { appState.pendingContextSwitchTabId != nil },
+            get: { toolState.pendingContextSwitchTabId != nil },
             set: { if !$0 { appState.cancelPendingContextSwitch() } }
         )) {
             Button("继续切换", role: .destructive) {
@@ -47,16 +67,16 @@ struct MainView: View {
                 appState.cancelPendingContextSwitch()
             }
         } message: {
-            Text(appState.pendingContextSwitchMessage ?? "")
+            Text(toolState.pendingContextSwitchMessage ?? "")
         }
         .onAppear {
-            if appState.servers.isEmpty { appState.loadServers() }
-            if appState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
+            if inventoryState.servers.isEmpty { appState.loadServers() }
+            if inventoryState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
         }
 
         return base
             .onExitCommand {
-                if appState.activeTool?.tool != .ai {
+                if toolState.activeTool?.tool != .ai {
                     appState.closeOverlayTool()
                 }
             }
@@ -84,16 +104,15 @@ struct MainView: View {
 
     private var mainLayout: some View {
         HStack(spacing: 0) {
-            AssetTreeView()
-                .environmentObject(appState)
-                .frame(width: appState.assetTreeWidth)
+            AssetTreeView(appState: appState)
+                .frame(width: uiState.assetTreeWidth)
 
             resizeHandle
 
             Divider()
 
             VStack(spacing: 0) {
-                TabBarView()
+                TabBarView(appState: appState)
                 ZStack(alignment: .topTrailing) {
                     contentArea
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -102,21 +121,18 @@ struct MainView: View {
                             appState.closeOverlayTool()
                         }
 
-                    SessionToolOverlayView()
-                        .environmentObject(appState)
+                    SessionToolOverlayView(appState: appState)
                 }
-                StatusBarView()
+                StatusBarView(appState: appState)
             }
 
-            if appState.aiPanelOpen {
+            if toolState.aiPanelOpen {
                 Divider()
-                AIChatView()
-                    .environmentObject(appState)
+                AIChatView(appState: appState)
             }
 
             Divider()
-            SessionToolDockView()
-                .environmentObject(appState)
+            SessionToolDockView(appState: appState)
         }
         .background(themeWindowColor)
         .preferredColorScheme(themeColorScheme)
@@ -137,31 +153,31 @@ struct MainView: View {
             .gesture(
                 DragGesture()
                     .onChanged { value in
-                        let newWidth = appState.assetTreeWidth + value.translation.width
-                        appState.assetTreeWidth = min(350, max(160, newWidth))
+                        let newWidth = uiState.assetTreeWidth + value.translation.width
+                        uiState.assetTreeWidth = min(350, max(160, newWidth))
                     }
                     .onEnded { _ in
-                        appState.saveAssetTreeWidth(appState.assetTreeWidth)
+                        appState.saveAssetTreeWidth(uiState.assetTreeWidth)
                     }
             )
     }
 
     private var themeWindowColor: Color {
-        let tc = ThemeColors.colors(for: appState.theme)
+        let tc = ThemeColors.colors(for: themeState.theme)
         return Color(red: tc.windowBg.red, green: tc.windowBg.green, blue: tc.windowBg.blue)
     }
 
     private var themeColorScheme: ColorScheme {
-        let tc = ThemeColors.colors(for: appState.theme)
+        let tc = ThemeColors.colors(for: themeState.theme)
         let luminance = 0.299 * tc.foreground.red + 0.587 * tc.foreground.green + 0.114 * tc.foreground.blue
         return luminance > 0.5 ? .dark : .light
     }
 
     @ViewBuilder
     private var contentArea: some View {
-        if let activeTab = appState.tabs.first(where: { $0.id == appState.activeTabId }) {
+        if let activeTab = tabState.tabs.first(where: { $0.id == tabState.activeTabId }) {
             if let tree = activeTab.paneTree {
-                SplitPaneView(node: tree, serverId: activeTab.serverId, tabId: activeTab.id)
+                SplitPaneView(node: tree, serverId: activeTab.serverId, tabId: activeTab.id, appState: appState)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 tabContent(activeTab)
@@ -177,49 +193,48 @@ struct MainView: View {
         switch tab.type {
         case .terminal:
             ZStack(alignment: .bottomTrailing) {
-                TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id)
+                TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id, appState: appState)
                     .id(tab.id)
-                if appState.activeTabError != nil, tab.id == appState.activeTabId {
-                    AIErrorBanner(errorText: appState.activeTabError!)
-                        .environmentObject(appState)
+                if tabState.activeTabError != nil, tab.id == tabState.activeTabId {
+                    AIErrorBanner(errorText: tabState.activeTabError!, appState: appState)
                         .padding(12)
                 }
             }
         case .sftp:
-            SftpView(tab: tab)
+            SftpView(tab: tab, appState: appState)
                 .id(tab.id)
         case .monitor:
-            MonitorView(tab: tab)
+            MonitorView(tab: tab, appState: appState)
                 .id(tab.id)
         case .database:
-            DatabaseView(tab: tab)
+            DatabaseView(tab: tab, appState: appState)
                 .id(tab.id)
         case .docker:
-            DockerView(tab: tab)
+            DockerView(appState: appState, tab: tab)
                 .id(tab.id)
         }
     }
 
     private var emptyState: some View {
-        HomeView()
+        HomeView(appState: appState)
     }
 
     @ViewBuilder
     private var spotlightOverlay: some View {
-        if appState.spotlightOpen {
+        if uiState.spotlightOpen {
             ZStack {
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                     .onTapGesture { appState.closeSpotlight() }
 
-                SpotlightView()
+                SpotlightView(appState: appState)
             }
         }
     }
 
     @ViewBuilder
     private var terminalCloseConfirmationOverlay: some View {
-        if let tab = appState.pendingCloseTab {
+        if let tab = pendingCloseTab {
             ZStack {
                 Color.black.opacity(0.18)
                     .ignoresSafeArea()
@@ -303,7 +318,7 @@ struct MainView: View {
 
     @ViewBuilder
     private var quitConfirmationOverlay: some View {
-        if appState.showQuitConfirmation {
+        if uiState.showQuitConfirmation {
             ZStack {
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
@@ -351,6 +366,11 @@ struct MainView: View {
             }
         }
     }
+
+    private var pendingCloseTab: TabItem? {
+        guard let id = uiState.pendingCloseTabId else { return nil }
+        return tabState.tabs.first { $0.id == id }
+    }
 }
 
 private struct SftpDrawerModifier: ViewModifier {
@@ -373,7 +393,7 @@ private struct ClearScreenModifier: ViewModifier {
             if let activeId = appState.activeTabId,
                let tab = appState.tabs.first(where: { $0.id == activeId }),
                let sid = tab.focusedChannelId ?? tab.sessionId,
-               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+               let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView {
                 let term = tv.getTerminal()
                 term.buffer.clear()
                 tv.setNeedsDisplay(tv.bounds)
@@ -389,7 +409,7 @@ private struct FindInTerminalModifier: ViewModifier {
             if let activeId = appState.activeTabId,
                let tab = appState.tabs.first(where: { $0.id == activeId }),
                let sid = tab.focusedChannelId ?? tab.sessionId,
-               let tv = OrbitBridge.shared.terminalViewCache[sid] as? OrbitTerminalView {
+               let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView {
                 tv.performFindPanelAction(NSTextFinder.Action.showFindInterface.rawValue)
             }
         }
@@ -411,15 +431,16 @@ private struct ReconnectModifier: ViewModifier {
 
 private struct AlertModifier: ViewModifier {
     let appState: AppState
+    @ObservedObject var uiState: UIState
 
     func body(content: Content) -> some View {
-        content.alert(appState.alertTitle, isPresented: Binding(
-            get: { appState.alertMessage != nil },
+        content.alert(uiState.alertTitle, isPresented: Binding(
+            get: { uiState.alertMessage != nil },
             set: { if !$0 { appState.alertMessage = nil } }
         )) {
             Button("确定") { appState.alertMessage = nil }
         } message: {
-            Text(appState.alertMessage ?? "")
+            Text(uiState.alertMessage ?? "")
         }
     }
 }

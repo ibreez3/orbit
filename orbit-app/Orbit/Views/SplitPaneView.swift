@@ -4,20 +4,21 @@ struct SplitPaneView: View {
     let node: PaneNode
     let serverId: String
     let tabId: String
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
+    @EnvironmentObject var tabState: TabState
 
     var body: some View {
         switch node {
         case .leaf(let channelId):
-            TerminalView(channelId: channelId, serverId: serverId, tabId: tabId)
+            TerminalView(channelId: channelId, serverId: serverId, tabId: tabId, appState: appState)
                 .overlay(
-                    (appState.tabs.first(where: { $0.id == tabId })?.focusedChannelId == channelId)
+                    (tabState.tabs.first(where: { $0.id == tabId })?.focusedChannelId == channelId)
                         ? Color.accentColor.opacity(0.03)
                         : Color.clear
                 )
                 .onTapGesture {
                     appState.requestFocusPane(tabId: tabId, paneId: channelId)
-                    if let tv = OrbitBridge.shared.terminalViewCache[channelId] as? OrbitTerminalView {
+                    if let tv = OrbitBridge.shared.terminalView(for: channelId) as? OrbitTerminalView {
                         tv.window?.makeFirstResponder(tv)
                     }
                 }
@@ -25,9 +26,9 @@ struct SplitPaneView: View {
             SplitContainer(direction: direction, ratio: ratio, splitId: splitId) { newRatio in
                 appState.updatePaneRatio(tabId: tabId, splitId: splitId, newRatio: newRatio)
             } first: {
-                SplitPaneView(node: first, serverId: serverId, tabId: tabId)
+                SplitPaneView(node: first, serverId: serverId, tabId: tabId, appState: appState)
             } second: {
-                SplitPaneView(node: second, serverId: serverId, tabId: tabId)
+                SplitPaneView(node: second, serverId: serverId, tabId: tabId, appState: appState)
             }
             .id(splitId)
         }

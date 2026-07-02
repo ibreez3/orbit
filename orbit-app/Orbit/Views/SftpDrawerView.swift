@@ -2,13 +2,13 @@ import SwiftUI
 
 struct SftpDrawerView: View {
     let tab: TabItem
+    let appState: AppState
     @EnvironmentObject var drawerState: SftpDrawerState
-    @EnvironmentObject var appState: AppState
 
     var body: some View {
         VStack(spacing: 0) {
             dragHandle
-            SftpView(tab: tab)
+            SftpView(tab: tab, appState: appState)
         }
         .frame(height: drawerState.height)
         .background(.ultraThinMaterial)

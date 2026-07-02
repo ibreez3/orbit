@@ -1,7 +1,10 @@
 import SwiftUI
 
 struct SessionToolDockView: View {
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var toolState: ToolState
+    @EnvironmentObject var tabState: TabState
+    @EnvironmentObject var inventoryState: InventoryState
+    let appState: AppState
 
     var body: some View {
         VStack(spacing: 8) {
@@ -48,7 +51,7 @@ struct SessionToolDockView: View {
 
     private func dockButton(_ tool: SessionTool, symbol: String, title: String) -> some View {
         let disabledReason = appState.canOpenTool(tool)
-        let isActive = appState.activeTool?.tool == tool || (tool == .ai && appState.aiPanelOpen)
+        let isActive = toolState.activeTool?.tool == tool || (tool == .ai && toolState.aiPanelOpen)
 
         return Button(action: {
             if tool == .ai {
@@ -71,7 +74,7 @@ struct SessionToolDockView: View {
 
     private func activeServer() -> Server? {
         guard let serverId = appState.activeSessionContext.serverId, serverId != "local" else { return nil }
-        return appState.servers.first(where: { $0.id == serverId })
+        return inventoryState.servers.first(where: { $0.id == serverId })
     }
 
     private func openDockerTab() {
@@ -85,7 +88,7 @@ struct SessionToolDockView: View {
         let serverId = context.serverId ?? "database"
         let serverName = context.serverName ?? "Database"
         let tab = TabItem(id: id, type: .database, serverId: serverId, serverName: serverName, title: "Database")
-        appState.tabs.append(tab)
+        tabState.tabs.append(tab)
         appState.requestActivateTab(id)
     }
 }

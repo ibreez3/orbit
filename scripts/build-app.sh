@@ -23,6 +23,9 @@ PRODUCT_DIR="$(
 )"
 APP_PATH="$PRODUCT_DIR/Orbit.app"
 
+echo "==> Verifying Orbit.app..."
+bash "$SCRIPT_DIR/verify-app.sh" "$APP_PATH"
+
 echo "==> Done!"
 echo "    App: $APP_PATH"
 echo "    Run: open \"$APP_PATH\""

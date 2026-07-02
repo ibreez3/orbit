@@ -204,6 +204,9 @@ fn start_local_proxy(
         let mut tunnel = tunnel;
         let mut buf_up = [0u8; 32768];
         let mut buf_down = [0u8; 32768];
+        let mut idle_sleep = Duration::from_micros(250);
+        const MIN_IDLE_SLEEP: Duration = Duration::from_micros(250);
+        const MAX_IDLE_SLEEP: Duration = Duration::from_millis(10);
 
         while run.load(Ordering::Relaxed) {
             let mut did_work = false;
@@ -272,8 +275,11 @@ fn start_local_proxy(
                 }
             }
 
-            if !did_work {
-                std::thread::sleep(Duration::from_millis(1));
+            if did_work {
+                idle_sleep = MIN_IDLE_SLEEP;
+            } else {
+                std::thread::sleep(idle_sleep);
+                idle_sleep = std::cmp::min(idle_sleep * 2, MAX_IDLE_SLEEP);
             }
         }
     });
@@ -289,6 +295,17 @@ struct PooledEntry {
 
 pub struct SessionPool {
     inner: Mutex<HashMap<String, Arc<PooledEntry>>>,
+}
+
+pub struct SessionPoolLease<'a> {
+    pool: &'a SessionPool,
+    server_id: String,
+}
+
+impl Drop for SessionPoolLease<'_> {
+    fn drop(&mut self) {
+        self.pool.release(&self.server_id);
+    }
 }
 
 impl SessionPool {
@@ -327,6 +344,18 @@ impl SessionPool {
         );
         debug!(server_id = %server.id, "新建连接池会话");
         Ok(())
+    }
+
+    pub fn acquire_scoped<'a>(
+        &'a self,
+        server: &Server,
+        db: &Database,
+    ) -> Result<SessionPoolLease<'a>> {
+        self.acquire(server, db)?;
+        Ok(SessionPoolLease {
+            pool: self,
+            server_id: server.id.clone(),
+        })
     }
 
     pub fn with_session_mut<F, T>(&self, server_id: &str, f: F) -> Result<T>

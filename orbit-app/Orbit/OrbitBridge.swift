@@ -28,6 +28,16 @@ private func orbitProgressCallback(serverId: UnsafePointer<CChar>?, transferred:
 
 class OrbitBridge {
     static let shared = OrbitBridge()
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
+    private final class WeakViewBox {
+        weak var view: NSView?
+
+        init(_ view: NSView) {
+            self.view = view
+        }
+    }
 
     private var app: OpaquePointer?
     private let initLock = NSLock()
@@ -35,9 +45,18 @@ class OrbitBridge {
     var sshDataHandlers: [String: (Data) -> Void] = [:]
     var sshClosedHandlers: [String: () -> Void] = [:]
     var progressHandlers: [String: (UInt64, UInt64) -> Void] = [:]
-    var terminalViewCache: [String: NSView] = [:]
+    private var terminalViewCache: [String: WeakViewBox] = [:]
 
     private init() {}
+
+    private static func decodeJSON<T: Decodable>(_ type: T.Type, from json: UnsafePointer<CChar>) throws -> T {
+        let data = Data(
+            bytesNoCopy: UnsafeMutableRawPointer(mutating: json),
+            count: strlen(json),
+            deallocator: .none
+        )
+        return try decoder.decode(type, from: data)
+    }
 
     func ensureInitialized() throws {
         initLock.lock()
@@ -89,6 +108,29 @@ class OrbitBridge {
         handlersLock.unlock()
     }
 
+    func removeTerminalView(sessionId: String) {
+        handlersLock.lock()
+        terminalViewCache.removeValue(forKey: sessionId)
+        handlersLock.unlock()
+    }
+
+    func terminalView(for sessionId: String) -> NSView? {
+        handlersLock.lock()
+        defer { handlersLock.unlock() }
+        guard let box = terminalViewCache[sessionId] else { return nil }
+        if let view = box.view {
+            return view
+        }
+        terminalViewCache.removeValue(forKey: sessionId)
+        return nil
+    }
+
+    func cacheTerminalView(_ view: NSView, sessionId: String) {
+        handlersLock.lock()
+        terminalViewCache[sessionId] = WeakViewBox(view)
+        handlersLock.unlock()
+    }
+
     func setSSHHandlers(sessionId: String, dataHandler: @escaping (Data) -> Void, closedHandler: @escaping () -> Void) {
         handlersLock.lock()
         sshDataHandlers[sessionId] = dataHandler
@@ -106,12 +148,12 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([Server].self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON([Server].self, from: json)
     }
 
     func addServer(input: ServerInput) throws -> Server {
         try ensureInitialized()
-        let jsonData = try JSONEncoder().encode(input)
+        let jsonData = try Self.encoder.encode(input)
         let jsonString = String(data: jsonData, encoding: .utf8)!
         var outJson: UnsafeMutablePointer<CChar>?
         let rc = jsonString.withCString { inputPtr in
@@ -121,12 +163,12 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode(Server.self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON(Server.self, from: json)
     }
 
     func updateServer(id: String, input: ServerInput) throws -> Server {
         try ensureInitialized()
-        let jsonData = try JSONEncoder().encode(input)
+        let jsonData = try Self.encoder.encode(input)
         let jsonString = String(data: jsonData, encoding: .utf8)!
         var outJson: UnsafeMutablePointer<CChar>?
         let rc = id.withCString { idPtr in
@@ -138,7 +180,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode(Server.self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON(Server.self, from: json)
     }
 
     func deleteServer(id: String) throws {
@@ -151,7 +193,7 @@ class OrbitBridge {
 
     func testConnection(input: ServerInput) throws -> Bool {
         try ensureInitialized()
-        let jsonData = try JSONEncoder().encode(input)
+        let jsonData = try Self.encoder.encode(input)
         let jsonString = String(data: jsonData, encoding: .utf8)!
         let rc = jsonString.withCString { inputPtr in
             orbit_test_connection(app, inputPtr)
@@ -169,12 +211,12 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([CredentialGroup].self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON([CredentialGroup].self, from: json)
     }
 
     func addCredentialGroup(input: CredentialGroupInput) throws -> CredentialGroup {
         try ensureInitialized()
-        let jsonData = try JSONEncoder().encode(input)
+        let jsonData = try Self.encoder.encode(input)
         let jsonString = String(data: jsonData, encoding: .utf8)!
         var outJson: UnsafeMutablePointer<CChar>?
         let rc = jsonString.withCString { inputPtr in
@@ -184,12 +226,12 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode(CredentialGroup.self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON(CredentialGroup.self, from: json)
     }
 
     func updateCredentialGroup(id: String, input: CredentialGroupInput) throws -> CredentialGroup {
         try ensureInitialized()
-        let jsonData = try JSONEncoder().encode(input)
+        let jsonData = try Self.encoder.encode(input)
         let jsonString = String(data: jsonData, encoding: .utf8)!
         var outJson: UnsafeMutablePointer<CChar>?
         let rc = id.withCString { idPtr in
@@ -201,7 +243,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode(CredentialGroup.self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON(CredentialGroup.self, from: json)
     }
 
     func deleteCredentialGroup(id: String) throws {
@@ -243,10 +285,20 @@ class OrbitBridge {
             orbit_connect_ssh(app, sidPtr, orbitDataCallback, orbitClosedCallback, selfPtr, &outSessionId)
         }
         guard rc == 0, let sessionId = outSessionId else {
-            throw OrbitError.apiError(rc)
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
         }
         defer { orbit_free_string(sessionId) }
         return String(cString: sessionId)
+    }
+
+    func lastErrorMessage() -> String? {
+        guard let app = app else { return nil }
+        var outError: UnsafeMutablePointer<CChar>?
+        let rc = orbit_get_last_error(app, &outError)
+        guard rc == 0, let error = outError else { return nil }
+        defer { orbit_free_string(error) }
+        let message = String(cString: error)
+        return message.isEmpty ? nil : message
     }
 
     func spawnChannel(existingSessionId: String) throws -> String {
@@ -325,7 +377,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        let result = try JSONDecoder().decode([FileEntry].self, from: String(cString: json).data(using: .utf8)!)
+        let result = try Self.decodeJSON([FileEntry].self, from: json)
         print("[OrbitBridge] sftpListFull OK path=\(path) entries=\(result.count)")
         return result
     }
@@ -353,6 +405,31 @@ class OrbitBridge {
                 }
             }
         }
+        guard rc == 0 else { throw OrbitError.apiError(rc) }
+    }
+
+    func sftpUploadWithProgress(serverId: String, localPath: String, remotePath: String, progress: @escaping (UInt64, UInt64) -> Void) throws {
+        try ensureInitialized()
+
+        class ProgressContext {
+            let callback: (UInt64, UInt64) -> Void
+            init(callback: @escaping (UInt64, UInt64) -> Void) { self.callback = callback }
+        }
+        let ctx = ProgressContext(callback: progress)
+        let ctxPtr = Unmanaged.passRetained(ctx).toOpaque()
+
+        let rc = serverId.withCString { sidPtr in
+            localPath.withCString { localPtr in
+                remotePath.withCString { remotePtr in
+                    orbit_sftp_upload(app, sidPtr, localPtr, remotePtr, { sidPtr, transferred, total, userdata in
+                        guard let userdata = userdata else { return }
+                        let ctx = Unmanaged<ProgressContext>.fromOpaque(userdata).takeUnretainedValue()
+                        ctx.callback(transferred, total)
+                    }, ctxPtr)
+                }
+            }
+        }
+        Unmanaged<ProgressContext>.fromOpaque(ctxPtr).release()
         guard rc == 0 else { throw OrbitError.apiError(rc) }
     }
 
@@ -445,7 +522,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode(ServerStats.self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON(ServerStats.self, from: json)
     }
 
     func getServerHome(serverId: String) throws -> String {
@@ -475,7 +552,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([ServerProcess].self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON([ServerProcess].self, from: json)
     }
 
     // MARK: - Docker
@@ -494,7 +571,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([DockerContainer].self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON([DockerContainer].self, from: json)
     }
 
     func getDockerStatsAsync(serverId: String) async throws -> [DockerContainerStats] {
@@ -511,7 +588,7 @@ class OrbitBridge {
             throw OrbitError.apiError(rc)
         }
         defer { orbit_free_string(json) }
-        return try JSONDecoder().decode([DockerContainerStats].self, from: String(cString: json).data(using: .utf8)!)
+        return try Self.decodeJSON([DockerContainerStats].self, from: json)
     }
 
     func getDockerLogsAsync(serverId: String, containerId: String, tail: UInt32 = 200) async throws -> String {
@@ -555,18 +632,99 @@ class OrbitBridge {
         defer { orbit_free_string(output) }
         return String(cString: output)
     }
+
+    func exportConfig() throws -> String {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = orbit_export_config(app, &outJson)
+        guard rc == 0, let json = outJson else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(json) }
+        return String(cString: json)
+    }
+
+    func importConfig(jsonContent: String, strategy: Int32) throws -> Int32 {
+        try ensureInitialized()
+        var importedCount: Int32 = 0
+        let rc = jsonContent.withCString { jsonPtr in
+            orbit_import_config(app, jsonPtr, strategy, &importedCount)
+        }
+        guard rc == 0 else {
+            throw OrbitError.apiError(rc)
+        }
+        return importedCount
+    }
+
+    @discardableResult
+    func execCommand(serverId: String, command: String, timeoutMs: UInt32 = 30000) throws -> String {
+        try ensureInitialized()
+        var outOutput: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { sidPtr in
+            command.withCString { cmdPtr in
+                orbit_exec_command(app, sidPtr, cmdPtr, timeoutMs, &outOutput)
+            }
+        }
+        guard rc == 0, let output = outOutput else {
+            throw OrbitError.apiError(rc)
+        }
+        defer { orbit_free_string(output) }
+        return String(cString: output)
+    }
+
+    @discardableResult
+    func startPortForward(forwardingId: String, serverId: String, localPort: UInt16, remoteHost: String, remotePort: UInt16) throws -> UInt16 {
+        try ensureInitialized()
+        var actualPort: UInt16 = 0
+        let rc = forwardingId.withCString { fidPtr in
+            serverId.withCString { sidPtr in
+                remoteHost.withCString { rhostPtr in
+                    orbit_start_port_forward(app, fidPtr, sidPtr, localPort, rhostPtr, remotePort, &actualPort)
+                }
+            }
+        }
+        guard rc == 0 else {
+            throw OrbitError.apiError(rc)
+        }
+        return actualPort
+    }
+
+    func stopPortForward(forwardingId: String) throws {
+        try ensureInitialized()
+        let rc = forwardingId.withCString { fidPtr in
+            orbit_stop_port_forward(app, fidPtr)
+        }
+        guard rc == 0 else {
+            throw OrbitError.apiError(rc)
+        }
+    }
+
+    @discardableResult
+    func startPortForwardAsync(forwardingId: String, serverId: String, localPort: UInt16, remoteHost: String, remotePort: UInt16) async throws -> UInt16 {
+        try await runOffThread { try self.startPortForward(forwardingId: forwardingId, serverId: serverId, localPort: localPort, remoteHost: remoteHost, remotePort: remotePort) }
+    }
+
+    func stopPortForwardAsync(forwardingId: String) async throws {
+        try await runOffThread { try self.stopPortForward(forwardingId: forwardingId) }
+    }
 }
 
 enum OrbitError: LocalizedError {
     case notInitialized
     case initializationFailed
     case apiError(Int32)
+    case apiErrorWithMessage(Int32, String?)
 
     var errorDescription: String? {
         switch self {
         case .notInitialized: return "OrbitApp not initialized"
         case .initializationFailed: return "Failed to initialize OrbitApp"
         case .apiError(let rc): return "API error: code \(rc)"
+        case .apiErrorWithMessage(let rc, let message):
+            if let message, !message.isEmpty {
+                return "API error: code \(rc) - \(message)"
+            }
+            return "API error: code \(rc)"
         }
     }
 }
