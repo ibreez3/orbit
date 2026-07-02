@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Changed
-- Clarified that GitHub Actions builds and uploads release DMGs; local DMGs are only for smoke testing.
-
 ## [v0.0.6-pre] - 2026-07-02
 
 ### Added
@@ -12,7 +9,6 @@
 - Snippet template variables for host, user, port, server name, and group.
 - Batch command execution with concurrency, timeout, cancellation, and result status.
 - Local port forwarding rules backed by SSH tunnel start/stop APIs.
-- App entitlement verification and local DMG verification scripts.
 
 ### Changed
 - Split the previous monolithic AppState into focused state objects to reduce SwiftUI recomputation.

@@ -55,6 +55,20 @@ cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration
 cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -arch arm64 build
 ```
 
+## 发布流程（Agent / 维护者）
+
+预览版本使用类似 `v0.0.6-pre` 的 tag。
+
+1. 更新 `orbit-app/project.yml` 中的版本字段。
+2. 运行 `cd orbit-app && xcodegen generate && cd ..` 重新生成 Xcode 工程。
+3. 运行本地验证，例如 `make build-app` 和 Rust 测试。
+4. 提交到 `develop` 并推送分支。
+5. 创建并推送 release tag。
+6. 创建 GitHub prerelease，只填写 release notes。
+7. 交给 `Release DMG` GitHub Action 构建、验证并上传 Apple Silicon DMG。
+
+不要把本地构建的 DMG 上传到 GitHub Releases。本地 DMG 仅用于冒烟验证。
+
 ## 项目结构
 
 ```
