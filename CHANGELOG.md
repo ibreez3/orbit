@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Clarified that GitHub Actions builds and uploads release DMGs; local DMGs are only for smoke testing.
+
 ## [v0.0.6-pre] - 2026-07-02
 
 ### Added

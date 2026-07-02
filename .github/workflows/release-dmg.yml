@@ -1,11 +1,6 @@
 name: Release DMG
 
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - ".github/workflows/release-dmg.yml"
   workflow_dispatch:
     inputs:
       tag:

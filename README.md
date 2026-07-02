@@ -86,7 +86,8 @@ cd orbit
 # Generate the Xcode project, build Release, and verify signing/entitlements.
 make build-app
 
-# Build a local DMG and verify the mounted app bundle.
+# Optional: build a local DMG for smoke testing only.
+# GitHub Releases use the DMG built by GitHub Actions.
 make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
 
 # Open the project for development.
@@ -130,12 +131,13 @@ Preview releases use tags such as `v0.0.6-pre`.
 
 1. Update `orbit-app/project.yml` version fields.
 2. Regenerate the Xcode project with `xcodegen generate`.
-3. Run `make build-dmg`.
-4. Commit to `develop`.
+3. Run local verification, for example `make build-app` and Rust tests.
+4. Commit to `develop` and push the branch.
 5. Create and push the release tag.
-6. Publish a GitHub prerelease and upload the Apple Silicon DMG.
+6. Publish a GitHub prerelease with release notes only.
+7. Let the `Release DMG` GitHub Action build, verify, and upload the Apple Silicon DMG.
 
-The release workflow can also build and upload a DMG when a GitHub Release is published.
+Do not upload a locally built DMG to GitHub Releases. Local DMGs are only for smoke testing.
 
 ### Security Notes
 
@@ -235,7 +237,8 @@ cd orbit
 # 生成 Xcode 工程、构建 Release，并验证签名和关键权限
 make build-app
 
-# 构建本地 DMG，并验证挂载后的 app
+# 可选：构建本地 DMG，仅用于冒烟验证。
+# GitHub Release 使用 GitHub Actions 构建出的 DMG。
 make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
 
 # 打开 Xcode 工程进行开发
@@ -279,12 +282,13 @@ orbit/
 
 1. 更新 `orbit-app/project.yml` 中的版本字段。
 2. 运行 `xcodegen generate` 重新生成 Xcode 工程。
-3. 运行 `make build-dmg`。
-4. 提交到 `develop`。
+3. 运行本地验证，例如 `make build-app` 和 Rust 测试。
+4. 提交到 `develop` 并推送分支。
 5. 创建并推送 release tag。
-6. 创建 GitHub prerelease，并上传 Apple Silicon DMG。
+6. 创建 GitHub prerelease，只填写 release notes。
+7. 交给 `Release DMG` GitHub Action 构建、验证并上传 Apple Silicon DMG。
 
-GitHub Release 发布后，release workflow 也可以构建并上传 DMG。
+不要把本地构建的 DMG 上传到 GitHub Releases。本地 DMG 仅用于冒烟验证。
 
 ### 安全说明
 
