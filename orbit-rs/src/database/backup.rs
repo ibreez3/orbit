@@ -88,6 +88,33 @@ pub fn table_to_backup_rows(
     }
 }
 
+pub fn sqlite_json_rows_to_backup_table(
+    table: &DatabaseTableSchema,
+    rows: Vec<HashMap<String, serde_json::Value>>,
+) -> DatabaseBackupTable {
+    let backup_rows = rows
+        .into_iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .map(|column| {
+                    (
+                        column.name.clone(),
+                        json_value_to_string(row.get(&column.name)),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .collect();
+
+    DatabaseBackupTable {
+        name: table.name.clone(),
+        columns: table.columns.clone(),
+        rows: backup_rows,
+    }
+}
+
 pub fn create_backup_record(
     db: &Database,
     connection: &DatabaseConnection,
@@ -213,9 +240,21 @@ fn sanitize_filename(value: &str) -> String {
     sanitized.trim_matches('-').to_string()
 }
 
+fn json_value_to_string(value: Option<&serde_json::Value>) -> Option<String> {
+    match value {
+        Some(serde_json::Value::Null) | None => None,
+        Some(serde_json::Value::String(value)) => Some(value.clone()),
+        Some(value) => Some(value.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::database::models::DatabaseBackupArtifact;
+    use super::sqlite_json_rows_to_backup_table;
+
+    use crate::database::models::{
+        DatabaseBackupArtifact, DatabaseColumnSchema, DatabaseTableSchema,
+    };
 
     #[test]
     fn backup_artifact_round_trips_schema_and_rows() {
@@ -234,5 +273,35 @@ mod tests {
             parsed.tables[0].rows[0].get("system").unwrap().as_deref(),
             Some("prod")
         );
+    }
+
+    #[test]
+    fn sqlite_json_rows_are_mapped_by_schema_column_name() {
+        let table = DatabaseTableSchema {
+            name: "sample".into(),
+            columns: vec![
+                DatabaseColumnSchema {
+                    name: "a".into(),
+                    db_type: "TEXT".into(),
+                    nullable: true,
+                    primary_key: false,
+                    default_value: None,
+                },
+                DatabaseColumnSchema {
+                    name: "b".into(),
+                    db_type: "TEXT".into(),
+                    nullable: true,
+                    primary_key: false,
+                    default_value: None,
+                },
+            ],
+        };
+        let rows = serde_json::from_str(r#"[{ "b": "value-b", "a": "value-a" }]"#)
+            .expect("sqlite json rows");
+
+        let backup = sqlite_json_rows_to_backup_table(&table, rows);
+
+        assert_eq!(backup.rows[0].get("a").unwrap().as_deref(), Some("value-a"));
+        assert_eq!(backup.rows[0].get("b").unwrap().as_deref(), Some("value-b"));
     }
 }
