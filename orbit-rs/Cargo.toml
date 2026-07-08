@@ -18,6 +18,8 @@ tokio = { version = "1", features = ["full"] }
 ssh2 = "0.9"
 openssl-sys = { version = "0.9", features = ["vendored"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+mysql = "25"
+postgres = "0.19"
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }

@@ -47,6 +47,20 @@ ORBIT_API int32_t orbit_db_delete_connection(struct OrbitApp *app, const char *i
 
 ORBIT_API int32_t orbit_db_list_backup_records(struct OrbitApp *app, char **out_json);
 
+ORBIT_API int32_t orbit_db_test_connection(struct OrbitApp *app, const char *id, bool install_sqlite, char **out_json);
+
+ORBIT_API int32_t orbit_db_list_schema(struct OrbitApp *app, const char *connection_id, char **out_json);
+
+ORBIT_API int32_t orbit_db_execute(struct OrbitApp *app, const char *connection_id, const char *json_request, char **out_json);
+
+ORBIT_API int32_t orbit_db_backup(struct OrbitApp *app, const char *connection_id, char **out_json);
+
+ORBIT_API int32_t orbit_db_restore(struct OrbitApp *app, const char *json_request, char **out_json);
+
+ORBIT_API int32_t orbit_db_prepare_import(struct OrbitApp *app, const char *backup_path, const char *target_connection_id, const char *mode, char **out_json);
+
+ORBIT_API int32_t orbit_db_run_import(struct OrbitApp *app, const char *json_request, char **out_json);
+
 ORBIT_API int32_t orbit_test_connection(struct OrbitApp *app, const char *json_input);
 
 ORBIT_API int32_t orbit_connect_ssh(struct OrbitApp *app, const char *server_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);

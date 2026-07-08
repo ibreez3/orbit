@@ -4,9 +4,13 @@ use std::net::{TcpListener, TcpStream};
 use std::os::raw::c_char;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::database::{DatabaseConnectionInput, DatabaseStore};
+use crate::database::models::{
+    DatabaseImportRequest, DatabaseQueryRequest, DatabaseRestoreRequest,
+};
+use crate::database::{DatabaseConnectionInput, DatabaseManager, DatabaseStore};
 use crate::docker;
 use crate::models::*;
 use crate::monitor;
@@ -360,6 +364,109 @@ pub extern "C" fn orbit_db_list_backup_records(
             -2
         }
     }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_test_connection(
+    app: *mut OrbitApp,
+    id: *const c_char,
+    install_sqlite: bool,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        let id = cstr_to_str(id, "数据库连接 ID")?;
+        DatabaseManager::test_connection(&app.db, &app.pool, id, install_sqlite)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_list_schema(
+    app: *mut OrbitApp,
+    connection_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        let connection_id = cstr_to_str(connection_id, "数据库连接 ID")?;
+        DatabaseManager::list_schema(&app.db, &app.pool, connection_id)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_execute(
+    app: *mut OrbitApp,
+    connection_id: *const c_char,
+    json_request: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        let connection_id = cstr_to_str(connection_id, "数据库连接 ID")?;
+        if json_request.is_null() {
+            return Err(anyhow::anyhow!("数据库查询请求为空"));
+        }
+        let request = parse_json_input_with_error::<DatabaseQueryRequest>(json_request)
+            .map_err(anyhow::Error::msg)?;
+        DatabaseManager::execute(&app.db, &app.pool, connection_id, &request)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_backup(
+    app: *mut OrbitApp,
+    connection_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        let connection_id = cstr_to_str(connection_id, "数据库连接 ID")?;
+        DatabaseManager::backup(&app.db, &app.pool, connection_id)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_restore(
+    app: *mut OrbitApp,
+    json_request: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        if json_request.is_null() {
+            return Err(anyhow::anyhow!("数据库恢复请求为空"));
+        }
+        let request = parse_json_input_with_error::<DatabaseRestoreRequest>(json_request)
+            .map_err(anyhow::Error::msg)?;
+        DatabaseManager::restore(&app.db, &app.pool, &request)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_prepare_import(
+    app: *mut OrbitApp,
+    backup_path: *const c_char,
+    target_connection_id: *const c_char,
+    mode: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        let backup_path = cstr_to_str(backup_path, "备份路径")?;
+        let target_connection_id = cstr_to_str(target_connection_id, "目标数据库连接 ID")?;
+        let mode = cstr_to_str(mode, "导入模式")?;
+        DatabaseManager::prepare_import(&app.db, backup_path, target_connection_id, mode)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_run_import(
+    app: *mut OrbitApp,
+    json_request: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        if json_request.is_null() {
+            return Err(anyhow::anyhow!("数据库导入请求为空"));
+        }
+        let request = parse_json_input_with_error::<DatabaseImportRequest>(json_request)
+            .map_err(anyhow::Error::msg)?;
+        DatabaseManager::run_import(&app.db, &request)
+    })
 }
 
 #[no_mangle]
@@ -1374,33 +1481,53 @@ pub extern "C" fn orbit_start_port_forward(
         return -1;
     }
     let app = unsafe { &*app };
+    app.clear_error();
     let fid = match unsafe { CStr::from_ptr(forwarding_id) }.to_str() {
         Ok(s) => s,
-        Err(_) => return -2,
+        Err(e) => {
+            app.set_error(format!("端口转发 ID 不是有效 UTF-8: {}", e));
+            return -2;
+        }
     };
     let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
         Ok(s) => s,
-        Err(_) => return -2,
+        Err(e) => {
+            app.set_error(format!("服务器 ID 不是有效 UTF-8: {}", e));
+            return -2;
+        }
     };
     let rhost = match unsafe { CStr::from_ptr(remote_host) }.to_str() {
         Ok(s) => s,
-        Err(_) => return -2,
+        Err(e) => {
+            app.set_error(format!("远端地址不是有效 UTF-8: {}", e));
+            return -2;
+        }
     };
     let server = match app.db.get_server(sid) {
         Ok(s) => s,
-        Err(_) => return -3,
+        Err(e) => {
+            app.set_error(format!("服务器配置读取失败: {}", e));
+            return -3;
+        }
     };
 
     let guard = match crate::transport::create_session(&server, &app.db) {
         Ok(g) => g,
-        Err(_) => return -4,
+        Err(e) => {
+            app.set_error(format!("SSH 连接失败: {}", e));
+            return -4;
+        }
     };
 
     let listener = match TcpListener::bind(format!("127.0.0.1:{}", local_port)) {
         Ok(l) => l,
-        Err(_) => return -6,
+        Err(e) => {
+            app.set_error(format!("本地端口 127.0.0.1:{} 绑定失败: {}", local_port, e));
+            return -6;
+        }
     };
     if listener.set_nonblocking(true).is_err() {
+        app.set_error("本地监听 socket 设置非阻塞模式失败");
         return -6;
     }
     let actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
@@ -1411,32 +1538,57 @@ pub extern "C" fn orbit_start_port_forward(
     {
         let mut mgr = match app.ssh.lock() {
             Ok(m) => m,
-            Err(_) => return -7,
+            Err(e) => {
+                app.set_error(format!("SSH 会话管理器锁定失败: {}", e));
+                return -7;
+            }
         };
         mgr.register_port_forward(fid, running);
     }
 
-    std::thread::spawn(move || {
-        guard.session.set_blocking(false);
+    guard.session.set_blocking(false);
+    let session = guard.session.clone();
+    let channel_open_lock = Arc::new(std::sync::Mutex::new(()));
 
-        while run.load(Ordering::Relaxed) {
+    let open_lock = channel_open_lock.clone();
+    spawn_port_forward_listener(listener, run, guard, move |local_tcp, run| {
+        let Ok(channel_open_guard) = open_lock.lock() else {
+            return;
+        };
+        let Some(channel) = open_port_forward_channel(&session, &remote_host, remote_port, &run)
+        else {
+            return;
+        };
+        drop(channel_open_guard);
+        proxy_port_forward_connection(local_tcp, channel, run);
+    });
+
+    unsafe { *out_local_port = actual_port };
+    0
+}
+
+fn spawn_port_forward_listener<F, K>(
+    listener: TcpListener,
+    running: Arc<AtomicBool>,
+    keep_alive: K,
+    on_connection: F,
+) -> std::thread::JoinHandle<()>
+where
+    F: Fn(TcpStream, Arc<AtomicBool>) + Send + Sync + 'static,
+    K: Send + 'static,
+{
+    let on_connection = Arc::new(on_connection);
+    std::thread::spawn(move || {
+        let _keep_alive = keep_alive;
+        while running.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((local_tcp, _)) => {
-                    let channel = match guard.session.channel_direct_tcpip(
-                        &remote_host,
-                        remote_port,
-                        None,
-                    ) {
-                        Ok(ch) => ch,
-                        Err(e) => {
-                            error!(target: "orbit::ffi", error = %e, "端口转发远端通道创建失败");
-                            continue;
-                        }
-                    };
-                    proxy_port_forward_connection(local_tcp, channel, run.clone());
+                    let handler = on_connection.clone();
+                    let run = running.clone();
+                    std::thread::spawn(move || handler(local_tcp, run));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    std::thread::sleep(Duration::from_millis(50));
                 }
                 Err(e) => {
                     error!(target: "orbit::ffi", error = %e, "端口转发 accept 失败");
@@ -1444,10 +1596,40 @@ pub extern "C" fn orbit_start_port_forward(
                 }
             }
         }
-    });
+    })
+}
 
-    unsafe { *out_local_port = actual_port };
-    0
+fn open_port_forward_channel(
+    session: &ssh2::Session,
+    remote_host: &str,
+    remote_port: u16,
+    running: &Arc<AtomicBool>,
+) -> Option<ssh2::Channel> {
+    let mut idle_sleep = Duration::from_micros(500);
+    const MIN_IDLE_SLEEP: Duration = Duration::from_micros(500);
+    const MAX_IDLE_SLEEP: Duration = Duration::from_millis(10);
+
+    while running.load(Ordering::Relaxed) {
+        match session.channel_direct_tcpip(remote_host, remote_port, None) {
+            Ok(channel) => return Some(channel),
+            Err(e) if ssh_error_would_block(&e) => {
+                std::thread::sleep(idle_sleep);
+                idle_sleep = std::cmp::min(idle_sleep * 2, MAX_IDLE_SLEEP);
+            }
+            Err(e) => {
+                error!(target: "orbit::ffi", error = %e, "端口转发远端通道创建失败");
+                return None;
+            }
+        }
+        if idle_sleep < MIN_IDLE_SLEEP {
+            idle_sleep = MIN_IDLE_SLEEP;
+        }
+    }
+    None
+}
+
+fn ssh_error_would_block(error: &ssh2::Error) -> bool {
+    error.code() == ssh2::ErrorCode::Session(-37)
 }
 
 fn proxy_port_forward_connection(
@@ -1519,6 +1701,42 @@ fn proxy_port_forward_connection(
             std::thread::sleep(idle_sleep);
             idle_sleep = std::cmp::min(idle_sleep * 2, MAX_IDLE_SLEEP);
         }
+    }
+}
+
+#[cfg(test)]
+mod port_forward_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
+
+    #[test]
+    fn listener_accepts_second_connection_while_first_proxy_is_active() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let running = std::sync::Arc::new(AtomicBool::new(true));
+        let connection_count = std::sync::Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = mpsc::channel();
+        let count_for_handler = connection_count.clone();
+
+        let handle =
+            spawn_port_forward_listener(listener, running.clone(), (), move |_tcp, run| {
+                let index = count_for_handler.fetch_add(1, Ordering::SeqCst) + 1;
+                tx.send(index).unwrap();
+                while index == 1 && run.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            });
+
+        let _first = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 1);
+
+        let _second = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), 2);
+
+        running.store(false, Ordering::Relaxed);
+        handle.join().unwrap();
     }
 }
 
@@ -1714,6 +1932,45 @@ fn parse_json_input_with_error<T: serde::de::DeserializeOwned>(
         .to_str()
         .map_err(|e| format!("输入不是有效 UTF-8: {}", e))?;
     serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+fn cstr_to_str<'a>(value: *const c_char, label: &str) -> anyhow::Result<&'a str> {
+    if value.is_null() {
+        return Err(anyhow::anyhow!("{} 为空", label));
+    }
+    unsafe { CStr::from_ptr(value) }
+        .to_str()
+        .map_err(|e| anyhow::anyhow!("{} 不是有效 UTF-8: {}", label, e))
+}
+
+fn database_json_operation<T: serde::Serialize>(
+    app: *mut OrbitApp,
+    out_json: *mut *mut c_char,
+    operation: impl FnOnce(&OrbitApp) -> anyhow::Result<T>,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if out_json.is_null() {
+        app.set_error("数据库操作输出指针为空");
+        return -1;
+    }
+
+    match operation(app) {
+        Ok(value) => {
+            let code = json_to_out(&value, out_json);
+            if code != 0 {
+                app.set_error("序列化数据库操作结果失败");
+            }
+            code
+        }
+        Err(e) => {
+            app.set_error(format!("数据库操作失败: {}", e));
+            -2
+        }
+    }
 }
 
 fn json_to_out<T: serde::Serialize>(value: &T, out: *mut *mut c_char) -> i32 {

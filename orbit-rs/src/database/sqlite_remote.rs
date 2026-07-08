@@ -1,6 +1,11 @@
+use std::collections::HashMap;
+use std::time::Instant;
+
 use anyhow::{anyhow, Result};
 
-use crate::database::models::DatabaseOperationResult;
+use crate::database::models::{
+    DatabaseColumnSchema, DatabaseOperationResult, DatabaseQueryResult, DatabaseTableSchema,
+};
 use crate::database::sql::is_write_statement;
 use crate::db::Database;
 use crate::models::Server;
@@ -116,7 +121,7 @@ impl SqliteRemote {
         })
     }
 
-    pub fn list_schema(
+    pub fn list_table_names(
         pool: &transport::SessionPool,
         server: &Server,
         db: &Database,
@@ -127,7 +132,69 @@ impl SqliteRemote {
         ssh::SshManager::exec_command(pool, server, db, &command)
     }
 
-    pub fn execute(
+    pub fn table_info(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        sqlite_path: &str,
+        table_name: &str,
+    ) -> Result<String> {
+        let sql = format!("PRAGMA table_info({})", sqlite_ident(table_name));
+        let command = SqliteRemoteCommand::read(sqlite_path, &sql).to_shell();
+        ssh::SshManager::exec_command(pool, server, db, &command)
+    }
+
+    pub fn list_schema(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        sqlite_path: &str,
+    ) -> Result<Vec<DatabaseTableSchema>> {
+        let tables_json = Self::list_table_names(pool, server, db, sqlite_path)?;
+        let table_rows: Vec<HashMap<String, serde_json::Value>> =
+            serde_json::from_str(&tables_json).unwrap_or_default();
+        let mut tables = Vec::new();
+        for row in table_rows {
+            let Some(name) = row.get("name").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            let info_json = Self::table_info(pool, server, db, sqlite_path, name)?;
+            let info_rows: Vec<HashMap<String, serde_json::Value>> =
+                serde_json::from_str(&info_json).unwrap_or_default();
+            let columns = info_rows
+                .into_iter()
+                .filter_map(|info| {
+                    let name = info.get("name")?.as_str()?.to_string();
+                    Some(DatabaseColumnSchema {
+                        name,
+                        db_type: info
+                            .get("type")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("TEXT")
+                            .to_string(),
+                        nullable: info
+                            .get("notnull")
+                            .and_then(|value| value.as_i64())
+                            .unwrap_or(0)
+                            == 0,
+                        primary_key: info.get("pk").and_then(|value| value.as_i64()).unwrap_or(0)
+                            != 0,
+                        default_value: info
+                            .get("dflt_value")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                    })
+                })
+                .collect();
+            tables.push(DatabaseTableSchema {
+                name: name.to_string(),
+                columns,
+            });
+        }
+        Ok(tables)
+    }
+
+    pub fn execute_raw(
         pool: &transport::SessionPool,
         server: &Server,
         db: &Database,
@@ -143,6 +210,58 @@ impl SqliteRemote {
         ssh::SshManager::exec_command(pool, server, db, &command)
     }
 
+    pub fn execute(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        sqlite_path: &str,
+        sql: &str,
+    ) -> Result<DatabaseQueryResult> {
+        let started = Instant::now();
+        let write_statement = is_write_statement(sql);
+        let output = Self::execute_raw(pool, server, db, sqlite_path, sql)?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+
+        if write_statement {
+            let rows: Vec<HashMap<String, serde_json::Value>> =
+                serde_json::from_str(&output).unwrap_or_default();
+            let affected_rows = rows
+                .first()
+                .and_then(|row| row.get("affected_rows"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            return Ok(DatabaseQueryResult::empty_message(
+                "Query executed",
+                affected_rows,
+                elapsed_ms,
+            ));
+        }
+
+        let rows: Vec<HashMap<String, serde_json::Value>> =
+            serde_json::from_str(&output).unwrap_or_default();
+        let columns = rows
+            .first()
+            .map(|row| row.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let result_rows = rows
+            .into_iter()
+            .map(|row| {
+                columns
+                    .iter()
+                    .map(|column| json_value_to_string(row.get(column)))
+                    .collect()
+            })
+            .collect();
+
+        Ok(DatabaseQueryResult {
+            columns,
+            rows: result_rows,
+            affected_rows: 0,
+            elapsed_ms,
+            message: String::new(),
+        })
+    }
+
     fn detect_package_manager(
         pool: &transport::SessionPool,
         server: &Server,
@@ -156,6 +275,18 @@ impl SqliteRemote {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string))
+    }
+}
+
+fn sqlite_ident(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+fn json_value_to_string(value: Option<&serde_json::Value>) -> Option<String> {
+    match value {
+        Some(serde_json::Value::Null) | None => None,
+        Some(serde_json::Value::String(value)) => Some(value.clone()),
+        Some(value) => Some(value.to_string()),
     }
 }
 
@@ -295,8 +426,8 @@ mod tests {
 
         assert!(!result.ok);
         assert_eq!(result.code, "sqlite_missing");
-        assert!(result.message.contains(
-            "Suggested command: sudo apt-get update && sudo apt-get install -y sqlite3"
-        ));
+        assert!(result
+            .message
+            .contains("Suggested command: sudo apt-get update && sudo apt-get install -y sqlite3"));
     }
 }

@@ -2,7 +2,11 @@ use std::collections::HashSet;
 
 use anyhow::{anyhow, Result};
 
-use crate::database::models::DatabaseImportPlan;
+use crate::database::models::{
+    DatabaseBackupArtifact, DatabaseImportColumnMapping, DatabaseImportPlan,
+    DatabaseImportTablePlan, DatabaseTableSchema,
+};
+use crate::database::sql::mysql_type_for_sqlite;
 
 pub fn validate_mysql_import_plan(plan: &DatabaseImportPlan) -> Result<()> {
     if plan.backup_path.trim().is_empty() {
@@ -67,6 +71,100 @@ pub fn validate_mysql_import_plan(plan: &DatabaseImportPlan) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn prepare_new_table_import_plan(
+    artifact: &DatabaseBackupArtifact,
+    backup_path: &str,
+    target_connection_id: &str,
+) -> DatabaseImportPlan {
+    DatabaseImportPlan {
+        backup_path: backup_path.into(),
+        target_connection_id: target_connection_id.into(),
+        mode: "new_table".into(),
+        tables: artifact
+            .tables
+            .iter()
+            .map(|table| DatabaseImportTablePlan {
+                source_table: table.name.clone(),
+                target_table: table.name.clone(),
+                columns: table
+                    .columns
+                    .iter()
+                    .map(|column| DatabaseImportColumnMapping {
+                        source_column: column.name.clone(),
+                        target_column: Some(column.name.clone()),
+                        target_type: mysql_type_for_sqlite(&column.db_type),
+                        required_without_default: false,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+pub fn prepare_existing_table_import_plan(
+    artifact: &DatabaseBackupArtifact,
+    backup_path: &str,
+    target_connection_id: &str,
+    target_schema: &[DatabaseTableSchema],
+) -> DatabaseImportPlan {
+    DatabaseImportPlan {
+        backup_path: backup_path.into(),
+        target_connection_id: target_connection_id.into(),
+        mode: "existing_table".into(),
+        tables: artifact
+            .tables
+            .iter()
+            .filter_map(|source_table| {
+                let target_table = target_schema
+                    .iter()
+                    .find(|table| table.name.eq_ignore_ascii_case(&source_table.name))?;
+                let mut mappings = source_table
+                    .columns
+                    .iter()
+                    .map(|source_column| {
+                        let target_column = target_table
+                            .columns
+                            .iter()
+                            .find(|column| column.name.eq_ignore_ascii_case(&source_column.name))
+                            .map(|column| column.name.clone());
+                        DatabaseImportColumnMapping {
+                            source_column: source_column.name.clone(),
+                            target_column,
+                            target_type: mysql_type_for_sqlite(&source_column.db_type),
+                            required_without_default: false,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                for target_column in &target_table.columns {
+                    let mapped = mappings.iter().any(|mapping| {
+                        mapping
+                            .target_column
+                            .as_deref()
+                            .is_some_and(|name| name.eq_ignore_ascii_case(&target_column.name))
+                    });
+                    let required_without_default =
+                        !target_column.nullable && target_column.default_value.is_none();
+                    if required_without_default && !mapped {
+                        mappings.push(DatabaseImportColumnMapping {
+                            source_column: String::new(),
+                            target_column: Some(target_column.name.clone()),
+                            target_type: target_column.db_type.clone(),
+                            required_without_default: true,
+                        });
+                    }
+                }
+
+                Some(DatabaseImportTablePlan {
+                    source_table: source_table.name.clone(),
+                    target_table: target_table.name.clone(),
+                    columns: mappings,
+                })
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]
