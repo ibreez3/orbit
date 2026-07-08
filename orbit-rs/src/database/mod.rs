@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 
 use crate::database::backup::{
     artifact_from_tables, backup_path_for, create_backup_record, insert_rows_sql, quote_ident,
-    read_artifact, sqlite_json_rows_to_backup_table, write_artifact,
+    read_artifact, sqlite_rows_to_backup_table, write_artifact,
 };
 use crate::database::import_mysql::{
     prepare_existing_table_import_plan, prepare_new_table_import_plan, validate_mysql_import_plan,
@@ -30,7 +30,7 @@ use crate::database::models::{
 };
 use crate::database::mysql::MysqlEngine;
 use crate::database::postgres::PostgresEngine;
-use crate::database::sqlite_remote::{parse_sqlite_json, SqliteRemote};
+use crate::database::sqlite_remote::{parse_sqlite_output, SqliteRemote};
 use crate::db::Database;
 use crate::transport;
 
@@ -135,9 +135,12 @@ impl DatabaseManager {
                         &connection.sqlite_path,
                         &sql,
                     )?;
-                    let rows: Vec<std::collections::HashMap<String, serde_json::Value>> =
-                        parse_sqlite_json(&format!("backup SQLite table {}", table.name), &output)?;
-                    tables.push(sqlite_json_rows_to_backup_table(&table, rows));
+                    let rows = parse_sqlite_output(
+                        &format!("backup SQLite table {}", table.name),
+                        &output,
+                    )?
+                    .row_maps();
+                    tables.push(sqlite_rows_to_backup_table(&table, rows));
                 }
                 tables
             }

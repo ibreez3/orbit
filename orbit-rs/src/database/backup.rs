@@ -115,6 +115,33 @@ pub fn sqlite_json_rows_to_backup_table(
     }
 }
 
+pub fn sqlite_rows_to_backup_table(
+    table: &DatabaseTableSchema,
+    rows: Vec<HashMap<String, Option<String>>>,
+) -> DatabaseBackupTable {
+    let backup_rows = rows
+        .into_iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .map(|column| {
+                    (
+                        column.name.clone(),
+                        row.get(&column.name).cloned().unwrap_or(None),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .collect();
+
+    DatabaseBackupTable {
+        name: table.name.clone(),
+        columns: table.columns.clone(),
+        rows: backup_rows,
+    }
+}
+
 pub fn create_backup_record(
     db: &Database,
     connection: &DatabaseConnection,
@@ -250,7 +277,9 @@ fn json_value_to_string(value: Option<&serde_json::Value>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::sqlite_json_rows_to_backup_table;
+    use std::collections::HashMap;
+
+    use super::{sqlite_json_rows_to_backup_table, sqlite_rows_to_backup_table};
 
     use crate::database::models::{
         DatabaseBackupArtifact, DatabaseColumnSchema, DatabaseTableSchema,
@@ -302,6 +331,40 @@ mod tests {
             .expect("sqlite json rows");
 
         let backup = sqlite_json_rows_to_backup_table(&table, rows);
+
+        assert_eq!(backup.rows[0].get("a").unwrap().as_deref(), Some("value-a"));
+        assert_eq!(backup.rows[0].get("b").unwrap().as_deref(), Some("value-b"));
+    }
+
+    #[test]
+    fn sqlite_legacy_rows_are_mapped_by_schema_column_name() {
+        let table = DatabaseTableSchema {
+            name: "sample".into(),
+            columns: vec![
+                DatabaseColumnSchema {
+                    name: "a".into(),
+                    db_type: "TEXT".into(),
+                    nullable: true,
+                    primary_key: false,
+                    default_value: None,
+                    auto_generated: false,
+                },
+                DatabaseColumnSchema {
+                    name: "b".into(),
+                    db_type: "TEXT".into(),
+                    nullable: true,
+                    primary_key: false,
+                    default_value: None,
+                    auto_generated: false,
+                },
+            ],
+        };
+        let rows = vec![HashMap::from([
+            ("b".into(), Some("value-b".into())),
+            ("a".into(), Some("value-a".into())),
+        ])];
+
+        let backup = sqlite_rows_to_backup_table(&table, rows);
 
         assert_eq!(backup.rows[0].get("a").unwrap().as_deref(), Some("value-a"));
         assert_eq!(backup.rows[0].get("b").unwrap().as_deref(), Some("value-b"));

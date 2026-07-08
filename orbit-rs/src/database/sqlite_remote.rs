@@ -14,6 +14,9 @@ use crate::transport;
 
 pub struct SqliteRemote;
 
+const SQLITE_COLUMN_SEPARATOR: &str = "\x1f";
+const SQLITE_NULL_VALUE: &str = "__ORBIT_SQLITE_NULL__";
+
 pub enum SqliteRemoteCommand {
     DetectSqlite,
     Read { path: String, sql: String },
@@ -54,7 +57,9 @@ impl SqliteRemoteCommand {
             }
             Self::Read { path, sql } => {
                 format!(
-                    "sqlite3 -json {} {}",
+                    "sqlite3 -header -separator {} -nullvalue {} {} {}",
+                    shell_quote(SQLITE_COLUMN_SEPARATOR),
+                    shell_quote(SQLITE_NULL_VALUE),
                     shell_quote(path),
                     shell_quote(sql)
                 )
@@ -65,13 +70,15 @@ impl SqliteRemoteCommand {
                     sql.trim().trim_end_matches(';')
                 );
                 format!(
-                    "sqlite3 -json {} {}",
+                    "sqlite3 -header -separator {} -nullvalue {} {} {}",
+                    shell_quote(SQLITE_COLUMN_SEPARATOR),
+                    shell_quote(SQLITE_NULL_VALUE),
                     shell_quote(path),
                     shell_quote(&wrapped)
                 )
             }
             Self::Script { path, sql } => {
-                format!("sqlite3 -json {} {}", shell_quote(path), shell_quote(sql))
+                format!("sqlite3 {} {}", shell_quote(path), shell_quote(sql))
             }
         }
     }
@@ -177,39 +184,41 @@ impl SqliteRemote {
         db: &Database,
         sqlite_path: &str,
     ) -> Result<Vec<DatabaseTableSchema>> {
-        let tables_json = Self::list_table_names(pool, server, db, sqlite_path)?;
-        let table_rows: Vec<HashMap<String, serde_json::Value>> =
-            parse_sqlite_json("list schema tables", &tables_json)?;
+        let tables_output = Self::list_table_names(pool, server, db, sqlite_path)?;
+        let table_rows = parse_sqlite_output("list schema tables", &tables_output)?.row_maps();
         let mut tables = Vec::new();
         for row in table_rows {
-            let Some(name) = row.get("name").and_then(|value| value.as_str()) else {
+            let Some(name) = row.get("name").and_then(|value| value.as_deref()) else {
                 continue;
             };
-            let info_json = Self::table_info(pool, server, db, sqlite_path, name)?;
-            let info_rows: Vec<HashMap<String, serde_json::Value>> =
-                parse_sqlite_json(&format!("read schema for table {}", name), &info_json)?;
+            let info_output = Self::table_info(pool, server, db, sqlite_path, name)?;
+            let info_rows =
+                parse_sqlite_output(&format!("read schema for table {}", name), &info_output)?
+                    .row_maps();
             let columns = info_rows
                 .into_iter()
                 .filter_map(|info| {
-                    let name = info.get("name")?.as_str()?.to_string();
+                    let name = info.get("name")?.clone()?;
                     Some(DatabaseColumnSchema {
                         name,
                         db_type: info
                             .get("type")
-                            .and_then(|value| value.as_str())
+                            .and_then(|value| value.as_deref())
                             .unwrap_or("TEXT")
                             .to_string(),
                         nullable: info
                             .get("notnull")
-                            .and_then(|value| value.as_i64())
+                            .and_then(|value| value.as_deref())
+                            .and_then(|value| value.parse::<i64>().ok())
                             .unwrap_or(0)
                             == 0,
-                        primary_key: info.get("pk").and_then(|value| value.as_i64()).unwrap_or(0)
+                        primary_key: info
+                            .get("pk")
+                            .and_then(|value| value.as_deref())
+                            .and_then(|value| value.parse::<i64>().ok())
+                            .unwrap_or(0)
                             != 0,
-                        default_value: info
-                            .get("dflt_value")
-                            .and_then(|value| value.as_str())
-                            .map(str::to_string),
+                        default_value: info.get("dflt_value").cloned().flatten(),
                         auto_generated: false,
                     })
                 })
@@ -262,12 +271,10 @@ impl SqliteRemote {
         let elapsed_ms = started.elapsed().as_millis() as u64;
 
         if write_statement {
-            let rows: Vec<HashMap<String, serde_json::Value>> =
-                parse_sqlite_json("parse SQLite write result", &output)?;
-            let affected_rows = rows
-                .first()
-                .and_then(|row| row.get("affected_rows"))
-                .and_then(|value| value.as_u64())
+            let parsed = parse_sqlite_output("parse SQLite write result", &output)?;
+            let affected_rows = parsed
+                .first_value("affected_rows")
+                .and_then(|value| value.parse::<u64>().ok())
                 .unwrap_or(0);
             return Ok(DatabaseQueryResult::empty_message(
                 "Query executed",
@@ -276,21 +283,9 @@ impl SqliteRemote {
             ));
         }
 
-        let rows: Vec<HashMap<String, serde_json::Value>> =
-            parse_sqlite_json("parse SQLite query result", &output)?;
-        let columns = rows
-            .first()
-            .map(|row| row.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let result_rows = rows
-            .into_iter()
-            .map(|row| {
-                columns
-                    .iter()
-                    .map(|column| json_value_to_string(row.get(column)))
-                    .collect()
-            })
-            .collect();
+        let parsed = parse_sqlite_output("parse SQLite query result", &output)?;
+        let columns = parsed.columns;
+        let result_rows = parsed.rows;
 
         Ok(DatabaseQueryResult {
             columns,
@@ -327,26 +322,80 @@ fn sqlite_ident(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
-fn json_value_to_string(value: Option<&serde_json::Value>) -> Option<String> {
-    match value {
-        Some(serde_json::Value::Null) | None => None,
-        Some(serde_json::Value::String(value)) => Some(value.clone()),
-        Some(value) => Some(value.to_string()),
+#[derive(Debug, PartialEq)]
+pub(crate) struct SqliteOutput {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Option<String>>>,
+}
+
+impl SqliteOutput {
+    pub fn row_maps(&self) -> Vec<HashMap<String, Option<String>>> {
+        self.rows
+            .iter()
+            .map(|row| {
+                self.columns
+                    .iter()
+                    .cloned()
+                    .zip(row.iter().cloned())
+                    .collect::<HashMap<_, _>>()
+            })
+            .collect()
+    }
+
+    fn first_value(&self, column: &str) -> Option<&str> {
+        let index = self.columns.iter().position(|name| name == column)?;
+        self.rows
+            .first()
+            .and_then(|row| row.get(index))
+            .and_then(|value| value.as_deref())
     }
 }
 
-pub(crate) fn parse_sqlite_json<T>(context: &str, output: &str) -> Result<T>
-where
-    T: serde::de::DeserializeOwned,
-{
-    serde_json::from_str(output).map_err(|error| {
-        anyhow!(
-            "{}: malformed SQLite JSON output: {}. Output starts with: {}",
-            context,
-            error,
-            output.chars().take(200).collect::<String>()
-        )
-    })
+pub(crate) fn parse_sqlite_output(context: &str, output: &str) -> Result<SqliteOutput> {
+    let mut lines = output.lines();
+    let Some(header) = lines.next() else {
+        return Ok(SqliteOutput {
+            columns: Vec::new(),
+            rows: Vec::new(),
+        });
+    };
+    if header.is_empty() {
+        return Ok(SqliteOutput {
+            columns: Vec::new(),
+            rows: Vec::new(),
+        });
+    }
+
+    let columns = header
+        .split(SQLITE_COLUMN_SEPARATOR)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+
+    for (index, line) in lines.enumerate() {
+        let values = line
+            .split(SQLITE_COLUMN_SEPARATOR)
+            .map(|value| {
+                if value == SQLITE_NULL_VALUE {
+                    None
+                } else {
+                    Some(value.to_string())
+                }
+            })
+            .collect::<Vec<_>>();
+        if values.len() != columns.len() {
+            return Err(anyhow!(
+                "{}: malformed SQLite output row {}: expected {} columns, got {}",
+                context,
+                index + 1,
+                columns.len(),
+                values.len()
+            ));
+        }
+        rows.push(values);
+    }
+
+    Ok(SqliteOutput { columns, rows })
 }
 
 fn missing_sqlite_result(manager: Option<&str>) -> DatabaseOperationResult {
@@ -404,18 +453,48 @@ mod tests {
             shell_quote("/tmp/prod's db.sqlite"),
             "'/tmp/prod'\"'\"'s db.sqlite'"
         );
-        assert_eq!(
-            SqliteRemoteCommand::read("/tmp/prod's db.sqlite", "SELECT 'ok'").to_shell(),
-            "sqlite3 -json '/tmp/prod'\"'\"'s db.sqlite' 'SELECT '\"'\"'ok'\"'\"''"
-        );
+        let command = SqliteRemoteCommand::read("/tmp/prod's db.sqlite", "SELECT 'ok'").to_shell();
+        assert!(!command.contains("-readonly"));
+        assert!(!command.contains("-json"));
+        assert!(command.contains("-header"));
+        assert!(command.contains("-separator"));
+        assert!(command.contains("'/tmp/prod'\"'\"'s db.sqlite'"));
     }
 
     #[test]
     fn builds_write_command_wrapped_in_transaction() {
-        assert_eq!(
-            SqliteRemoteCommand::write("/tmp/app.db", "UPDATE users SET name='a'").to_shell(),
-            "sqlite3 -json '/tmp/app.db' 'BEGIN IMMEDIATE; UPDATE users SET name='\"'\"'a'\"'\"'; SELECT changes() AS affected_rows; COMMIT;'"
+        let command =
+            SqliteRemoteCommand::write("/tmp/app.db", "UPDATE users SET name='a'").to_shell();
+        assert!(!command.contains("-json"));
+        assert!(command.contains("-header"));
+        assert!(command.contains(
+            "'BEGIN IMMEDIATE; UPDATE users SET name='\"'\"'a'\"'\"'; SELECT changes() AS affected_rows; COMMIT;'"
+        ));
+    }
+
+    #[test]
+    fn parses_legacy_sqlite_separator_output() {
+        let output = format!(
+            "id{name_sep}name{name_sep}missing\n1{name_sep}alice{name_sep}{null_value}\n",
+            name_sep = SQLITE_COLUMN_SEPARATOR,
+            null_value = SQLITE_NULL_VALUE
         );
+        let parsed = parse_sqlite_output("query users", &output).expect("legacy output");
+
+        assert_eq!(parsed.columns, vec!["id", "name", "missing"]);
+        assert_eq!(
+            parsed.rows,
+            vec![vec![Some("1".into()), Some("alice".into()), None,]]
+        );
+    }
+
+    #[test]
+    fn malformed_legacy_sqlite_output_reports_context() {
+        let output = format!("id{name_sep}name\n1\n", name_sep = SQLITE_COLUMN_SEPARATOR);
+        let err = parse_sqlite_output("query users", &output).expect_err("malformed row");
+
+        assert!(err.to_string().contains("query users"));
+        assert!(err.to_string().contains("expected 2 columns"));
     }
 
     #[test]
@@ -488,15 +567,5 @@ mod tests {
         assert!(result
             .message
             .contains("Suggested command: sudo apt-get update && sudo apt-get install -y sqlite3"));
-    }
-
-    #[test]
-    fn sqlite_json_parse_failures_include_operation_context() {
-        let err =
-            parse_sqlite_json::<Vec<HashMap<String, serde_json::Value>>>("list schema tables", "{")
-                .expect_err("malformed json");
-
-        assert!(err.to_string().contains("list schema tables"));
-        assert!(err.to_string().contains("malformed SQLite JSON output"));
     }
 }
