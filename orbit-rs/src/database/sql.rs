@@ -1,7 +1,7 @@
 pub fn is_write_statement(sql: &str) -> bool {
     let token = first_sql_token(sql);
     if token.as_deref() == Some("with") {
-        return with_contains_data_modifying_cte(sql);
+        return with_contains_write(sql);
     }
     matches!(
         token.as_deref(),
@@ -71,28 +71,65 @@ fn first_sql_token(sql: &str) -> Option<String> {
     }
 }
 
-fn with_contains_data_modifying_cte(sql: &str) -> bool {
+fn with_contains_write(sql: &str) -> bool {
     let normalized = sql_without_comments_or_string_literals(sql);
     let mut chars = normalized.chars().peekable();
+    let mut depth = 0usize;
+    let mut previous_significant = '\0';
+
     while let Some(ch) = chars.next() {
-        if ch != '(' {
+        if ch == '(' {
+            depth += 1;
+            previous_significant = ch;
             continue;
         }
-        while chars.peek().is_some_and(|next| next.is_whitespace()) {
-            chars.next();
+        if ch == ')' {
+            depth = depth.saturating_sub(1);
+            previous_significant = ch;
+            continue;
         }
-        let token: String = chars
-            .by_ref()
-            .take_while(|next| next.is_ascii_alphabetic() || *next == '_')
-            .collect();
-        if matches!(
-            token.as_str(),
-            "insert" | "update" | "delete" | "create" | "replace"
-        ) {
+        if ch.is_whitespace() || !ch.is_ascii_alphabetic() {
+            if !ch.is_whitespace() {
+                previous_significant = ch;
+            }
+            continue;
+        }
+
+        let mut token = String::new();
+        token.push(ch);
+        while let Some(next) = chars.peek() {
+            if next.is_ascii_alphabetic() || *next == '_' {
+                token.push(*next);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+
+        if is_write_token(&token) && (depth == 0 || previous_significant == '(') {
             return true;
         }
+        previous_significant = token.chars().last().unwrap_or(previous_significant);
     }
     false
+}
+
+fn is_write_token(token: &str) -> bool {
+    matches!(
+        token,
+        "insert"
+            | "update"
+            | "delete"
+            | "drop"
+            | "alter"
+            | "create"
+            | "replace"
+            | "truncate"
+            | "vacuum"
+            | "attach"
+            | "detach"
+            | "pragma"
+    )
 }
 
 fn sql_without_comments_or_string_literals(sql: &str) -> String {
@@ -171,6 +208,22 @@ mod tests {
         ));
         assert!(!is_write_statement(
             "WITH recent AS (SELECT * FROM update_log) SELECT * FROM recent"
+        ));
+    }
+
+    #[test]
+    fn detects_write_main_statement_after_read_only_cte() {
+        assert!(is_write_statement(
+            "WITH recent AS (SELECT 1) DELETE FROM users WHERE id = 1"
+        ));
+        assert!(is_write_statement(
+            "WITH recent AS (SELECT 1) UPDATE users SET name = 'a'"
+        ));
+        assert!(is_write_statement(
+            "WITH recent AS (SELECT 1) INSERT INTO users(name) VALUES ('a')"
+        ));
+        assert!(!is_write_statement(
+            "WITH recent AS (SELECT 1), logs AS (SELECT * FROM update_log) SELECT * FROM recent"
         ));
     }
 

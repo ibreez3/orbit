@@ -325,19 +325,46 @@ fn restore_table_with_shadow(conn: &mut mysql::Conn, table: &DatabaseBackupTable
         }
     };
 
-    let rename_sql = format!(
-        "RENAME TABLE {} TO {}, {} TO {}",
-        quote_ident(&table.name, "mysql"),
-        quote_ident(&backup_name, "mysql"),
-        quote_ident(&restore_name, "mysql"),
-        quote_ident(&table.name, "mysql")
-    );
+    let original_exists = mysql_table_exists(conn, &table.name)?;
+    let rename_sql = restore_rename_sql(&table.name, &restore_name, &backup_name, original_exists);
     if let Err(error) = conn.query_drop(rename_sql) {
         let _ = conn.query_drop(drop_table_sql(&restore_name, "mysql"));
         return Err(error.into());
     }
-    conn.query_drop(drop_table_sql(&backup_name, "mysql"))?;
+    if original_exists {
+        conn.query_drop(drop_table_sql(&backup_name, "mysql"))?;
+    }
     Ok(inserted)
+}
+
+fn mysql_table_exists(conn: &mut mysql::Conn, table_name: &str) -> Result<bool> {
+    let count: Option<u64> = conn.exec_first(
+        "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+        (table_name,),
+    )?;
+    Ok(count.unwrap_or(0) > 0)
+}
+
+fn restore_rename_sql(
+    table_name: &str,
+    restore_name: &str,
+    backup_name: &str,
+    original_exists: bool,
+) -> String {
+    if original_exists {
+        return format!(
+            "RENAME TABLE {} TO {}, {} TO {}",
+            quote_ident(table_name, "mysql"),
+            quote_ident(backup_name, "mysql"),
+            quote_ident(restore_name, "mysql"),
+            quote_ident(table_name, "mysql")
+        );
+    }
+    format!(
+        "RENAME TABLE {} TO {}",
+        quote_ident(restore_name, "mysql"),
+        quote_ident(table_name, "mysql")
+    )
 }
 
 fn backup_table_with_name(table: &DatabaseBackupTable, name: &str) -> DatabaseBackupTable {
@@ -442,5 +469,33 @@ mod tests {
             mysql_value_to_string(Value::Bytes(vec![0xff, 0xfe])).expect_err("invalid utf8 bytes");
 
         assert!(err.to_string().contains("non-UTF-8 MySQL bytes"));
+    }
+
+    #[test]
+    fn restore_rename_sql_handles_missing_original_table() {
+        let sql = restore_rename_sql(
+            "users",
+            "__orbit_restore_users_1",
+            "__orbit_backup_users_1",
+            false,
+        );
+
+        assert_eq!(sql, "RENAME TABLE `__orbit_restore_users_1` TO `users`");
+        assert!(!sql.contains("__orbit_backup"));
+    }
+
+    #[test]
+    fn restore_rename_sql_swaps_existing_original_table() {
+        let sql = restore_rename_sql(
+            "users",
+            "__orbit_restore_users_1",
+            "__orbit_backup_users_1",
+            true,
+        );
+
+        assert_eq!(
+            sql,
+            "RENAME TABLE `users` TO `__orbit_backup_users_1`, `__orbit_restore_users_1` TO `users`"
+        );
     }
 }
