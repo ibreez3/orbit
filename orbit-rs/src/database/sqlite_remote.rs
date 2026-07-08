@@ -186,14 +186,16 @@ pub fn sqlite_install_command(manager: &str) -> Option<&'static str> {
 
 pub fn package_manager_detection_command() -> String {
     [
-        "command -v apt-get >/dev/null 2>&1 && echo apt-get",
-        "command -v dnf >/dev/null 2>&1 && echo dnf",
-        "command -v yum >/dev/null 2>&1 && echo yum",
-        "command -v pacman >/dev/null 2>&1 && echo pacman",
-        "command -v zypper >/dev/null 2>&1 && echo zypper",
-        "command -v apk >/dev/null 2>&1 && echo apk",
+        "if command -v apt-get >/dev/null 2>&1; then echo apt-get",
+        "elif command -v dnf >/dev/null 2>&1; then echo dnf",
+        "elif command -v yum >/dev/null 2>&1; then echo yum",
+        "elif command -v pacman >/dev/null 2>&1; then echo pacman",
+        "elif command -v zypper >/dev/null 2>&1; then echo zypper",
+        "elif command -v apk >/dev/null 2>&1; then echo apk",
+        "else exit 1",
+        "fi",
     ]
-    .join(" || ")
+    .join("; ")
 }
 
 #[cfg(test)]
@@ -244,5 +246,27 @@ mod tests {
         );
         assert_eq!(sqlite_install_command("apk"), Some("sudo apk add sqlite"));
         assert_eq!(sqlite_install_command("unknown"), None);
+    }
+
+    #[test]
+    fn package_manager_detection_uses_explicit_if_elif_chain_in_order() {
+        let command = package_manager_detection_command();
+        let expected_parts = [
+            "if command -v apt-get >/dev/null 2>&1; then echo apt-get",
+            "elif command -v dnf >/dev/null 2>&1; then echo dnf",
+            "elif command -v yum >/dev/null 2>&1; then echo yum",
+            "elif command -v pacman >/dev/null 2>&1; then echo pacman",
+            "elif command -v zypper >/dev/null 2>&1; then echo zypper",
+            "elif command -v apk >/dev/null 2>&1; then echo apk",
+            "else exit 1",
+            "fi",
+        ];
+
+        let mut previous_index = 0;
+        for part in expected_parts {
+            let index = command.find(part).expect("expected command part");
+            assert!(index >= previous_index);
+            previous_index = index;
+        }
     }
 }

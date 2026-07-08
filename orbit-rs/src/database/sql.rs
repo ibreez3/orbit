@@ -18,22 +18,14 @@ pub fn is_write_statement(sql: &str) -> bool {
 }
 
 pub fn mysql_type_for_sqlite(sqlite_type: &str) -> String {
-    let normalized = sqlite_type
-        .trim()
-        .split('(')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_uppercase();
+    let normalized = sqlite_type.trim().to_uppercase();
 
     match normalized.as_str() {
-        "INTEGER" | "INT" | "TINYINT" | "SMALLINT" | "MEDIUMINT" | "BIGINT"
-        | "UNSIGNED BIG INT" | "INT2" | "INT8" => "BIGINT",
-        "REAL" | "DOUBLE" | "DOUBLE PRECISION" | "FLOAT" => "DOUBLE",
-        "TEXT" | "CHARACTER" | "VARCHAR" | "VARYING CHARACTER" | "NCHAR" | "NATIVE CHARACTER"
-        | "NVARCHAR" | "CLOB" => "TEXT",
+        "INTEGER" => "BIGINT",
+        "REAL" => "DOUBLE",
+        "TEXT" => "TEXT",
         "BLOB" => "BLOB",
-        "NUMERIC" | "DECIMAL" | "BOOLEAN" | "DATE" | "DATETIME" => "DECIMAL(38,10)",
+        "NUMERIC" => "DECIMAL(38,10)",
         _ => "TEXT",
     }
     .to_string()
@@ -99,6 +91,11 @@ mod tests {
         assert_eq!(mysql_type_for_sqlite("TEXT"), "TEXT");
         assert_eq!(mysql_type_for_sqlite("BLOB"), "BLOB");
         assert_eq!(mysql_type_for_sqlite("NUMERIC"), "DECIMAL(38,10)");
+        assert_eq!(mysql_type_for_sqlite("INT"), "TEXT");
+        assert_eq!(mysql_type_for_sqlite("BOOLEAN"), "TEXT");
+        assert_eq!(mysql_type_for_sqlite("DATE"), "TEXT");
+        assert_eq!(mysql_type_for_sqlite("DATETIME"), "TEXT");
         assert_eq!(mysql_type_for_sqlite("VARCHAR(255)"), "TEXT");
+        assert_eq!(mysql_type_for_sqlite("custom_type"), "TEXT");
     }
 }
