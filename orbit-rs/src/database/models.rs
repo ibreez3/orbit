@@ -67,3 +67,61 @@ pub struct DatabaseOperationResult {
     pub artifact_path: Option<String>,
     pub affected_rows: Option<u64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseImportPlan {
+    pub backup_path: String,
+    pub target_connection_id: String,
+    pub mode: String,
+    pub tables: Vec<DatabaseImportTablePlan>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseImportTablePlan {
+    pub source_table: String,
+    pub target_table: String,
+    pub columns: Vec<DatabaseImportColumnMapping>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseImportColumnMapping {
+    pub source_column: String,
+    pub target_column: Option<String>,
+    pub target_type: String,
+    pub required_without_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseImportRequest {
+    pub plan: DatabaseImportPlan,
+}
+
+#[cfg(test)]
+impl DatabaseImportPlan {
+    pub fn single_table_for_test(
+        source_table: &str,
+        target_table: &str,
+        mappings: Vec<(&str, &str)>,
+    ) -> Self {
+        Self {
+            backup_path: "/tmp/source.orbit-db-backup.json".into(),
+            target_connection_id: "target-mysql".into(),
+            mode: "new_table".into(),
+            tables: vec![DatabaseImportTablePlan {
+                source_table: source_table.into(),
+                target_table: target_table.into(),
+                columns: mappings
+                    .into_iter()
+                    .map(
+                        |(source_column, target_column)| DatabaseImportColumnMapping {
+                            source_column: source_column.into(),
+                            target_column: Some(target_column.into()),
+                            target_type: "TEXT".into(),
+                            required_without_default: false,
+                        },
+                    )
+                    .collect(),
+            }],
+        }
+    }
+}
