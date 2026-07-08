@@ -127,6 +127,13 @@ struct DatabaseConnectionDialog: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("通过已配置 SSH 服务器连接", isOn: $useSSHTunnel)
                             .toggleStyle(.checkbox)
+                            .onChange(of: useSSHTunnel) { enabled in
+                                if enabled, sshServerId.isEmpty {
+                                    sshServerId = inventoryState.servers.first?.id ?? ""
+                                } else if !enabled {
+                                    sshServerId = ""
+                                }
+                            }
                         if useSSHTunnel {
                             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                                 serverPickerRow("跳板服务器")
@@ -197,7 +204,7 @@ struct DatabaseConnectionDialog: View {
             name: trimmed(name),
             group_name: trimmed(groupName).isEmpty ? nil : trimmed(groupName),
             engine: engine.rawValue,
-            ssh_server_id: trimmed(sshServerId).isEmpty ? nil : trimmed(sshServerId),
+            ssh_server_id: shouldPersistSSHServer ? (trimmed(sshServerId).isEmpty ? nil : trimmed(sshServerId)) : nil,
             use_ssh_tunnel: engine == .remoteSQLite ? false : useSSHTunnel,
             host: engine == .remoteSQLite ? nil : trimmed(host),
             port: engine == .remoteSQLite ? nil : UInt16(portText),
@@ -207,6 +214,10 @@ struct DatabaseConnectionDialog: View {
             sqlite_path: engine == .remoteSQLite ? trimmed(sqlitePath) : nil,
             ssl_mode: engine == .remoteSQLite ? nil : trimmed(sslMode)
         )
+    }
+
+    private var shouldPersistSSHServer: Bool {
+        engine == .remoteSQLite || useSSHTunnel
     }
 
     private var canSave: Bool {
@@ -240,6 +251,9 @@ struct DatabaseConnectionDialog: View {
         password = connection.password
         sqlitePath = connection.sqlite_path
         sslMode = connection.ssl_mode
+        if engine != .remoteSQLite && !useSSHTunnel {
+            sshServerId = ""
+        }
     }
 
     private func applyDefaults(for engine: DatabaseConnectionEngine) {
@@ -248,6 +262,11 @@ struct DatabaseConnectionDialog: View {
         }
         if engine == .remoteSQLite {
             useSSHTunnel = false
+            if sshServerId.isEmpty {
+                sshServerId = inventoryState.servers.first?.id ?? ""
+            }
+        } else if !useSSHTunnel {
+            sshServerId = ""
         }
     }
 

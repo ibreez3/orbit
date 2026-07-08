@@ -322,6 +322,7 @@ struct DatabaseView: View {
         guard let connection, canExecuteQuery else { return }
         isExecuting = true
         errorMessage = nil
+        queryResult = nil
         do {
             let request = DatabaseQueryRequest(
                 sql: sqlText,
@@ -333,6 +334,7 @@ struct DatabaseView: View {
             saveSnapshot()
         } catch {
             errorMessage = error.localizedDescription
+            queryResult = nil
             saveSnapshot()
         }
         isExecuting = false

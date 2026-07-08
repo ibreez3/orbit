@@ -501,6 +501,13 @@ class AppState: ObservableObject {
                     if editingDatabaseConnection?.id == id {
                         editingDatabaseConnection = connection
                     }
+                    tabs = tabs.map { tab in
+                        guard tab.type == .database, tab.serverId == id else { return tab }
+                        var updated = tab
+                        updated.serverName = connection.name
+                        updated.title = "DB: \(connection.name)"
+                        return updated
+                    }
                     databaseOperationLoading = false
                 }
             } catch {
@@ -566,6 +573,7 @@ class AppState: ObservableObject {
                         tabs = tabs.map { tab in
                             guard tab.type == .database, tab.serverId == editingId else { return tab }
                             var updated = tab
+                            updated.serverName = connection.name
                             updated.title = "DB: \(connection.name)"
                             return updated
                         }

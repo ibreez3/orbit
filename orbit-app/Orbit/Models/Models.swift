@@ -316,7 +316,7 @@ struct TabItem: Identifiable {
     let id: String
     let type: TabType
     let serverId: String
-    let serverName: String
+    var serverName: String
     var title: String
     var sessionId: String?
     var paneTree: PaneNode?
