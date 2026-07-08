@@ -8,6 +8,8 @@ struct DatabaseView: View {
     @State private var errorMessage: String?
     @State private var isLoadingSchema = false
     @State private var isExecuting = false
+    @State private var schemaRequestRevision = 0
+    @State private var queryRequestRevision = 0
     @State private var selectedTable: String? = nil
     @State private var sqlText: String = ""
     @State private var tableSearchQuery: String = ""
@@ -299,20 +301,29 @@ struct DatabaseView: View {
 
     @MainActor
     private func loadSchema() async {
+        schemaRequestRevision += 1
+        let schemaRevision = schemaRequestRevision
+        let schemaInvalidationToken = appState.databasePanelInvalidationToken(for: tab.id)
+
         guard let connection else {
+            guard isCurrentSchemaRequest(schemaRevision, invalidationToken: schemaInvalidationToken) else { return }
+            isLoadingSchema = false
             errorMessage = "数据库连接不存在"
+            publishAIContext()
             return
         }
         isLoadingSchema = true
         errorMessage = nil
         do {
             let loaded = try await appState.bridge.listDatabaseSchemaAsync(connectionId: connection.id)
+            guard isCurrentSchemaRequest(schemaRevision, invalidationToken: schemaInvalidationToken) else { return }
             schema = loaded
             if selectedTable == nil {
                 selectedTable = loaded.tables.first?.name
             }
             saveSnapshot()
         } catch {
+            guard isCurrentSchemaRequest(schemaRevision, invalidationToken: schemaInvalidationToken) else { return }
             errorMessage = error.localizedDescription
             saveSnapshot()
         }
@@ -322,6 +333,10 @@ struct DatabaseView: View {
 
     @MainActor
     private func executeSQL() async {
+        queryRequestRevision += 1
+        let queryRevision = queryRequestRevision
+        let queryInvalidationToken = appState.databasePanelInvalidationToken(for: tab.id)
+
         guard let connection, canExecuteQuery else { return }
         isExecuting = true
         errorMessage = nil
@@ -333,9 +348,11 @@ struct DatabaseView: View {
                 timeout_ms: UInt32(dbQueryTimeout * 1000)
             )
             let result = try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request)
+            guard isCurrentQueryRequest(queryRevision, invalidationToken: queryInvalidationToken) else { return }
             queryResult = result
             saveSnapshot()
         } catch {
+            guard isCurrentQueryRequest(queryRevision, invalidationToken: queryInvalidationToken) else { return }
             errorMessage = error.localizedDescription
             queryResult = nil
             saveSnapshot()
@@ -390,10 +407,26 @@ struct DatabaseView: View {
     }
 
     private func clearLoadedState() {
+        schemaRequestRevision += 1
+        queryRequestRevision += 1
+        isLoadingSchema = false
+        isExecuting = false
         schema = nil
         selectedTable = nil
         queryResult = nil
         errorMessage = nil
+    }
+
+    @MainActor
+    private func isCurrentSchemaRequest(_ revision: Int, invalidationToken: Int) -> Bool {
+        revision == schemaRequestRevision
+            && invalidationToken == appState.databasePanelInvalidationToken(for: tab.id)
+    }
+
+    @MainActor
+    private func isCurrentQueryRequest(_ revision: Int, invalidationToken: Int) -> Bool {
+        revision == queryRequestRevision
+            && invalidationToken == appState.databasePanelInvalidationToken(for: tab.id)
     }
 
     private func saveSnapshot() {
