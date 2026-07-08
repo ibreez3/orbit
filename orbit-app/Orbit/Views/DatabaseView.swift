@@ -29,9 +29,12 @@ struct DatabaseView: View {
             restoreSnapshot()
             applyDatabaseSettings()
             publishAIContext()
-            if schema == nil {
-                Task { await loadSchema() }
-            }
+            Task { await loadSchema() }
+        }
+        .onChange(of: appState.databasePanelInvalidationToken(for: tab.id)) { _ in
+            clearLoadedState()
+            publishAIContext()
+            Task { await loadSchema() }
         }
         .onChange(of: selectedTable) { _ in
             saveSnapshot()
@@ -384,6 +387,13 @@ struct DatabaseView: View {
         }
         queryResult = snapshot.queryResult
         errorMessage = snapshot.error
+    }
+
+    private func clearLoadedState() {
+        schema = nil
+        selectedTable = nil
+        queryResult = nil
+        errorMessage = nil
     }
 
     private func saveSnapshot() {

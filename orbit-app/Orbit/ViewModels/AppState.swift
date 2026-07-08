@@ -17,6 +17,7 @@ class AppState: ObservableObject {
     private var pendingQuitTabId: String? = nil
 
     @Published var databaseConnectionDialogOpen: Bool = false
+    @Published private var databasePanelInvalidationTokens: [String: Int] = [:]
 
     var tabs: [TabItem] {
         get { tabState.tabs }
@@ -508,6 +509,7 @@ class AppState: ObservableObject {
                         updated.title = "DB: \(connection.name)"
                         return updated
                     }
+                    invalidateDatabasePanels(forConnectionId: id)
                     databaseOperationLoading = false
                 }
             } catch {
@@ -577,6 +579,7 @@ class AppState: ObservableObject {
                             updated.title = "DB: \(connection.name)"
                             return updated
                         }
+                        invalidateDatabasePanels(forConnectionId: editingId)
                         databaseOperationLoading = false
                         closeDatabaseConnectionDialog()
                     }
@@ -802,6 +805,23 @@ class AppState: ObservableObject {
 
     func removeDatabasePanelSnapshot(for tabId: String) {
         databasePanelSnapshots.removeValue(forKey: tabId)
+    }
+
+    func databasePanelInvalidationToken(for tabId: String) -> Int {
+        databasePanelInvalidationTokens[tabId, default: 0]
+    }
+
+    private func invalidateDatabasePanels(forConnectionId connectionId: String) {
+        let affectedTabIds = tabs
+            .filter { $0.type == .database && $0.serverId == connectionId }
+            .map(\.id)
+        for tabId in affectedTabIds {
+            databasePanelSnapshots.removeValue(forKey: tabId)
+            databaseAIContexts.removeValue(forKey: tabId)
+            var tokens = databasePanelInvalidationTokens
+            tokens[tabId, default: 0] += 1
+            databasePanelInvalidationTokens = tokens
+        }
     }
 
     func openTool(_ tool: SessionTool, presentation: ToolPresentation = .floating) {
