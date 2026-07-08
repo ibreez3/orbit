@@ -138,6 +138,141 @@ struct DockerPanelSnapshot {
     var lastUpdated: Date?
 }
 
+// MARK: - Database
+
+struct DatabaseConnection: Codable, Identifiable {
+    let id: String
+    let name: String
+    let group_name: String
+    let engine: String
+    let ssh_server_id: String
+    let use_ssh_tunnel: Bool
+    let host: String
+    let port: UInt16
+    let database_name: String
+    let username: String
+    let password: String
+    let sqlite_path: String
+    let ssl_mode: String
+    let created_at: String
+    let updated_at: String
+}
+
+struct DatabaseConnectionInput: Codable {
+    var name: String
+    var group_name: String?
+    var engine: String
+    var ssh_server_id: String?
+    var use_ssh_tunnel: Bool?
+    var host: String?
+    var port: UInt16?
+    var database_name: String?
+    var username: String?
+    var password: String?
+    var sqlite_path: String?
+    var ssl_mode: String?
+}
+
+struct DatabaseSchema: Codable {
+    let connection_id: String
+    let engine: String
+    let tables: [DatabaseTableSchema]
+}
+
+struct DatabaseTableSchema: Codable, Identifiable {
+    let name: String
+    let columns: [DatabaseColumnSchema]
+
+    var id: String { name }
+}
+
+struct DatabaseColumnSchema: Codable, Identifiable {
+    let name: String
+    let db_type: String
+    let nullable: Bool
+    let primary_key: Bool
+    let default_value: String?
+
+    var id: String { name }
+}
+
+struct DatabaseQueryRequest: Codable {
+    var sql: String
+    var read_only: Bool
+    var timeout_ms: UInt32
+}
+
+struct DatabaseQueryResult: Codable {
+    let columns: [String]
+    let rows: [[String?]]
+    let affected_rows: UInt64
+    let elapsed_ms: UInt64
+    let message: String
+}
+
+struct DatabaseBackupRecord: Codable, Identifiable {
+    let id: String
+    let connection_id: String
+    let connection_name: String
+    let engine: String
+    let artifact_path: String
+    let operation: String
+    let status: String
+    let summary: String
+    let created_at: String
+}
+
+struct DatabaseOperationResult: Codable {
+    let ok: Bool
+    let code: String
+    let message: String
+    let artifact_path: String?
+    let affected_rows: UInt64?
+}
+
+struct DatabaseRestoreRequest: Codable {
+    var backup_path: String
+    var target_connection_id: String
+    var mode: String
+}
+
+struct DatabaseImportPlan: Codable {
+    var backup_path: String
+    var target_connection_id: String
+    var mode: String
+    var tables: [DatabaseImportTablePlan]
+}
+
+struct DatabaseImportTablePlan: Codable, Identifiable {
+    var source_table: String
+    var target_table: String
+    var columns: [DatabaseImportColumnMapping]
+
+    var id: String { source_table }
+}
+
+struct DatabaseImportColumnMapping: Codable, Identifiable {
+    var source_column: String
+    var target_column: String?
+    var target_type: String
+    var required_without_default: Bool
+
+    var id: String { source_column }
+}
+
+struct DatabaseImportRequest: Codable {
+    var plan: DatabaseImportPlan
+}
+
+struct DatabasePanelSnapshot {
+    var schema: DatabaseSchema?
+    var selectedTable: String?
+    var sqlText: String = ""
+    var queryResult: DatabaseQueryResult?
+    var error: String?
+    var lastUpdated: Date?
+}
+
 enum AppTheme: String, CaseIterable {
     case light
     case dark

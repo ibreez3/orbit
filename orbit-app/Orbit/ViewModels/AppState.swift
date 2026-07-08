@@ -112,6 +112,14 @@ class AppState: ObservableObject {
         get { inventoryState.credentialGroups }
         set { inventoryState.credentialGroups = newValue }
     }
+    var databaseConnections: [DatabaseConnection] {
+        get { inventoryState.databaseConnections }
+        set { inventoryState.databaseConnections = newValue }
+    }
+    var databaseBackupRecords: [DatabaseBackupRecord] {
+        get { inventoryState.databaseBackupRecords }
+        set { inventoryState.databaseBackupRecords = newValue }
+    }
     var portForwardRules: [PortForwardRule] {
         get { inventoryState.portForwardRules }
         set { inventoryState.portForwardRules = newValue }
@@ -127,6 +135,18 @@ class AppState: ObservableObject {
     var editingCg: CredentialGroup? {
         get { inventoryState.editingCg }
         set { inventoryState.editingCg = newValue }
+    }
+    var editingDatabaseConnection: DatabaseConnection? {
+        get { inventoryState.editingDatabaseConnection }
+        set { inventoryState.editingDatabaseConnection = newValue }
+    }
+    var databaseOperationLoading: Bool {
+        get { inventoryState.databaseOperationLoading }
+        set { inventoryState.databaseOperationLoading = newValue }
+    }
+    var databasePanelSnapshots: [String: DatabasePanelSnapshot] {
+        get { inventoryState.databasePanelSnapshots }
+        set { inventoryState.databasePanelSnapshots = newValue }
     }
 
     // MARK: - Snippet forwarding
@@ -286,6 +306,8 @@ class AppState: ObservableObject {
         ThemeManager.shared.loadThemes()
         loadServers()
         loadCredentialGroups()
+        loadDatabaseConnections()
+        loadDatabaseBackupRecords()
         loadSnippets()
         loadKeywords()
         loadAIConfig()
@@ -422,6 +444,97 @@ class AppState: ObservableObject {
         }
     }
 
+    func loadDatabaseConnections() {
+        Task {
+            do {
+                let result = try await bridge.listDatabaseConnectionsAsync()
+                await MainActor.run { self.databaseConnections = result }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载数据库连接: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func loadDatabaseBackupRecords() {
+        Task {
+            do {
+                let result = try await bridge.listDatabaseBackupRecordsAsync()
+                await MainActor.run { self.databaseBackupRecords = result }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载数据库备份记录: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func addDatabaseConnection(_ input: DatabaseConnectionInput) {
+        Task {
+            await MainActor.run { databaseOperationLoading = true }
+            do {
+                let connection = try await bridge.addDatabaseConnectionAsync(input: input)
+                await MainActor.run {
+                    databaseConnections.append(connection)
+                    databaseOperationLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = "添加失败"
+                    alertMessage = "无法添加数据库连接: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func updateDatabaseConnection(id: String, input: DatabaseConnectionInput) {
+        Task {
+            await MainActor.run { databaseOperationLoading = true }
+            do {
+                let connection = try await bridge.updateDatabaseConnectionAsync(id: id, input: input)
+                await MainActor.run {
+                    databaseConnections = databaseConnections.map { $0.id == id ? connection : $0 }
+                    if editingDatabaseConnection?.id == id {
+                        editingDatabaseConnection = connection
+                    }
+                    databaseOperationLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新数据库连接: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func deleteDatabaseConnection(_ id: String) {
+        Task {
+            await MainActor.run { databaseOperationLoading = true }
+            do {
+                try await bridge.deleteDatabaseConnectionAsync(id: id)
+                await MainActor.run {
+                    databaseConnections.removeAll { $0.id == id }
+                    if editingDatabaseConnection?.id == id {
+                        editingDatabaseConnection = nil
+                    }
+                    databaseOperationLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = "删除失败"
+                    alertMessage = "无法删除数据库连接: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     func addLocalTerminalTab() {
         let id = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
         let tab = TabItem(id: id, type: .terminal, serverId: "local", serverName: "本地", title: "本地终端")
@@ -553,6 +666,18 @@ class AppState: ObservableObject {
 
     func dockerPanelSnapshot(for tabId: String) -> DockerPanelSnapshot? {
         dockerPanelSnapshots[tabId]
+    }
+
+    func saveDatabasePanelSnapshot(_ snapshot: DatabasePanelSnapshot, for tabId: String) {
+        databasePanelSnapshots[tabId] = snapshot
+    }
+
+    func databasePanelSnapshot(for tabId: String) -> DatabasePanelSnapshot? {
+        databasePanelSnapshots[tabId]
+    }
+
+    func removeDatabasePanelSnapshot(for tabId: String) {
+        databasePanelSnapshots.removeValue(forKey: tabId)
     }
 
     func openTool(_ tool: SessionTool, presentation: ToolPresentation = .floating) {
@@ -842,6 +967,7 @@ class AppState: ObservableObject {
             disconnectAllChannels(tab: tab)
         }
         dockerPanelSnapshots.removeValue(forKey: id)
+        databasePanelSnapshots.removeValue(forKey: id)
         tabs.removeAll { $0.id == id }
         if activeTabId == id {
             closeSessionScopedTools()

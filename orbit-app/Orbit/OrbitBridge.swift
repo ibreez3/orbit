@@ -58,6 +58,11 @@ class OrbitBridge {
         return try decoder.decode(type, from: data)
     }
 
+    private static func encodeJSONString<T: Encodable>(_ value: T) throws -> String {
+        let data = try encoder.encode(value)
+        return String(data: data, encoding: .utf8)!
+    }
+
     func ensureInitialized() throws {
         initLock.lock()
         defer { initLock.unlock() }
@@ -254,8 +259,6 @@ class OrbitBridge {
         guard rc == 0 else { throw OrbitError.apiError(rc) }
     }
 
-    // MARK: - SSH
-
     private func runOffThread<T>(_ block: @escaping () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -268,6 +271,200 @@ class OrbitBridge {
             }
         }
     }
+
+    private func decodeDatabaseResponse<T: Decodable>(_ type: T.Type, rc: Int32, outJson: UnsafeMutablePointer<CChar>?) throws -> T {
+        guard rc == 0 else {
+            if let outJson {
+                orbit_free_string(outJson)
+            }
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
+        }
+        guard let json = outJson else {
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
+        }
+        defer { orbit_free_string(json) }
+        return try Self.decodeJSON(type, from: json)
+    }
+
+    private func checkDatabaseResult(_ rc: Int32) throws {
+        guard rc == 0 else {
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
+        }
+    }
+
+    // MARK: - Database
+
+    func listDatabaseConnectionsAsync() async throws -> [DatabaseConnection] {
+        try await runOffThread { try self.listDatabaseConnections() }
+    }
+
+    func listDatabaseConnections() throws -> [DatabaseConnection] {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = orbit_db_list_connections(app, &outJson)
+        return try decodeDatabaseResponse([DatabaseConnection].self, rc: rc, outJson: outJson)
+    }
+
+    func addDatabaseConnectionAsync(input: DatabaseConnectionInput) async throws -> DatabaseConnection {
+        try await runOffThread { try self.addDatabaseConnection(input: input) }
+    }
+
+    func addDatabaseConnection(input: DatabaseConnectionInput) throws -> DatabaseConnection {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = jsonString.withCString { inputPtr in
+            orbit_db_add_connection(app, inputPtr, &outJson)
+        }
+        return try decodeDatabaseResponse(DatabaseConnection.self, rc: rc, outJson: outJson)
+    }
+
+    func updateDatabaseConnectionAsync(id: String, input: DatabaseConnectionInput) async throws -> DatabaseConnection {
+        try await runOffThread { try self.updateDatabaseConnection(id: id, input: input) }
+    }
+
+    func updateDatabaseConnection(id: String, input: DatabaseConnectionInput) throws -> DatabaseConnection {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = id.withCString { idPtr in
+            jsonString.withCString { inputPtr in
+                orbit_db_update_connection(app, idPtr, inputPtr, &outJson)
+            }
+        }
+        return try decodeDatabaseResponse(DatabaseConnection.self, rc: rc, outJson: outJson)
+    }
+
+    func deleteDatabaseConnectionAsync(id: String) async throws {
+        try await runOffThread { try self.deleteDatabaseConnection(id: id) }
+    }
+
+    func deleteDatabaseConnection(id: String) throws {
+        try ensureInitialized()
+        let rc = id.withCString { idPtr in
+            orbit_db_delete_connection(app, idPtr)
+        }
+        try checkDatabaseResult(rc)
+    }
+
+    func testDatabaseConnectionAsync(id: String, installSqlite: Bool) async throws -> DatabaseOperationResult {
+        try await runOffThread { try self.testDatabaseConnection(id: id, installSqlite: installSqlite) }
+    }
+
+    func testDatabaseConnection(id: String, installSqlite: Bool) throws -> DatabaseOperationResult {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = id.withCString { idPtr in
+            orbit_db_test_connection(app, idPtr, installSqlite, &outJson)
+        }
+        return try decodeDatabaseResponse(DatabaseOperationResult.self, rc: rc, outJson: outJson)
+    }
+
+    func listDatabaseSchemaAsync(connectionId: String) async throws -> DatabaseSchema {
+        try await runOffThread { try self.listDatabaseSchema(connectionId: connectionId) }
+    }
+
+    func listDatabaseSchema(connectionId: String) throws -> DatabaseSchema {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = connectionId.withCString { connectionIdPtr in
+            orbit_db_list_schema(app, connectionIdPtr, &outJson)
+        }
+        return try decodeDatabaseResponse(DatabaseSchema.self, rc: rc, outJson: outJson)
+    }
+
+    func executeDatabaseQueryAsync(connectionId: String, request: DatabaseQueryRequest) async throws -> DatabaseQueryResult {
+        try await runOffThread { try self.executeDatabaseQuery(connectionId: connectionId, request: request) }
+    }
+
+    func executeDatabaseQuery(connectionId: String, request: DatabaseQueryRequest) throws -> DatabaseQueryResult {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(request)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = connectionId.withCString { connectionIdPtr in
+            jsonString.withCString { requestPtr in
+                orbit_db_execute(app, connectionIdPtr, requestPtr, &outJson)
+            }
+        }
+        return try decodeDatabaseResponse(DatabaseQueryResult.self, rc: rc, outJson: outJson)
+    }
+
+    func backupDatabaseAsync(connectionId: String) async throws -> DatabaseOperationResult {
+        try await runOffThread { try self.backupDatabase(connectionId: connectionId) }
+    }
+
+    func backupDatabase(connectionId: String) throws -> DatabaseOperationResult {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = connectionId.withCString { connectionIdPtr in
+            orbit_db_backup(app, connectionIdPtr, &outJson)
+        }
+        return try decodeDatabaseResponse(DatabaseOperationResult.self, rc: rc, outJson: outJson)
+    }
+
+    func listDatabaseBackupRecordsAsync() async throws -> [DatabaseBackupRecord] {
+        try await runOffThread { try self.listDatabaseBackupRecords() }
+    }
+
+    func listDatabaseBackupRecords() throws -> [DatabaseBackupRecord] {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = orbit_db_list_backup_records(app, &outJson)
+        return try decodeDatabaseResponse([DatabaseBackupRecord].self, rc: rc, outJson: outJson)
+    }
+
+    func restoreDatabaseAsync(request: DatabaseRestoreRequest) async throws -> DatabaseOperationResult {
+        try await runOffThread { try self.restoreDatabase(request: request) }
+    }
+
+    func restoreDatabase(request: DatabaseRestoreRequest) throws -> DatabaseOperationResult {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(request)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = jsonString.withCString { requestPtr in
+            orbit_db_restore(app, requestPtr, &outJson)
+        }
+        return try decodeDatabaseResponse(DatabaseOperationResult.self, rc: rc, outJson: outJson)
+    }
+
+    func prepareDatabaseImportAsync(backupPath: String, targetConnectionId: String, mode: String) async throws -> DatabaseImportPlan {
+        try await runOffThread {
+            try self.prepareDatabaseImport(
+                backupPath: backupPath,
+                targetConnectionId: targetConnectionId,
+                mode: mode
+            )
+        }
+    }
+
+    func prepareDatabaseImport(backupPath: String, targetConnectionId: String, mode: String) throws -> DatabaseImportPlan {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = backupPath.withCString { backupPathPtr in
+            targetConnectionId.withCString { targetConnectionIdPtr in
+                mode.withCString { modePtr in
+                    orbit_db_prepare_import(app, backupPathPtr, targetConnectionIdPtr, modePtr, &outJson)
+                }
+            }
+        }
+        return try decodeDatabaseResponse(DatabaseImportPlan.self, rc: rc, outJson: outJson)
+    }
+
+    func runDatabaseImportAsync(request: DatabaseImportRequest) async throws -> DatabaseOperationResult {
+        try await runOffThread { try self.runDatabaseImport(request: request) }
+    }
+
+    func runDatabaseImport(request: DatabaseImportRequest) throws -> DatabaseOperationResult {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(request)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = jsonString.withCString { requestPtr in
+            orbit_db_run_import(app, requestPtr, &outJson)
+        }
+        return try decodeDatabaseResponse(DatabaseOperationResult.self, rc: rc, outJson: outJson)
+    }
+
+    // MARK: - SSH
 
     func connectSSHAsync(serverId: String) async throws -> String {
         try await runOffThread { try self.connectSSH(serverId: serverId) }
