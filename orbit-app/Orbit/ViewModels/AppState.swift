@@ -533,10 +533,8 @@ class AppState: ObservableObject {
                     if editingDatabaseConnection?.id == id {
                         editingDatabaseConnection = nil
                     }
+                    invalidateDatabasePanels(forConnectionId: id)
                     tabs.removeAll { $0.type == .database && $0.serverId == id }
-                    for tabId in removedTabIds {
-                        databasePanelSnapshots.removeValue(forKey: tabId)
-                    }
                     if let active = activeTabId, removedTabIds.contains(active) {
                         closeSessionScopedTools()
                         activeTabId = tabs.last?.id

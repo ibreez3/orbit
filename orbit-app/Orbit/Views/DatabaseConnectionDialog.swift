@@ -202,17 +202,17 @@ struct DatabaseConnectionDialog: View {
     private var input: DatabaseConnectionInput {
         DatabaseConnectionInput(
             name: trimmed(name),
-            group_name: trimmed(groupName).isEmpty ? nil : trimmed(groupName),
+            group_name: trimmed(groupName),
             engine: engine.rawValue,
-            ssh_server_id: shouldPersistSSHServer ? (trimmed(sshServerId).isEmpty ? nil : trimmed(sshServerId)) : nil,
+            ssh_server_id: shouldPersistSSHServer ? trimmed(sshServerId) : "",
             use_ssh_tunnel: engine == .remoteSQLite ? false : useSSHTunnel,
-            host: engine == .remoteSQLite ? nil : trimmed(host),
-            port: engine == .remoteSQLite ? nil : UInt16(portText),
-            database_name: engine == .remoteSQLite ? nil : trimmed(databaseName),
-            username: engine == .remoteSQLite ? nil : trimmed(username),
-            password: engine == .remoteSQLite ? nil : password,
-            sqlite_path: engine == .remoteSQLite ? trimmed(sqlitePath) : nil,
-            ssl_mode: engine == .remoteSQLite ? nil : trimmed(sslMode)
+            host: engine == .remoteSQLite ? "" : trimmed(host),
+            port: engine == .remoteSQLite ? UInt16(0) : UInt16(portText),
+            database_name: engine == .remoteSQLite ? "" : trimmed(databaseName),
+            username: engine == .remoteSQLite ? "" : trimmed(username),
+            password: engine == .remoteSQLite ? "" : password,
+            sqlite_path: engine == .remoteSQLite ? trimmed(sqlitePath) : "",
+            ssl_mode: engine == .remoteSQLite ? "" : trimmed(sslMode)
         )
     }
 
