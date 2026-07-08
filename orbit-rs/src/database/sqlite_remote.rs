@@ -83,25 +83,16 @@ impl SqliteRemote {
         }
 
         let manager = Self::detect_package_manager(pool, server, db)?;
+        if !install_sqlite {
+            return Ok(missing_sqlite_result(manager.as_deref()));
+        }
+
         let install_command = manager
             .as_deref()
             .and_then(sqlite_install_command)
             .ok_or_else(|| {
                 anyhow!("sqlite3 is not installed and no supported package manager was found")
             })?;
-
-        if !install_sqlite {
-            return Ok(DatabaseOperationResult {
-                ok: false,
-                code: "sqlite_missing".into(),
-                message: format!(
-                    "sqlite3 is not installed. Suggested command: {}",
-                    install_command
-                ),
-                artifact_path: None,
-                affected_rows: None,
-            });
-        }
 
         ssh::SshManager::exec_command(pool, server, db, install_command)?;
         let recheck = ssh::SshManager::exec_command(
@@ -165,6 +156,21 @@ impl SqliteRemote {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string))
+    }
+}
+
+fn missing_sqlite_result(manager: Option<&str>) -> DatabaseOperationResult {
+    let message = match manager.and_then(sqlite_install_command) {
+        Some(command) => format!("sqlite3 is not installed. Suggested command: {}", command),
+        None => "sqlite3 is not installed and no supported package manager was found".into(),
+    };
+
+    DatabaseOperationResult {
+        ok: false,
+        code: "sqlite_missing".into(),
+        message,
+        artifact_path: None,
+        affected_rows: None,
     }
 }
 
@@ -268,5 +274,29 @@ mod tests {
             assert!(index >= previous_index);
             previous_index = index;
         }
+    }
+
+    #[test]
+    fn missing_sqlite_result_reports_unsupported_manager_without_install_command() {
+        let result = missing_sqlite_result(None);
+
+        assert!(!result.ok);
+        assert_eq!(result.code, "sqlite_missing");
+        assert!(result.message.contains("sqlite3 is not installed"));
+        assert!(result
+            .message
+            .contains("no supported package manager was found"));
+        assert!(!result.message.contains("Suggested command:"));
+    }
+
+    #[test]
+    fn missing_sqlite_result_includes_suggested_command_for_supported_manager() {
+        let result = missing_sqlite_result(Some("apt-get"));
+
+        assert!(!result.ok);
+        assert_eq!(result.code, "sqlite_missing");
+        assert!(result.message.contains(
+            "Suggested command: sudo apt-get update && sudo apt-get install -y sqlite3"
+        ));
     }
 }
