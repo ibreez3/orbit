@@ -61,6 +61,9 @@ pub struct DatabaseBackupRecordInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseOperationResult {
-    pub success: bool,
+    pub ok: bool,
+    pub code: String,
     pub message: String,
+    pub artifact_path: Option<String>,
+    pub affected_rows: Option<u64>,
 }

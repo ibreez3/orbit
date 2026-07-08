@@ -79,8 +79,7 @@ impl DatabaseStore {
     ) -> Result<DatabaseConnection> {
         let existing = Self::get_connection(db, id)?;
         let now = chrono::Utc::now().to_rfc3339();
-        let connection =
-            Self::connection_from_input(id.to_string(), existing.created_at, now, input);
+        let connection = Self::connection_from_update(existing, now, input);
         let enc_password = crypto::encrypt(&connection.password);
         let conn = db.conn.lock().unwrap();
         conn.execute(
@@ -181,6 +180,39 @@ impl DatabaseStore {
             sqlite_path: input.sqlite_path.clone().unwrap_or_default(),
             ssl_mode: input.ssl_mode.clone().unwrap_or_default(),
             created_at,
+            updated_at,
+        }
+    }
+
+    fn connection_from_update(
+        existing: DatabaseConnection,
+        updated_at: String,
+        input: &DatabaseConnectionInput,
+    ) -> DatabaseConnection {
+        DatabaseConnection {
+            id: existing.id,
+            name: input.name.clone(),
+            group_name: input
+                .group_name
+                .clone()
+                .unwrap_or(existing.group_name),
+            engine: input.engine.clone(),
+            ssh_server_id: input
+                .ssh_server_id
+                .clone()
+                .unwrap_or(existing.ssh_server_id),
+            use_ssh_tunnel: input.use_ssh_tunnel.unwrap_or(existing.use_ssh_tunnel),
+            host: input.host.clone().unwrap_or(existing.host),
+            port: input.port.unwrap_or(existing.port),
+            database_name: input
+                .database_name
+                .clone()
+                .unwrap_or(existing.database_name),
+            username: input.username.clone().unwrap_or(existing.username),
+            password: input.password.clone().unwrap_or(existing.password),
+            sqlite_path: input.sqlite_path.clone().unwrap_or(existing.sqlite_path),
+            ssl_mode: input.ssl_mode.clone().unwrap_or(existing.ssl_mode),
+            created_at: existing.created_at,
             updated_at,
         }
     }
@@ -302,5 +334,60 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].operation, "restore");
         assert_eq!(records[1].operation, "backup");
+    }
+
+    #[test]
+    fn update_connection_preserves_omitted_optional_fields() {
+        let db = test_db();
+        let saved = DatabaseStore::add_connection(
+            &db,
+            &DatabaseConnectionInput {
+                name: "prod mysql".into(),
+                group_name: Some("prod".into()),
+                engine: "mysql".into(),
+                ssh_server_id: Some("ssh-1".into()),
+                use_ssh_tunnel: Some(true),
+                host: Some("mysql.internal".into()),
+                port: Some(3306),
+                database_name: Some("app".into()),
+                username: Some("app_user".into()),
+                password: Some("secret".into()),
+                sqlite_path: Some("/tmp/prod.sqlite".into()),
+                ssl_mode: Some("prefer".into()),
+            },
+        )
+        .expect("add");
+
+        let updated = DatabaseStore::update_connection(
+            &db,
+            &saved.id,
+            &DatabaseConnectionInput {
+                name: "renamed mysql".into(),
+                group_name: None,
+                engine: "mysql".into(),
+                ssh_server_id: None,
+                use_ssh_tunnel: None,
+                host: None,
+                port: None,
+                database_name: None,
+                username: None,
+                password: None,
+                sqlite_path: None,
+                ssl_mode: None,
+            },
+        )
+        .expect("update");
+
+        assert_eq!(updated.name, "renamed mysql");
+        assert_eq!(updated.group_name, "prod");
+        assert_eq!(updated.ssh_server_id, "ssh-1");
+        assert!(updated.use_ssh_tunnel);
+        assert_eq!(updated.host, "mysql.internal");
+        assert_eq!(updated.port, 3306);
+        assert_eq!(updated.database_name, "app");
+        assert_eq!(updated.username, "app_user");
+        assert_eq!(updated.password, "secret");
+        assert_eq!(updated.sqlite_path, "/tmp/prod.sqlite");
+        assert_eq!(updated.ssl_mode, "prefer");
     }
 }
