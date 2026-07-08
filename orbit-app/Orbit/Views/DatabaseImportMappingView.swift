@@ -391,12 +391,13 @@ struct DatabaseImportMappingView: View {
         importPlan.target_connection_id = targetConnectionId
         importPlan.mode = mode
         errorMessage = nil
+        let importedTables = importedTableCount(in: importPlan)
         do {
             let skipped = skippedFieldCount(in: importPlan)
             let result = try await appState.runDatabaseImport(request: DatabaseImportRequest(plan: importPlan))
             resultSummary = ImportRunSummary(
                 ok: result.ok,
-                tableCount: importPlan.tables.count,
+                tableCount: importedTables,
                 rowCount: result.affected_rows ?? 0,
                 skippedFieldCount: skipped,
                 errorSummary: result.ok ? result.message : appState.databaseOperationMessage(result)
@@ -405,12 +406,20 @@ struct DatabaseImportMappingView: View {
         } catch {
             resultSummary = ImportRunSummary(
                 ok: false,
-                tableCount: importPlan.tables.count,
+                tableCount: importedTables,
                 rowCount: 0,
                 skippedFieldCount: skippedFieldCount(in: importPlan),
                 errorSummary: error.localizedDescription
             )
         }
+    }
+
+    private func importedTableCount(in plan: DatabaseImportPlan) -> Int {
+        plan.tables.filter { table in
+            table.columns.contains {
+                !trimmed($0.source_column).isEmpty && !trimmed($0.target_column ?? "").isEmpty
+            }
+        }.count
     }
 
     private func skippedFieldCount(in plan: DatabaseImportPlan) -> Int {
