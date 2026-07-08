@@ -1,5 +1,8 @@
 pub fn is_write_statement(sql: &str) -> bool {
     let token = first_sql_token(sql);
+    if token.as_deref() == Some("with") {
+        return with_contains_data_modifying_cte(sql);
+    }
     matches!(
         token.as_deref(),
         Some("insert")
@@ -68,6 +71,74 @@ fn first_sql_token(sql: &str) -> Option<String> {
     }
 }
 
+fn with_contains_data_modifying_cte(sql: &str) -> bool {
+    let normalized = sql_without_comments_or_string_literals(sql);
+    let mut chars = normalized.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '(' {
+            continue;
+        }
+        while chars.peek().is_some_and(|next| next.is_whitespace()) {
+            chars.next();
+        }
+        let token: String = chars
+            .by_ref()
+            .take_while(|next| next.is_ascii_alphabetic() || *next == '_')
+            .collect();
+        if matches!(
+            token.as_str(),
+            "insert" | "update" | "delete" | "create" | "replace"
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
+fn sql_without_comments_or_string_literals(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '-' && chars.peek() == Some(&'-') {
+            chars.next();
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    result.push(' ');
+                    break;
+                }
+            }
+            continue;
+        }
+        if ch == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            let mut previous = '\0';
+            for next in chars.by_ref() {
+                if previous == '*' && next == '/' {
+                    result.push(' ');
+                    break;
+                }
+                previous = next;
+            }
+            continue;
+        }
+        if ch == '\'' {
+            result.push(' ');
+            while let Some(next) = chars.next() {
+                if next == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        result.push(ch.to_ascii_lowercase());
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +153,25 @@ mod tests {
             "WITH recent AS (SELECT 1) SELECT * FROM recent"
         ));
         assert!(!is_write_statement("SELECT * FROM users LIMIT 10"));
+    }
+
+    #[test]
+    fn detects_data_modifying_ctes_as_writes() {
+        assert!(is_write_statement(
+            "WITH updated AS (UPDATE users SET name = 'a' RETURNING id) SELECT * FROM updated"
+        ));
+        assert!(is_write_statement(
+            "WITH removed AS (DELETE FROM users WHERE id = 1 RETURNING id) SELECT * FROM removed"
+        ));
+        assert!(is_write_statement(
+            "WITH inserted AS (INSERT INTO users(name) VALUES ('a') RETURNING id) SELECT * FROM inserted"
+        ));
+        assert!(is_write_statement(
+            "WITH made AS (CREATE TABLE scratch(id INTEGER) RETURNING id) SELECT * FROM made"
+        ));
+        assert!(!is_write_statement(
+            "WITH recent AS (SELECT * FROM update_log) SELECT * FROM recent"
+        ));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 class AppState: ObservableObject {
@@ -621,6 +622,27 @@ class AppState: ObservableObject {
             await MainActor.run { databaseOperationLoading = true }
             do {
                 let result = try await bridge.testDatabaseConnectionAsync(id: connection.id, installSqlite: false)
+                if shouldPromptForRemoteSqliteInstall(connection: connection, result: result) {
+                    let confirmed = await MainActor.run {
+                        databaseOperationLoading = false
+                        return confirmRemoteSqliteInstall(message: result.message)
+                    }
+                    guard confirmed else {
+                        await MainActor.run {
+                            alertTitle = "连接测试失败"
+                            alertMessage = result.message
+                        }
+                        return
+                    }
+                    await MainActor.run { databaseOperationLoading = true }
+                    let installResult = try await bridge.testDatabaseConnectionAsync(id: connection.id, installSqlite: true)
+                    await MainActor.run {
+                        databaseOperationLoading = false
+                        alertTitle = installResult.ok ? "连接测试成功" : "连接测试失败"
+                        alertMessage = installResult.message
+                    }
+                    return
+                }
                 await MainActor.run {
                     databaseOperationLoading = false
                     alertTitle = result.ok ? "连接测试成功" : "连接测试失败"
@@ -634,6 +656,23 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    private func shouldPromptForRemoteSqliteInstall(connection: DatabaseConnection, result: DatabaseOperationResult) -> Bool {
+        connection.engine == "remote_sqlite"
+            && result.code == "sqlite_missing"
+            && result.message.contains("Suggested command:")
+    }
+
+    @MainActor
+    private func confirmRemoteSqliteInstall(message: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "远端缺少 sqlite3"
+        alert.informativeText = "\(message)\n\n是否在远端服务器执行上述安装命令？"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "安装并重新测试")
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func backupDatabaseConnection(_ connection: DatabaseConnection) {

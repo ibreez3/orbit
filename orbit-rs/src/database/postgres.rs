@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use postgres::{Client, NoTls, Row};
 
-use crate::database::backup::{drop_table_sql, insert_rows_sql, quote_ident};
+use crate::database::backup::{insert_rows_sql, quote_ident};
 use crate::database::models::{
     DatabaseBackupArtifact, DatabaseBackupTable, DatabaseColumnSchema, DatabaseConnection,
     DatabaseOperationResult, DatabaseQueryResult, DatabaseTableSchema,
@@ -63,9 +63,9 @@ impl PostgresEngine {
             .map(|row| {
                 (0..columns.len())
                     .map(|index| postgres_cell_to_string(row, index))
-                    .collect()
+                    .collect::<Result<Vec<_>>>()
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(DatabaseQueryResult {
             columns,
@@ -98,20 +98,9 @@ impl PostgresEngine {
         let mut client = Self::connect(connection)?;
         let mut inserted = 0;
         for table in &artifact.tables {
-            client.batch_execute(&drop_table_sql(&table.name, "postgres"))?;
-            client.batch_execute(&crate::database::backup::create_table_sql(
-                table, "postgres",
-            ))?;
-            for indexes in (0..table.rows.len())
-                .collect::<Vec<_>>()
-                .chunks(500)
-                .map(|chunk| chunk.to_vec())
-            {
-                if let Some(sql) = insert_rows_sql(table, "postgres", &indexes) {
-                    client.batch_execute(&sql)?;
-                    inserted += indexes.len() as u64;
-                }
-            }
+            let script = postgres_restore_script_for_table(table);
+            client.batch_execute(&script)?;
+            inserted += table.rows.len() as u64;
         }
         Ok(inserted)
     }
@@ -135,7 +124,8 @@ impl PostgresEngine {
 fn list_schema_with_client(client: &mut Client) -> Result<Vec<DatabaseTableSchema>> {
     let rows = client.query(
         "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default,
-                COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_primary
+                COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_primary,
+                c.is_identity
          FROM information_schema.columns c
          LEFT JOIN information_schema.key_column_usage kcu
            ON c.table_schema = kcu.table_schema
@@ -158,17 +148,18 @@ fn backup_rows_with_client(
 ) -> Result<Vec<HashMap<String, Option<String>>>> {
     let sql = format!("SELECT * FROM {}", quote_ident(&table.name, "postgres"));
     let rows = client.query(&sql, &[])?;
-    Ok(rows
-        .iter()
+    rows.iter()
         .map(|row| {
             table
                 .columns
                 .iter()
                 .enumerate()
-                .map(|(index, column)| (column.name.clone(), postgres_cell_to_string(row, index)))
-                .collect::<HashMap<_, _>>()
+                .map(|(index, column)| {
+                    Ok((column.name.clone(), postgres_cell_to_string(row, index)?))
+                })
+                .collect::<Result<HashMap<_, _>>>()
         })
-        .collect())
+        .collect()
 }
 
 fn rows_to_schema(rows: Vec<Row>) -> Vec<DatabaseTableSchema> {
@@ -181,6 +172,7 @@ fn rows_to_schema(rows: Vec<Row>) -> Vec<DatabaseTableSchema> {
             nullable: row.get::<_, String>(3) == "YES",
             primary_key: row.get(5),
             default_value: row.get(4),
+            auto_generated: row.get::<_, String>(6) == "YES",
         };
 
         if let Some(table) = tables.iter_mut().find(|table| table.name == table_name) {
@@ -195,24 +187,101 @@ fn rows_to_schema(rows: Vec<Row>) -> Vec<DatabaseTableSchema> {
     tables
 }
 
-fn postgres_cell_to_string(row: &Row, index: usize) -> Option<String> {
+fn postgres_cell_to_string(row: &Row, index: usize) -> Result<Option<String>> {
     if let Ok(value) = row.try_get::<_, Option<String>>(index) {
-        return value;
+        return Ok(value);
     }
     if let Ok(value) = row.try_get::<_, Option<i64>>(index) {
-        return value.map(|value| value.to_string());
+        return Ok(value.map(|value| value.to_string()));
     }
     if let Ok(value) = row.try_get::<_, Option<i32>>(index) {
-        return value.map(|value| value.to_string());
+        return Ok(value.map(|value| value.to_string()));
     }
     if let Ok(value) = row.try_get::<_, Option<f64>>(index) {
-        return value.map(|value| value.to_string());
+        return Ok(value.map(|value| value.to_string()));
     }
     if let Ok(value) = row.try_get::<_, Option<f32>>(index) {
-        return value.map(|value| value.to_string());
+        return Ok(value.map(|value| value.to_string()));
     }
     if let Ok(value) = row.try_get::<_, Option<bool>>(index) {
-        return value.map(|value| value.to_string());
+        return Ok(value.map(|value| value.to_string()));
     }
-    Some("<unsupported>".into())
+    Err(unsupported_postgres_type_error(
+        row.columns()[index].type_().name(),
+    ))
+}
+
+fn unsupported_postgres_type_error(type_name: &str) -> Error {
+    anyhow!(
+        "unsupported PostgreSQL column type {}; backup/query serialization is not supported yet",
+        type_name
+    )
+}
+
+fn postgres_restore_script_for_table(table: &DatabaseBackupTable) -> String {
+    let restore_name = restore_table_name("__orbit_restore", &table.name);
+    let restore_table = backup_table_with_name(table, &restore_name);
+    let mut statements = vec![
+        "BEGIN".to_string(),
+        format!(
+            "DROP TABLE IF EXISTS {}",
+            quote_ident(&restore_name, "postgres")
+        ),
+        crate::database::backup::create_table_sql(&restore_table, "postgres"),
+    ];
+    for indexes in (0..restore_table.rows.len())
+        .collect::<Vec<_>>()
+        .chunks(500)
+        .map(|chunk| chunk.to_vec())
+    {
+        if let Some(sql) = insert_rows_sql(&restore_table, "postgres", &indexes) {
+            statements.push(sql);
+        }
+    }
+    statements.push(format!(
+        "DROP TABLE IF EXISTS {}",
+        quote_ident(&table.name, "postgres")
+    ));
+    statements.push(format!(
+        "ALTER TABLE {} RENAME TO {}",
+        quote_ident(&restore_name, "postgres"),
+        quote_ident(&table.name, "postgres")
+    ));
+    statements.push("COMMIT".into());
+    format!("{};", statements.join("; "))
+}
+
+fn backup_table_with_name(table: &DatabaseBackupTable, name: &str) -> DatabaseBackupTable {
+    let mut renamed = table.clone();
+    renamed.name = name.into();
+    renamed
+}
+
+fn restore_table_name(prefix: &str, table_name: &str) -> String {
+    let safe = table_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{}_{}", prefix, safe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_postgres_type_error_is_explicit() {
+        let err = unsupported_postgres_type_error("jsonb");
+
+        assert!(err
+            .to_string()
+            .contains("unsupported PostgreSQL column type jsonb"));
+        assert!(!err.to_string().contains("<unsupported>"));
+    }
 }

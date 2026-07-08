@@ -192,6 +192,7 @@ struct DatabaseColumnSchema: Codable, Identifiable {
     let nullable: Bool
     let primary_key: Bool
     let default_value: String?
+    let auto_generated: Bool?
 
     var id: String { name }
 }

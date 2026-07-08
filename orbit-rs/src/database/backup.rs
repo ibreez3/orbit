@@ -286,6 +286,7 @@ mod tests {
                     nullable: true,
                     primary_key: false,
                     default_value: None,
+                    auto_generated: false,
                 },
                 DatabaseColumnSchema {
                     name: "b".into(),
@@ -293,6 +294,7 @@ mod tests {
                     nullable: true,
                     primary_key: false,
                     default_value: None,
+                    auto_generated: false,
                 },
             ],
         };

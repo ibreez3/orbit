@@ -21,6 +21,37 @@ pub struct TrafficStats {
 pub type DataCallback = Box<dyn Fn(&str, &[u8]) + Send + Sync>;
 pub type ClosedCallback = Box<dyn Fn(&str) + Send + Sync>;
 
+#[derive(Debug, Clone)]
+pub struct SshCommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_status: i32,
+}
+
+impl SshCommandOutput {
+    pub fn into_success_stdout(self, context: &str) -> Result<String> {
+        if self.exit_status == 0 {
+            return Ok(self.stdout);
+        }
+
+        let stderr = self.stderr.trim();
+        let stdout = self.stdout.trim();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            "no output"
+        };
+        Err(anyhow!(
+            "{} failed with exit status {}: {}",
+            context,
+            self.exit_status,
+            detail
+        ))
+    }
+}
+
 pub(crate) struct ActiveChannel {
     channel: Arc<std::sync::Mutex<ssh2::Channel>>,
     running: Arc<AtomicBool>,
@@ -441,10 +472,79 @@ impl SshManager {
         }
         result
     }
+
+    pub fn exec_command_checked(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        command: &str,
+        context: &str,
+    ) -> Result<String> {
+        Self::exec_command_output(pool, server, db, command)?.into_success_stdout(context)
+    }
+
+    pub fn exec_command_output(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        command: &str,
+    ) -> Result<SshCommandOutput> {
+        debug!(server = %server.name, command, "执行远程命令并检查退出状态");
+        let _lease = pool.acquire_scoped(server, db)?;
+        let result = pool.with_session_mut(&server.id, |session| {
+            let mut channel = session.channel_session()?;
+            channel.exec(command)?;
+            session.set_timeout(30_000);
+
+            let mut stdout = String::new();
+            let stdout_result = channel.read_to_string(&mut stdout);
+            let mut stderr = String::new();
+            let mut stderr_stream = channel.stderr();
+            let stderr_result = stderr_stream.read_to_string(&mut stderr);
+            let wait_result = channel.wait_close();
+            let exit_status_result = channel.exit_status();
+            session.set_timeout(0);
+
+            stdout_result?;
+            stderr_result?;
+            wait_result?;
+            Ok(SshCommandOutput {
+                stdout,
+                stderr,
+                exit_status: exit_status_result?,
+            })
+        });
+        if let Err(ref e) = result {
+            warn!(server = %server.name, command, error = %e, "远程命令执行失败");
+        }
+        result
+    }
 }
 
 impl Drop for SshManager {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_command_output_rejects_nonzero_exit_with_stderr() {
+        let output = SshCommandOutput {
+            stdout: String::new(),
+            stderr: "permission denied".into(),
+            exit_status: 13,
+        };
+
+        let err = output
+            .into_success_stdout("sqlite schema")
+            .expect_err("nonzero exit");
+
+        assert!(err.to_string().contains("sqlite schema"));
+        assert!(err.to_string().contains("exit status 13"));
+        assert!(err.to_string().contains("permission denied"));
     }
 }

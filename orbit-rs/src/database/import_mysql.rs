@@ -156,19 +156,25 @@ pub fn prepare_existing_table_import_plan(
         tables: artifact
             .tables
             .iter()
-            .filter_map(|source_table| {
+            .map(|source_table| {
                 let target_table = target_schema
                     .iter()
-                    .find(|table| table.name.eq_ignore_ascii_case(&source_table.name))?;
+                    .find(|table| table.name.eq_ignore_ascii_case(&source_table.name));
                 let mut mappings = source_table
                     .columns
                     .iter()
                     .map(|source_column| {
                         let target_column = target_table
-                            .columns
-                            .iter()
-                            .find(|column| column.name.eq_ignore_ascii_case(&source_column.name))
-                            .map(|column| column.name.clone());
+                            .and_then(|table| {
+                                table
+                                    .columns
+                                    .iter()
+                                    .find(|column| {
+                                        column.name.eq_ignore_ascii_case(&source_column.name)
+                                    })
+                                    .map(|column| column.name.clone())
+                            })
+                            .or_else(|| Some(source_column.name.clone()));
                         DatabaseImportColumnMapping {
                             source_column: source_column.name.clone(),
                             target_column,
@@ -178,30 +184,35 @@ pub fn prepare_existing_table_import_plan(
                     })
                     .collect::<Vec<_>>();
 
-                for target_column in &target_table.columns {
-                    let mapped = mappings.iter().any(|mapping| {
-                        mapping
-                            .target_column
-                            .as_deref()
-                            .is_some_and(|name| name.eq_ignore_ascii_case(&target_column.name))
-                    });
-                    let required_without_default =
-                        !target_column.nullable && target_column.default_value.is_none();
-                    if required_without_default && !mapped {
-                        mappings.push(DatabaseImportColumnMapping {
-                            source_column: String::new(),
-                            target_column: Some(target_column.name.clone()),
-                            target_type: target_column.db_type.clone(),
-                            required_without_default: true,
+                if let Some(target_table) = target_table {
+                    for target_column in &target_table.columns {
+                        let mapped = mappings.iter().any(|mapping| {
+                            mapping
+                                .target_column
+                                .as_deref()
+                                .is_some_and(|name| name.eq_ignore_ascii_case(&target_column.name))
                         });
+                        let required_without_default = !target_column.nullable
+                            && target_column.default_value.is_none()
+                            && !target_column.auto_generated;
+                        if required_without_default && !mapped {
+                            mappings.push(DatabaseImportColumnMapping {
+                                source_column: String::new(),
+                                target_column: Some(target_column.name.clone()),
+                                target_type: target_column.db_type.clone(),
+                                required_without_default: true,
+                            });
+                        }
                     }
                 }
 
-                Some(DatabaseImportTablePlan {
+                DatabaseImportTablePlan {
                     source_table: source_table.name.clone(),
-                    target_table: target_table.name.clone(),
+                    target_table: target_table
+                        .map(|table| table.name.clone())
+                        .unwrap_or_else(|| source_table.name.clone()),
                     columns: mappings,
-                })
+                }
             })
             .collect(),
     }
@@ -291,5 +302,24 @@ mod tests {
             validate_mysql_import_sources(&plan, &artifact).expect_err("invalid source mapping");
         assert!(err.to_string().contains("source_table"));
         assert!(err.to_string().contains("missing_column"));
+    }
+
+    #[test]
+    fn existing_table_plan_includes_unmatched_source_tables() {
+        let artifact = DatabaseBackupArtifact::single_table_for_test(
+            "legacy_users",
+            vec![("id", "INTEGER"), ("system", "TEXT")],
+            vec![vec![("id", Some("1")), ("system", Some("prod"))]],
+        );
+        let plan =
+            prepare_existing_table_import_plan(&artifact, "/tmp/source.json", "mysql-1", &[]);
+
+        assert_eq!(plan.tables.len(), 1);
+        assert_eq!(plan.tables[0].source_table, "legacy_users");
+        assert_eq!(plan.tables[0].target_table, "legacy_users");
+        assert_eq!(
+            plan.tables[0].columns[0].target_column.as_deref(),
+            Some("id")
+        );
     }
 }

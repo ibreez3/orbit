@@ -76,6 +76,8 @@ pub struct DatabaseColumnSchema {
     pub nullable: bool,
     pub primary_key: bool,
     pub default_value: Option<String>,
+    #[serde(default)]
+    pub auto_generated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +259,7 @@ impl DatabaseBackupArtifact {
                         nullable: true,
                         primary_key: false,
                         default_value: None,
+                        auto_generated: false,
                     })
                     .collect(),
                 rows: rows

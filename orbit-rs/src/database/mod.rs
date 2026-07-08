@@ -15,8 +15,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 
 use crate::database::backup::{
-    artifact_from_tables, backup_path_for, create_backup_record, drop_table_sql, read_artifact,
-    sqlite_json_rows_to_backup_table, write_artifact,
+    artifact_from_tables, backup_path_for, create_backup_record, insert_rows_sql, quote_ident,
+    read_artifact, sqlite_json_rows_to_backup_table, write_artifact,
 };
 use crate::database::import_mysql::{
     prepare_existing_table_import_plan, prepare_new_table_import_plan, validate_mysql_import_plan,
@@ -30,7 +30,7 @@ use crate::database::models::{
 };
 use crate::database::mysql::MysqlEngine;
 use crate::database::postgres::PostgresEngine;
-use crate::database::sqlite_remote::SqliteRemote;
+use crate::database::sqlite_remote::{parse_sqlite_json, SqliteRemote};
 use crate::db::Database;
 use crate::transport;
 
@@ -136,7 +136,7 @@ impl DatabaseManager {
                         &sql,
                     )?;
                     let rows: Vec<std::collections::HashMap<String, serde_json::Value>> =
-                        serde_json::from_str(&output).unwrap_or_default();
+                        parse_sqlite_json(&format!("backup SQLite table {}", table.name), &output)?;
                     tables.push(sqlite_json_rows_to_backup_table(&table, rows));
                 }
                 tables
@@ -327,11 +327,11 @@ impl DbTunnel {
         }
         let server = db.get_server(&connection.ssh_server_id)?;
         let guard = transport::create_session(&server, db)?;
-        guard.session.set_blocking(false);
         let channel =
             guard
                 .session
                 .channel_direct_tcpip(connection.host.as_str(), connection.port, None)?;
+        guard.session.set_blocking(false);
         let (local_port, handle, running) = start_single_connection_proxy(channel)?;
         Ok(Self {
             local_port,
@@ -408,36 +408,68 @@ fn restore_sqlite(
     let server = db.get_server(&connection.ssh_server_id)?;
     let mut affected = 0;
     for table in tables {
-        SqliteRemote::execute_raw(
-            pool,
-            &server,
-            db,
-            &connection.sqlite_path,
-            &drop_table_sql(&table.name, "sqlite"),
-        )?;
-        SqliteRemote::execute_raw(
-            pool,
-            &server,
-            db,
-            &connection.sqlite_path,
-            &crate::database::backup::create_table_sql(table, "sqlite"),
-        )?;
-        for indexes in (0..table.rows.len())
-            .collect::<Vec<_>>()
-            .chunks(500)
-            .map(|chunk| chunk.to_vec())
-        {
-            if let Some(sql) = crate::database::backup::insert_rows_sql(table, "sqlite", &indexes) {
-                SqliteRemote::execute_raw(pool, &server, db, &connection.sqlite_path, &sql)?;
-                affected += indexes.len() as u64;
-            }
-        }
+        let script = sqlite_restore_script_for_table(table);
+        SqliteRemote::execute_script(pool, &server, db, &connection.sqlite_path, &script)?;
+        affected += table.rows.len() as u64;
     }
     Ok(affected)
 }
 
 fn sqlite_ident(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+fn sqlite_restore_script_for_table(table: &BackupTable) -> String {
+    let restore_name = restore_table_name("__orbit_restore", &table.name);
+    let restore_table = backup_table_with_name(table, &restore_name);
+    let mut statements = vec![
+        "BEGIN IMMEDIATE".to_string(),
+        format!(
+            "DROP TABLE IF EXISTS {}",
+            quote_ident(&restore_name, "sqlite")
+        ),
+        crate::database::backup::create_table_sql(&restore_table, "sqlite"),
+    ];
+    for indexes in (0..restore_table.rows.len())
+        .collect::<Vec<_>>()
+        .chunks(500)
+        .map(|chunk| chunk.to_vec())
+    {
+        if let Some(sql) = insert_rows_sql(&restore_table, "sqlite", &indexes) {
+            statements.push(sql);
+        }
+    }
+    statements.push(format!(
+        "DROP TABLE IF EXISTS {}",
+        quote_ident(&table.name, "sqlite")
+    ));
+    statements.push(format!(
+        "ALTER TABLE {} RENAME TO {}",
+        quote_ident(&restore_name, "sqlite"),
+        quote_ident(&table.name, "sqlite")
+    ));
+    statements.push("COMMIT".into());
+    format!("{};", statements.join("; "))
+}
+
+fn backup_table_with_name(table: &BackupTable, name: &str) -> BackupTable {
+    let mut renamed = table.clone();
+    renamed.name = name.into();
+    renamed
+}
+
+fn restore_table_name(prefix: &str, table_name: &str) -> String {
+    let safe = table_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{}_{}", prefix, safe)
 }
 
 #[cfg(test)]
@@ -450,5 +482,29 @@ mod tests {
 
         assert!(err.to_string().contains("unsupported restore mode"));
         assert!(err.to_string().contains("merge"));
+    }
+
+    #[test]
+    fn sqlite_restore_script_populates_restore_table_before_dropping_original() {
+        let mut artifact = DatabaseBackupArtifact::single_table_for_test(
+            "users",
+            vec![("id", "INTEGER"), ("name", "TEXT")],
+            vec![vec![("id", Some("1")), ("name", Some("Ada"))]],
+        );
+        let table = artifact.tables.remove(0);
+
+        let script = sqlite_restore_script_for_table(&table);
+        let create_restore = script
+            .find("CREATE TABLE \"__orbit_restore_users\"")
+            .unwrap();
+        let insert_restore = script
+            .find("INSERT INTO \"__orbit_restore_users\"")
+            .unwrap();
+        let drop_original = script.find("DROP TABLE IF EXISTS \"users\"").unwrap();
+
+        assert!(create_restore < drop_original);
+        assert!(insert_restore < drop_original);
+        assert!(script.starts_with("BEGIN IMMEDIATE;"));
+        assert!(script.ends_with("COMMIT;"));
     }
 }

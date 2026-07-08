@@ -59,11 +59,10 @@ impl MysqlEngine {
         let rows = result
             .map(|row| {
                 let row = row?;
-                Ok(row
-                    .unwrap()
+                row.unwrap()
                     .into_iter()
                     .map(mysql_value_to_string)
-                    .collect::<Vec<_>>())
+                    .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -98,9 +97,7 @@ impl MysqlEngine {
         let mut conn = Self::connect(connection)?;
         let mut inserted = 0;
         for table in &artifact.tables {
-            conn.query_drop(drop_table_sql(&table.name, "mysql"))?;
-            conn.query_drop(crate::database::backup::create_table_sql(table, "mysql"))?;
-            inserted += insert_table_rows(&mut conn, table)?;
+            inserted += restore_table_with_shadow(&mut conn, table)?;
         }
         Ok(inserted)
     }
@@ -188,8 +185,8 @@ fn list_schema_with_conn(
     conn: &mut mysql::Conn,
     connection: &DatabaseConnection,
 ) -> Result<Vec<DatabaseTableSchema>> {
-    let rows: Vec<(String, String, String, String, Option<String>, u64)> = conn.exec(
-        "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY = 'PRI' AS IS_PRIMARY
+    let rows: Vec<(String, String, String, String, Option<String>, u64, String)> = conn.exec(
+        "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY = 'PRI' AS IS_PRIMARY, EXTRA
          FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = ?
          ORDER BY TABLE_NAME, ORDINAL_POSITION",
@@ -204,35 +201,34 @@ fn backup_rows_with_conn(
 ) -> Result<Vec<HashMap<String, Option<String>>>> {
     let sql = format!("SELECT * FROM {}", quote_ident(&table.name, "mysql"));
     let result = conn.query_iter(sql)?;
-    let rows = result
+    result
         .map(|row| {
-            let row = row?;
-            Ok(row
-                .unwrap()
-                .into_iter()
-                .map(mysql_value_to_string)
-                .collect::<Vec<_>>())
-        })
-        .collect::<std::result::Result<Vec<_>, mysql::Error>>()?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| {
+            let values = row?.unwrap();
             table
                 .columns
                 .iter()
-                .zip(row)
-                .map(|(column, value)| (column.name.clone(), value))
-                .collect::<HashMap<_, _>>()
+                .zip(values)
+                .map(|(column, value)| {
+                    if is_mysql_binary_type(&column.db_type) && !matches!(value, Value::NULL) {
+                        return Err(anyhow!(
+                            "unsupported MySQL binary column {}.{}; binary backup is not supported yet",
+                            table.name,
+                            column.name
+                        ));
+                    }
+                    Ok((column.name.clone(), mysql_value_to_string(value)?))
+                })
+                .collect::<Result<HashMap<_, _>>>()
         })
-        .collect())
+        .collect()
 }
 
 fn rows_to_schema(
-    rows: Vec<(String, String, String, String, Option<String>, u64)>,
+    rows: Vec<(String, String, String, String, Option<String>, u64, String)>,
 ) -> Vec<DatabaseTableSchema> {
     let mut tables: Vec<DatabaseTableSchema> = Vec::new();
-    for (table_name, column_name, db_type, nullable, default_value, primary_key) in rows {
+    for (table_name, column_name, db_type, nullable, default_value, primary_key, extra) in rows {
+        let auto_generated = mysql_extra_is_auto_generated(&extra);
         if let Some(table) = tables.iter_mut().find(|table| table.name == table_name) {
             table.columns.push(DatabaseColumnSchema {
                 name: column_name,
@@ -240,6 +236,7 @@ fn rows_to_schema(
                 nullable: nullable == "YES",
                 primary_key: primary_key != 0,
                 default_value,
+                auto_generated,
             });
         } else {
             tables.push(DatabaseTableSchema {
@@ -250,6 +247,7 @@ fn rows_to_schema(
                     nullable: nullable == "YES",
                     primary_key: primary_key != 0,
                     default_value,
+                    auto_generated,
                 }],
             });
         }
@@ -257,26 +255,41 @@ fn rows_to_schema(
     tables
 }
 
-fn mysql_value_to_string(value: Value) -> Option<String> {
+fn mysql_value_to_string(value: Value) -> Result<Option<String>> {
     match value {
-        Value::NULL => None,
-        Value::Bytes(bytes) => Some(String::from_utf8_lossy(&bytes).to_string()),
-        Value::Int(value) => Some(value.to_string()),
-        Value::UInt(value) => Some(value.to_string()),
-        Value::Float(value) => Some(value.to_string()),
-        Value::Double(value) => Some(value.to_string()),
-        Value::Date(year, month, day, hour, minute, second, micros) => Some(format!(
+        Value::NULL => Ok(None),
+        Value::Bytes(bytes) => String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|_| anyhow!("unsupported non-UTF-8 MySQL bytes value")),
+        Value::Int(value) => Ok(Some(value.to_string())),
+        Value::UInt(value) => Ok(Some(value.to_string())),
+        Value::Float(value) => Ok(Some(value.to_string())),
+        Value::Double(value) => Ok(Some(value.to_string())),
+        Value::Date(year, month, day, hour, minute, second, micros) => Ok(Some(format!(
             "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
             year, month, day, hour, minute, second, micros
-        )),
+        ))),
         Value::Time(negative, days, hours, minutes, seconds, micros) => {
             let sign = if negative { "-" } else { "" };
-            Some(format!(
+            Ok(Some(format!(
                 "{}{} {:02}:{:02}:{:02}.{:06}",
                 sign, days, hours, minutes, seconds, micros
-            ))
+            )))
         }
     }
+}
+
+fn mysql_extra_is_auto_generated(extra: &str) -> bool {
+    let normalized = extra.to_ascii_lowercase();
+    normalized.contains("auto_increment") || normalized.contains("generated")
+}
+
+fn is_mysql_binary_type(db_type: &str) -> bool {
+    let normalized = db_type.to_ascii_lowercase();
+    normalized.contains("blob")
+        || normalized.contains("binary")
+        || normalized.contains("varbinary")
+        || normalized.contains("bit")
 }
 
 fn insert_table_rows(conn: &mut mysql::Conn, table: &DatabaseBackupTable) -> Result<u64> {
@@ -292,6 +305,59 @@ fn insert_table_rows(conn: &mut mysql::Conn, table: &DatabaseBackupTable) -> Res
         }
     }
     Ok(inserted)
+}
+
+fn restore_table_with_shadow(conn: &mut mysql::Conn, table: &DatabaseBackupTable) -> Result<u64> {
+    let suffix = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
+    let restore_name = restore_shadow_name("__orbit_restore", &table.name, suffix);
+    let backup_name = restore_shadow_name("__orbit_backup", &table.name, suffix);
+    let restore_table = backup_table_with_name(table, &restore_name);
+
+    conn.query_drop(crate::database::backup::create_table_sql(
+        &restore_table,
+        "mysql",
+    ))?;
+    let inserted = match insert_table_rows(conn, &restore_table) {
+        Ok(inserted) => inserted,
+        Err(error) => {
+            let _ = conn.query_drop(drop_table_sql(&restore_name, "mysql"));
+            return Err(error);
+        }
+    };
+
+    let rename_sql = format!(
+        "RENAME TABLE {} TO {}, {} TO {}",
+        quote_ident(&table.name, "mysql"),
+        quote_ident(&backup_name, "mysql"),
+        quote_ident(&restore_name, "mysql"),
+        quote_ident(&table.name, "mysql")
+    );
+    if let Err(error) = conn.query_drop(rename_sql) {
+        let _ = conn.query_drop(drop_table_sql(&restore_name, "mysql"));
+        return Err(error.into());
+    }
+    conn.query_drop(drop_table_sql(&backup_name, "mysql"))?;
+    Ok(inserted)
+}
+
+fn backup_table_with_name(table: &DatabaseBackupTable, name: &str) -> DatabaseBackupTable {
+    let mut renamed = table.clone();
+    renamed.name = name.into();
+    renamed
+}
+
+fn restore_shadow_name(prefix: &str, table_name: &str, suffix: i64) -> String {
+    let safe = table_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{}_{}_{}", prefix, safe, suffix)
 }
 
 fn import_table_definition(
@@ -313,6 +379,7 @@ fn import_table_definition(
                         nullable: !mapping.required_without_default,
                         primary_key: false,
                         default_value: None,
+                        auto_generated: false,
                     })
             })
             .collect(),
@@ -348,4 +415,32 @@ fn import_insert_sql(
         columns,
         values
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mysql_auto_increment_columns_are_marked_auto_generated() {
+        let schema = rows_to_schema(vec![(
+            "users".into(),
+            "id".into(),
+            "bigint unsigned".into(),
+            "NO".into(),
+            None,
+            1,
+            "auto_increment".into(),
+        )]);
+
+        assert!(schema[0].columns[0].auto_generated);
+    }
+
+    #[test]
+    fn mysql_invalid_utf8_bytes_fail_instead_of_lossy_backup_value() {
+        let err =
+            mysql_value_to_string(Value::Bytes(vec![0xff, 0xfe])).expect_err("invalid utf8 bytes");
+
+        assert!(err.to_string().contains("non-UTF-8 MySQL bytes"));
+    }
 }

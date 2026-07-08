@@ -18,6 +18,7 @@ pub enum SqliteRemoteCommand {
     DetectSqlite,
     Read { path: String, sql: String },
     Write { path: String, sql: String },
+    Script { path: String, sql: String },
 }
 
 impl SqliteRemoteCommand {
@@ -39,9 +40,18 @@ impl SqliteRemoteCommand {
         }
     }
 
+    pub fn script(path: &str, sql: &str) -> Self {
+        Self::Script {
+            path: path.into(),
+            sql: sql.into(),
+        }
+    }
+
     pub fn to_shell(&self) -> String {
         match self {
-            Self::DetectSqlite => "command -v sqlite3".into(),
+            Self::DetectSqlite => {
+                "if command -v sqlite3 >/dev/null 2>&1; then command -v sqlite3; fi".into()
+            }
             Self::Read { path, sql } => {
                 format!(
                     "sqlite3 -readonly -json {} {}",
@@ -60,6 +70,9 @@ impl SqliteRemoteCommand {
                     shell_quote(&wrapped)
                 )
             }
+            Self::Script { path, sql } => {
+                format!("sqlite3 -json {} {}", shell_quote(path), shell_quote(sql))
+            }
         }
     }
 }
@@ -71,11 +84,12 @@ impl SqliteRemote {
         db: &Database,
         install_sqlite: bool,
     ) -> Result<DatabaseOperationResult> {
-        let check = ssh::SshManager::exec_command(
+        let check = ssh::SshManager::exec_command_checked(
             pool,
             server,
             db,
             &SqliteRemoteCommand::detect_sqlite().to_shell(),
+            "detect remote sqlite3",
         )?;
         if !check.trim().is_empty() {
             return Ok(DatabaseOperationResult {
@@ -99,12 +113,19 @@ impl SqliteRemote {
                 anyhow!("sqlite3 is not installed and no supported package manager was found")
             })?;
 
-        ssh::SshManager::exec_command(pool, server, db, install_command)?;
-        let recheck = ssh::SshManager::exec_command(
+        ssh::SshManager::exec_command_checked(
+            pool,
+            server,
+            db,
+            install_command,
+            "install remote sqlite3",
+        )?;
+        let recheck = ssh::SshManager::exec_command_checked(
             pool,
             server,
             db,
             &SqliteRemoteCommand::detect_sqlite().to_shell(),
+            "verify remote sqlite3 installation",
         )?;
         if recheck.trim().is_empty() {
             return Err(anyhow!(
@@ -129,7 +150,7 @@ impl SqliteRemote {
     ) -> Result<String> {
         let sql = "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name";
         let command = SqliteRemoteCommand::read(sqlite_path, sql).to_shell();
-        ssh::SshManager::exec_command(pool, server, db, &command)
+        ssh::SshManager::exec_command_checked(pool, server, db, &command, "list SQLite tables")
     }
 
     pub fn table_info(
@@ -141,7 +162,13 @@ impl SqliteRemote {
     ) -> Result<String> {
         let sql = format!("PRAGMA table_info({})", sqlite_ident(table_name));
         let command = SqliteRemoteCommand::read(sqlite_path, &sql).to_shell();
-        ssh::SshManager::exec_command(pool, server, db, &command)
+        ssh::SshManager::exec_command_checked(
+            pool,
+            server,
+            db,
+            &command,
+            &format!("read SQLite table info for {}", table_name),
+        )
     }
 
     pub fn list_schema(
@@ -152,7 +179,7 @@ impl SqliteRemote {
     ) -> Result<Vec<DatabaseTableSchema>> {
         let tables_json = Self::list_table_names(pool, server, db, sqlite_path)?;
         let table_rows: Vec<HashMap<String, serde_json::Value>> =
-            serde_json::from_str(&tables_json).unwrap_or_default();
+            parse_sqlite_json("list schema tables", &tables_json)?;
         let mut tables = Vec::new();
         for row in table_rows {
             let Some(name) = row.get("name").and_then(|value| value.as_str()) else {
@@ -160,7 +187,7 @@ impl SqliteRemote {
             };
             let info_json = Self::table_info(pool, server, db, sqlite_path, name)?;
             let info_rows: Vec<HashMap<String, serde_json::Value>> =
-                serde_json::from_str(&info_json).unwrap_or_default();
+                parse_sqlite_json(&format!("read schema for table {}", name), &info_json)?;
             let columns = info_rows
                 .into_iter()
                 .filter_map(|info| {
@@ -183,6 +210,7 @@ impl SqliteRemote {
                             .get("dflt_value")
                             .and_then(|value| value.as_str())
                             .map(str::to_string),
+                        auto_generated: false,
                     })
                 })
                 .collect();
@@ -207,7 +235,18 @@ impl SqliteRemote {
             SqliteRemoteCommand::read(sqlite_path, sql)
         }
         .to_shell();
-        ssh::SshManager::exec_command(pool, server, db, &command)
+        ssh::SshManager::exec_command_checked(pool, server, db, &command, "execute SQLite command")
+    }
+
+    pub fn execute_script(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        sqlite_path: &str,
+        sql: &str,
+    ) -> Result<String> {
+        let command = SqliteRemoteCommand::script(sqlite_path, sql).to_shell();
+        ssh::SshManager::exec_command_checked(pool, server, db, &command, "execute SQLite script")
     }
 
     pub fn execute(
@@ -224,7 +263,7 @@ impl SqliteRemote {
 
         if write_statement {
             let rows: Vec<HashMap<String, serde_json::Value>> =
-                serde_json::from_str(&output).unwrap_or_default();
+                parse_sqlite_json("parse SQLite write result", &output)?;
             let affected_rows = rows
                 .first()
                 .and_then(|row| row.get("affected_rows"))
@@ -238,7 +277,7 @@ impl SqliteRemote {
         }
 
         let rows: Vec<HashMap<String, serde_json::Value>> =
-            serde_json::from_str(&output).unwrap_or_default();
+            parse_sqlite_json("parse SQLite query result", &output)?;
         let columns = rows
             .first()
             .map(|row| row.keys().cloned().collect::<Vec<_>>())
@@ -268,7 +307,13 @@ impl SqliteRemote {
         db: &Database,
     ) -> Result<Option<String>> {
         let command = package_manager_detection_command();
-        let output = ssh::SshManager::exec_command(pool, server, db, &command)?;
+        let output = ssh::SshManager::exec_command_checked(
+            pool,
+            server,
+            db,
+            &command,
+            "detect package manager",
+        )?;
         Ok(output
             .lines()
             .next()
@@ -288,6 +333,20 @@ fn json_value_to_string(value: Option<&serde_json::Value>) -> Option<String> {
         Some(serde_json::Value::String(value)) => Some(value.clone()),
         Some(value) => Some(value.to_string()),
     }
+}
+
+pub(crate) fn parse_sqlite_json<T>(context: &str, output: &str) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_str(output).map_err(|error| {
+        anyhow!(
+            "{}: malformed SQLite JSON output: {}. Output starts with: {}",
+            context,
+            error,
+            output.chars().take(200).collect::<String>()
+        )
+    })
 }
 
 fn missing_sqlite_result(manager: Option<&str>) -> DatabaseOperationResult {
@@ -429,5 +488,15 @@ mod tests {
         assert!(result
             .message
             .contains("Suggested command: sudo apt-get update && sudo apt-get install -y sqlite3"));
+    }
+
+    #[test]
+    fn sqlite_json_parse_failures_include_operation_context() {
+        let err =
+            parse_sqlite_json::<Vec<HashMap<String, serde_json::Value>>>("list schema tables", "{")
+                .expect_err("malformed json");
+
+        assert!(err.to_string().contains("list schema tables"));
+        assert!(err.to_string().contains("malformed SQLite JSON output"));
     }
 }
