@@ -192,7 +192,7 @@ pub fn package_manager_detection_command() -> String {
         "elif command -v pacman >/dev/null 2>&1; then echo pacman",
         "elif command -v zypper >/dev/null 2>&1; then echo zypper",
         "elif command -v apk >/dev/null 2>&1; then echo apk",
-        "else exit 1",
+        "else echo ''",
         "fi",
     ]
     .join("; ")
@@ -258,7 +258,7 @@ mod tests {
             "elif command -v pacman >/dev/null 2>&1; then echo pacman",
             "elif command -v zypper >/dev/null 2>&1; then echo zypper",
             "elif command -v apk >/dev/null 2>&1; then echo apk",
-            "else exit 1",
+            "else echo ''",
             "fi",
         ];
 
