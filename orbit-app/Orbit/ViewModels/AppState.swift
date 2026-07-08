@@ -638,26 +638,76 @@ class AppState: ObservableObject {
 
     func backupDatabaseConnection(_ connection: DatabaseConnection) {
         Task {
-            await MainActor.run { databaseOperationLoading = true }
             do {
-                let result = try await bridge.backupDatabaseAsync(connectionId: connection.id)
-                let records = try? await bridge.listDatabaseBackupRecordsAsync()
+                let result = try await backupDatabaseConnectionResult(connection)
                 await MainActor.run {
-                    if let records {
-                        databaseBackupRecords = records
-                    }
-                    databaseOperationLoading = false
                     alertTitle = result.ok ? "备份完成" : "备份失败"
-                    alertMessage = result.message
+                    alertMessage = databaseOperationMessage(result)
                 }
             } catch {
                 await MainActor.run {
-                    databaseOperationLoading = false
                     alertTitle = "备份失败"
                     alertMessage = error.localizedDescription
                 }
             }
         }
+    }
+
+    @MainActor
+    func backupDatabaseConnectionResult(_ connection: DatabaseConnection) async throws -> DatabaseOperationResult {
+        databaseOperationLoading = true
+        defer { databaseOperationLoading = false }
+        let result = try await bridge.backupDatabaseAsync(connectionId: connection.id)
+        if let records = try? await bridge.listDatabaseBackupRecordsAsync() {
+            databaseBackupRecords = records
+        }
+        return result
+    }
+
+    @MainActor
+    func restoreDatabaseBackup(request: DatabaseRestoreRequest) async throws -> DatabaseOperationResult {
+        databaseOperationLoading = true
+        defer { databaseOperationLoading = false }
+        let result = try await bridge.restoreDatabaseAsync(request: request)
+        if let records = try? await bridge.listDatabaseBackupRecordsAsync() {
+            databaseBackupRecords = records
+        }
+        invalidateDatabasePanels(forConnectionId: request.target_connection_id)
+        return result
+    }
+
+    @MainActor
+    func prepareDatabaseImport(backupPath: String, targetConnectionId: String, mode: String) async throws -> DatabaseImportPlan {
+        databaseOperationLoading = true
+        defer { databaseOperationLoading = false }
+        return try await bridge.prepareDatabaseImportAsync(
+            backupPath: backupPath,
+            targetConnectionId: targetConnectionId,
+            mode: mode
+        )
+    }
+
+    @MainActor
+    func runDatabaseImport(request: DatabaseImportRequest) async throws -> DatabaseOperationResult {
+        databaseOperationLoading = true
+        defer { databaseOperationLoading = false }
+        let result = try await bridge.runDatabaseImportAsync(request: request)
+        if let records = try? await bridge.listDatabaseBackupRecordsAsync() {
+            databaseBackupRecords = records
+        }
+        invalidateDatabasePanels(forConnectionId: request.plan.target_connection_id)
+        return result
+    }
+
+    func databaseOperationMessage(_ result: DatabaseOperationResult) -> String {
+        var parts = [result.message]
+        if let artifactPath = result.artifact_path, !artifactPath.isEmpty {
+            parts.append("路径: \(artifactPath)")
+        }
+        if let affectedRows = result.affected_rows {
+            parts.append("行数: \(affectedRows)")
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     func addLocalTerminalTab() {

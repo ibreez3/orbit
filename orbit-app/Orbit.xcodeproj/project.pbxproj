@@ -39,8 +39,10 @@
 		89A6C1418D76248F48E469F3 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */; };
 		8CC5BD2F7028843A2B71958E /* SftpDrawerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F98C58264A158A314F01DAC /* SftpDrawerState.swift */; };
 		958A8F09DD43B7722C3A83E5 /* OrbitConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07692D9E82A9DF921C55B64F /* OrbitConfig.swift */; };
+		984FE53F12CB45AAD6D63A3D /* DatabaseBackupSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E34698C5B10A4A289B039E1B /* DatabaseBackupSheet.swift */; };
 		9864F6FA7399046CFED1A7AB /* KeyBindings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */; };
 		9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */; };
+		A397E134F5726742E4EA6B6E /* DatabaseImportMappingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 829C6E0E378F6105FD7D4738 /* DatabaseImportMappingView.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		B4660E88F677A56A4AA7258B /* AssetTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC744DC1B840951E08D4FD43 /* AssetTreeView.swift */; };
 		B94BCE8782A000F9C641CAC6 /* OrbitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */; };
@@ -101,6 +103,7 @@
 		608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		64825B472441C790427EFF55 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		750B458B02EF6C413A15C484 /* Orbit-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Orbit-Bridging-Header.h"; sourceTree = "<group>"; };
+		829C6E0E378F6105FD7D4738 /* DatabaseImportMappingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseImportMappingView.swift; sourceTree = "<group>"; };
 		8D7C11206A070E05D66487CD /* SessionToolDockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolDockView.swift; sourceTree = "<group>"; };
 		8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindings.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -119,6 +122,7 @@
 		D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalShell.swift; sourceTree = "<group>"; };
 		D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		E34698C5B10A4A289B039E1B /* DatabaseBackupSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseBackupSheet.swift; sourceTree = "<group>"; };
 		E360B425AAB16860239DB977 /* dark.orbit-theme */ = {isa = PBXFileReference; path = "dark.orbit-theme"; sourceTree = "<group>"; };
 		E691E1A576C579A627A7BDDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E6AC453107209B6B7049D5CA /* AIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIState.swift; sourceTree = "<group>"; };
@@ -211,7 +215,9 @@
 				AC744DC1B840951E08D4FD43 /* AssetTreeView.swift */,
 				20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */,
 				0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */,
+				E34698C5B10A4A289B039E1B /* DatabaseBackupSheet.swift */,
 				D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */,
+				829C6E0E378F6105FD7D4738 /* DatabaseImportMappingView.swift */,
 				1E3983C4735026A30426864D /* DatabaseView.swift */,
 				1530B85453C445BFC0E5E860 /* DockerView.swift */,
 				3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */,
@@ -347,7 +353,9 @@
 				B4660E88F677A56A4AA7258B /* AssetTreeView.swift in Sources */,
 				C785EF55D48C3015D138C8FA /* BatchExecutionView.swift in Sources */,
 				C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */,
+				984FE53F12CB45AAD6D63A3D /* DatabaseBackupSheet.swift in Sources */,
 				331DF8F0DDCD486E80DB9B10 /* DatabaseConnectionDialog.swift in Sources */,
+				A397E134F5726742E4EA6B6E /* DatabaseImportMappingView.swift in Sources */,
 				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
 				DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */,
 				DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */,

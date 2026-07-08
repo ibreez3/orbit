@@ -13,6 +13,11 @@ struct DatabaseView: View {
     @State private var selectedTable: String? = nil
     @State private var sqlText: String = ""
     @State private var tableSearchQuery: String = ""
+    @State private var showRestoreSheet = false
+    @State private var showImportMapping = false
+    @State private var isBackupRunning = false
+    @State private var backupStatusMessage: String?
+    @State private var backupStatusIsError = false
     @AppStorage("dbDefaultLimit") private var dbDefaultLimit: Double = 200
     @AppStorage("dbQueryTimeout") private var dbQueryTimeout: Double = 30
     @AppStorage("dbReadOnlyMode") private var dbReadOnlyMode: Bool = false
@@ -48,6 +53,14 @@ struct DatabaseView: View {
         }
         .onChange(of: dbDefaultLimit) { _ in applyDatabaseSettings() }
         .onChange(of: dbAutoLimit) { _ in applyDatabaseSettings() }
+        .sheet(isPresented: $showRestoreSheet) {
+            DatabaseBackupSheet(appState: appState, initialTargetConnectionId: connection?.id)
+                .environmentObject(appState.inventoryState)
+        }
+        .sheet(isPresented: $showImportMapping) {
+            DatabaseImportMappingView(appState: appState, initialTargetConnectionId: connection?.id)
+                .environmentObject(appState.inventoryState)
+        }
     }
 
     private var tableListPanel: some View {
@@ -65,6 +78,26 @@ struct DatabaseView: View {
                 HStack(spacing: 6) {
                     connectionBadge
                     Spacer()
+                    Button(action: { Task { await backupCurrentDatabase() } }) {
+                        operationIcon("archivebox")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBackupRunning || connection == nil)
+                    .help("一键备份")
+
+                    Button(action: { showRestoreSheet = true }) {
+                        operationIcon("arrow.counterclockwise.icloud")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(connection == nil)
+                    .help("恢复备份")
+
+                    Button(action: { showImportMapping = true }) {
+                        operationIcon("arrow.triangle.branch")
+                    }
+                    .buttonStyle(.plain)
+                    .help("SQLite 导入 MySQL")
+
                     Button(action: { Task { await loadSchema() } }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 11, weight: .semibold))
@@ -142,6 +175,28 @@ struct DatabaseView: View {
 
     private var sqlEditor: some View {
         VStack(spacing: 0) {
+            if let backupStatusMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: backupStatusIsError ? "exclamationmark.triangle" : "checkmark.circle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(backupStatusMessage)
+                        .font(.system(size: 11))
+                        .lineLimit(2)
+                    Spacer()
+                    Button(action: { self.backupStatusMessage = nil }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .help("关闭")
+                }
+                .foregroundStyle(backupStatusIsError ? Color.red : Color.green)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background((backupStatusIsError ? Color.red : Color.green).opacity(0.08))
+            }
+
             TextEditor(text: $sqlText)
                 .font(.system(.body, design: .monospaced))
                 .padding(8)
@@ -243,6 +298,12 @@ struct DatabaseView: View {
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
         }
+    }
+
+    private func operationIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 11, weight: .semibold))
+            .frame(width: 20, height: 20)
     }
 
     private func queryResultView(_ result: DatabaseQueryResult) -> some View {
@@ -393,6 +454,23 @@ struct DatabaseView: View {
 
     private func quoteIdentifier(_ value: String) -> String {
         "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    @MainActor
+    private func backupCurrentDatabase() async {
+        guard let connection else { return }
+        isBackupRunning = true
+        backupStatusMessage = nil
+        backupStatusIsError = false
+        do {
+            let result = try await appState.backupDatabaseConnectionResult(connection)
+            backupStatusIsError = !result.ok
+            backupStatusMessage = appState.databaseOperationMessage(result)
+        } catch {
+            backupStatusIsError = true
+            backupStatusMessage = error.localizedDescription
+        }
+        isBackupRunning = false
     }
 
     private func restoreSnapshot() {
