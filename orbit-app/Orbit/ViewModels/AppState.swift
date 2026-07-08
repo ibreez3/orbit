@@ -16,7 +16,7 @@ class AppState: ObservableObject {
 
     private var pendingQuitTabId: String? = nil
 
-
+    @Published var databaseConnectionDialogOpen: Bool = false
 
     var tabs: [TabItem] {
         get { tabState.tabs }
@@ -145,8 +145,8 @@ class AppState: ObservableObject {
         set { inventoryState.databaseOperationLoading = newValue }
     }
     var databasePanelSnapshots: [String: DatabasePanelSnapshot] {
-        get { inventoryState.databasePanelSnapshots }
-        set { inventoryState.databasePanelSnapshots = newValue }
+        get { toolState.databasePanelSnapshots }
+        set { toolState.databasePanelSnapshots = newValue }
     }
 
     // MARK: - Snippet forwarding
@@ -519,9 +519,18 @@ class AppState: ObservableObject {
             do {
                 try await bridge.deleteDatabaseConnectionAsync(id: id)
                 await MainActor.run {
+                    let removedTabIds = tabs.filter { $0.type == .database && $0.serverId == id }.map(\.id)
                     databaseConnections.removeAll { $0.id == id }
                     if editingDatabaseConnection?.id == id {
                         editingDatabaseConnection = nil
+                    }
+                    tabs.removeAll { $0.type == .database && $0.serverId == id }
+                    for tabId in removedTabIds {
+                        databasePanelSnapshots.removeValue(forKey: tabId)
+                    }
+                    if let active = activeTabId, removedTabIds.contains(active) {
+                        closeSessionScopedTools()
+                        activeTabId = tabs.last?.id
                     }
                     databaseOperationLoading = false
                 }
@@ -530,6 +539,113 @@ class AppState: ObservableObject {
                     databaseOperationLoading = false
                     alertTitle = "删除失败"
                     alertMessage = "无法删除数据库连接: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func openDatabaseConnectionDialog(_ connection: DatabaseConnection? = nil) {
+        editingDatabaseConnection = connection
+        databaseConnectionDialogOpen = true
+    }
+
+    func closeDatabaseConnectionDialog() {
+        databaseConnectionDialogOpen = false
+        editingDatabaseConnection = nil
+    }
+
+    func saveDatabaseConnectionFromDialog(_ input: DatabaseConnectionInput) {
+        let editingId = editingDatabaseConnection?.id
+        Task {
+            await MainActor.run { databaseOperationLoading = true }
+            do {
+                if let editingId {
+                    let connection = try await bridge.updateDatabaseConnectionAsync(id: editingId, input: input)
+                    await MainActor.run {
+                        databaseConnections = databaseConnections.map { $0.id == editingId ? connection : $0 }
+                        tabs = tabs.map { tab in
+                            guard tab.type == .database, tab.serverId == editingId else { return tab }
+                            var updated = tab
+                            updated.title = "DB: \(connection.name)"
+                            return updated
+                        }
+                        databaseOperationLoading = false
+                        closeDatabaseConnectionDialog()
+                    }
+                } else {
+                    let connection = try await bridge.addDatabaseConnectionAsync(input: input)
+                    await MainActor.run {
+                        databaseConnections.append(connection)
+                        databaseOperationLoading = false
+                        closeDatabaseConnectionDialog()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = editingId == nil ? "添加失败" : "更新失败"
+                    alertMessage = "无法保存数据库连接: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func openDatabaseConnection(_ connection: DatabaseConnection) {
+        if let existing = tabs.first(where: { $0.type == .database && $0.serverId == connection.id }) {
+            requestActivateTab(existing.id)
+            return
+        }
+        let id = "database-\(connection.id)-\(Int(Date().timeIntervalSince1970 * 1000))"
+        let tab = TabItem(
+            id: id,
+            type: .database,
+            serverId: connection.id,
+            serverName: connection.name,
+            title: "DB: \(connection.name)"
+        )
+        tabs.append(tab)
+        requestActivateTab(id)
+    }
+
+    func testDatabaseConnection(_ connection: DatabaseConnection) {
+        Task {
+            await MainActor.run { databaseOperationLoading = true }
+            do {
+                let result = try await bridge.testDatabaseConnectionAsync(id: connection.id, installSqlite: false)
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = result.ok ? "连接测试成功" : "连接测试失败"
+                    alertMessage = result.message
+                }
+            } catch {
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = "连接测试失败"
+                    alertMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func backupDatabaseConnection(_ connection: DatabaseConnection) {
+        Task {
+            await MainActor.run { databaseOperationLoading = true }
+            do {
+                let result = try await bridge.backupDatabaseAsync(connectionId: connection.id)
+                let records = try? await bridge.listDatabaseBackupRecordsAsync()
+                await MainActor.run {
+                    if let records {
+                        databaseBackupRecords = records
+                    }
+                    databaseOperationLoading = false
+                    alertTitle = result.ok ? "备份完成" : "备份失败"
+                    alertMessage = result.message
+                }
+            } catch {
+                await MainActor.run {
+                    databaseOperationLoading = false
+                    alertTitle = "备份失败"
+                    alertMessage = error.localizedDescription
                 }
             }
         }

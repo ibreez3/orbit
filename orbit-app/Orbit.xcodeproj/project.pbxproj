@@ -17,6 +17,7 @@
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		277D07614AF08EA716071858 /* SnippetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E598CB14BB36E079220CE3C /* SnippetEditorView.swift */; };
 		2F169B27AC1ECA61187A4C2C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */; };
+		331DF8F0DDCD486E80DB9B10 /* DatabaseConnectionDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */; };
 		33335E4F882F977DFA66C647 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20936134E6681D18358932B7 /* Assets.xcassets */; };
 		3BB68C6149D994286E514D35 /* UIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585377F6779F972D49C67F62 /* UIState.swift */; };
 		3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86934760741D5FA928C8E48 /* TabBarView.swift */; };
@@ -113,6 +114,7 @@
 		B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */ = {isa = PBXFileReference; path = "catppuccin-mocha.orbit-theme"; sourceTree = "<group>"; };
 		C9A251128C8C2F5D900FF058 /* solarized-dark.orbit-theme */ = {isa = PBXFileReference; path = "solarized-dark.orbit-theme"; sourceTree = "<group>"; };
 		CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseConnectionDialog.swift; sourceTree = "<group>"; };
 		D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolOverlayView.swift; sourceTree = "<group>"; };
 		D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalShell.swift; sourceTree = "<group>"; };
 		D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerView.swift; sourceTree = "<group>"; };
@@ -209,6 +211,7 @@
 				AC744DC1B840951E08D4FD43 /* AssetTreeView.swift */,
 				20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */,
 				0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */,
+				D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */,
 				1E3983C4735026A30426864D /* DatabaseView.swift */,
 				1530B85453C445BFC0E5E860 /* DockerView.swift */,
 				3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */,
@@ -344,6 +347,7 @@
 				B4660E88F677A56A4AA7258B /* AssetTreeView.swift in Sources */,
 				C785EF55D48C3015D138C8FA /* BatchExecutionView.swift in Sources */,
 				C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */,
+				331DF8F0DDCD486E80DB9B10 /* DatabaseConnectionDialog.swift in Sources */,
 				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
 				DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */,
 				DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */,

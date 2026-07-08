@@ -12,7 +12,6 @@ final class InventoryState: ObservableObject {
     @Published var editingCg: CredentialGroup?
     @Published var editingDatabaseConnection: DatabaseConnection?
     @Published var databaseOperationLoading: Bool = false
-    @Published var databasePanelSnapshots: [String: DatabasePanelSnapshot] = [:]
 
     let bridge = OrbitBridge.shared
 }

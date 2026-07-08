@@ -8,5 +8,6 @@ final class ToolState: ObservableObject {
     @Published var pendingContextSwitchMessage: String?
     @Published var activeSftpTransferTabIds: Set<String> = []
     @Published var dockerPanelSnapshots: [String: DockerPanelSnapshot] = [:]
+    @Published var databasePanelSnapshots: [String: DatabasePanelSnapshot] = [:]
     @Published var aiPanelOpen: Bool = false
 }

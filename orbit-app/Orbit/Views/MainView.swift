@@ -55,6 +55,13 @@ struct MainView: View {
             BatchExecutionView(appState: appState)
                 .environmentObject(appState.inventoryState)
         }
+        .sheet(isPresented: Binding(
+            get: { appState.databaseConnectionDialogOpen },
+            set: { if !$0 { appState.closeDatabaseConnectionDialog() } }
+        )) {
+            DatabaseConnectionDialog(appState: appState)
+                .environmentObject(appState.inventoryState)
+        }
         .modifier(AlertModifier(appState: appState, uiState: uiState))
         .alert("确认切换会话", isPresented: Binding(
             get: { toolState.pendingContextSwitchTabId != nil },
@@ -72,6 +79,7 @@ struct MainView: View {
         .onAppear {
             if inventoryState.servers.isEmpty { appState.loadServers() }
             if inventoryState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
+            if inventoryState.databaseConnections.isEmpty { appState.loadDatabaseConnections() }
         }
 
         return base
