@@ -26,14 +26,7 @@ impl MysqlEngine {
 
     pub fn list_schema(connection: &DatabaseConnection) -> Result<Vec<DatabaseTableSchema>> {
         let mut conn = Self::connect(connection)?;
-        let rows: Vec<(String, String, String, String, Option<String>, u64)> = conn.exec(
-            "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY = 'PRI' AS IS_PRIMARY
-             FROM information_schema.COLUMNS
-             WHERE TABLE_SCHEMA = ?
-             ORDER BY TABLE_NAME, ORDINAL_POSITION",
-            (connection.database_name.as_str(),),
-        )?;
-        Ok(rows_to_schema(rows))
+        list_schema_with_conn(&mut conn, connection)
     }
 
     pub fn execute(
@@ -84,23 +77,11 @@ impl MysqlEngine {
     }
 
     pub fn backup_tables(connection: &DatabaseConnection) -> Result<Vec<DatabaseBackupTable>> {
-        let schema = Self::list_schema(connection)?;
+        let mut conn = Self::connect(connection)?;
+        let schema = list_schema_with_conn(&mut conn, connection)?;
         let mut tables = Vec::new();
         for table in schema {
-            let sql = format!("SELECT * FROM {}", quote_ident(&table.name, "mysql"));
-            let result = Self::execute(connection, &sql, true)?;
-            let rows = result
-                .rows
-                .into_iter()
-                .map(|row| {
-                    table
-                        .columns
-                        .iter()
-                        .zip(row)
-                        .map(|(column, value)| (column.name.clone(), value))
-                        .collect::<HashMap<_, _>>()
-                })
-                .collect();
+            let rows = backup_rows_with_conn(&mut conn, &table)?;
             tables.push(DatabaseBackupTable {
                 name: table.name,
                 columns: table.columns,
@@ -201,6 +182,50 @@ impl MysqlEngine {
         }
         mysql::Conn::new(builder).map_err(Into::into)
     }
+}
+
+fn list_schema_with_conn(
+    conn: &mut mysql::Conn,
+    connection: &DatabaseConnection,
+) -> Result<Vec<DatabaseTableSchema>> {
+    let rows: Vec<(String, String, String, String, Option<String>, u64)> = conn.exec(
+        "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY = 'PRI' AS IS_PRIMARY
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ?
+         ORDER BY TABLE_NAME, ORDINAL_POSITION",
+        (connection.database_name.as_str(),),
+    )?;
+    Ok(rows_to_schema(rows))
+}
+
+fn backup_rows_with_conn(
+    conn: &mut mysql::Conn,
+    table: &DatabaseTableSchema,
+) -> Result<Vec<HashMap<String, Option<String>>>> {
+    let sql = format!("SELECT * FROM {}", quote_ident(&table.name, "mysql"));
+    let result = conn.query_iter(sql)?;
+    let rows = result
+        .map(|row| {
+            let row = row?;
+            Ok(row
+                .unwrap()
+                .into_iter()
+                .map(mysql_value_to_string)
+                .collect::<Vec<_>>())
+        })
+        .collect::<std::result::Result<Vec<_>, mysql::Error>>()?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .zip(row)
+                .map(|(column, value)| (column.name.clone(), value))
+                .collect::<HashMap<_, _>>()
+        })
+        .collect())
 }
 
 fn rows_to_schema(

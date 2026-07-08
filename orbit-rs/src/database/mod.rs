@@ -20,6 +20,7 @@ use crate::database::backup::{
 };
 use crate::database::import_mysql::{
     prepare_existing_table_import_plan, prepare_new_table_import_plan, validate_mysql_import_plan,
+    validate_mysql_import_sources,
 };
 use crate::database::models::{
     DatabaseBackupTable as BackupTable, DatabaseImportPlan as ImportPlan,
@@ -155,6 +156,7 @@ impl DatabaseManager {
         pool: &transport::SessionPool,
         request: &RestoreRequest,
     ) -> Result<OpResult> {
+        validate_restore_mode(&request.mode)?;
         let connection = DatabaseStore::get_connection(db, &request.target_connection_id)?;
         let artifact = read_artifact(&request.backup_path)?;
         if artifact.source.engine != connection.engine {
@@ -251,6 +253,7 @@ impl DatabaseManager {
                 "only remote SQLite backups can be imported to MySQL"
             ));
         }
+        validate_mysql_import_sources(&request.plan, &artifact)?;
         let affected_rows = with_driver_connection(db, &connection, |connection| {
             MysqlEngine::run_import(connection, &artifact, &request.plan)
         })?;
@@ -291,6 +294,16 @@ fn with_driver_connection<T>(
     tunneled.host = "127.0.0.1".into();
     tunneled.port = tunnel.local_port;
     operation(&tunneled)
+}
+
+fn validate_restore_mode(mode: &str) -> Result<()> {
+    if mode == "overwrite" {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "unsupported restore mode: {}; only overwrite is supported",
+        mode
+    ))
 }
 
 struct DbTunnel {
@@ -418,4 +431,17 @@ fn restore_sqlite(
 
 fn sqlite_ident(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_restore_modes_other_than_overwrite() {
+        let err = validate_restore_mode("merge").expect_err("unsupported restore mode");
+
+        assert!(err.to_string().contains("unsupported restore mode"));
+        assert!(err.to_string().contains("merge"));
+    }
 }

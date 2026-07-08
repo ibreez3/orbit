@@ -25,23 +25,7 @@ impl PostgresEngine {
 
     pub fn list_schema(connection: &DatabaseConnection) -> Result<Vec<DatabaseTableSchema>> {
         let mut client = Self::connect(connection)?;
-        let rows = client.query(
-            "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default,
-                    COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_primary
-             FROM information_schema.columns c
-             LEFT JOIN information_schema.key_column_usage kcu
-               ON c.table_schema = kcu.table_schema
-              AND c.table_name = kcu.table_name
-              AND c.column_name = kcu.column_name
-             LEFT JOIN information_schema.table_constraints tc
-               ON kcu.constraint_schema = tc.constraint_schema
-              AND kcu.constraint_name = tc.constraint_name
-              AND tc.constraint_type = 'PRIMARY KEY'
-             WHERE c.table_schema = 'public'
-             ORDER BY c.table_name, c.ordinal_position",
-            &[],
-        )?;
-        Ok(rows_to_schema(rows))
+        list_schema_with_client(&mut client)
     }
 
     pub fn execute(
@@ -93,23 +77,11 @@ impl PostgresEngine {
     }
 
     pub fn backup_tables(connection: &DatabaseConnection) -> Result<Vec<DatabaseBackupTable>> {
-        let schema = Self::list_schema(connection)?;
+        let mut client = Self::connect(connection)?;
+        let schema = list_schema_with_client(&mut client)?;
         let mut tables = Vec::new();
         for table in schema {
-            let sql = format!("SELECT * FROM {}", quote_ident(&table.name, "postgres"));
-            let result = Self::execute(connection, &sql, true)?;
-            let rows = result
-                .rows
-                .into_iter()
-                .map(|row| {
-                    table
-                        .columns
-                        .iter()
-                        .zip(row)
-                        .map(|(column, value)| (column.name.clone(), value))
-                        .collect::<HashMap<_, _>>()
-                })
-                .collect();
+            let rows = backup_rows_with_client(&mut client, &table)?;
             tables.push(DatabaseBackupTable {
                 name: table.name,
                 columns: table.columns,
@@ -158,6 +130,45 @@ impl PostgresEngine {
         }
         config.connect(NoTls).map_err(Into::into)
     }
+}
+
+fn list_schema_with_client(client: &mut Client) -> Result<Vec<DatabaseTableSchema>> {
+    let rows = client.query(
+        "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default,
+                COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_primary
+         FROM information_schema.columns c
+         LEFT JOIN information_schema.key_column_usage kcu
+           ON c.table_schema = kcu.table_schema
+          AND c.table_name = kcu.table_name
+          AND c.column_name = kcu.column_name
+         LEFT JOIN information_schema.table_constraints tc
+           ON kcu.constraint_schema = tc.constraint_schema
+          AND kcu.constraint_name = tc.constraint_name
+          AND tc.constraint_type = 'PRIMARY KEY'
+         WHERE c.table_schema = 'public'
+         ORDER BY c.table_name, c.ordinal_position",
+        &[],
+    )?;
+    Ok(rows_to_schema(rows))
+}
+
+fn backup_rows_with_client(
+    client: &mut Client,
+    table: &DatabaseTableSchema,
+) -> Result<Vec<HashMap<String, Option<String>>>> {
+    let sql = format!("SELECT * FROM {}", quote_ident(&table.name, "postgres"));
+    let rows = client.query(&sql, &[])?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            table
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(index, column)| (column.name.clone(), postgres_cell_to_string(row, index)))
+                .collect::<HashMap<_, _>>()
+        })
+        .collect())
 }
 
 fn rows_to_schema(rows: Vec<Row>) -> Vec<DatabaseTableSchema> {

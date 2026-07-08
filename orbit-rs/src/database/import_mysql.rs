@@ -73,6 +73,46 @@ pub fn validate_mysql_import_plan(plan: &DatabaseImportPlan) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_mysql_import_sources(
+    plan: &DatabaseImportPlan,
+    artifact: &DatabaseBackupArtifact,
+) -> Result<()> {
+    for table_plan in &plan.tables {
+        let source_table = artifact
+            .tables
+            .iter()
+            .find(|table| table.name == table_plan.source_table)
+            .ok_or_else(|| {
+                anyhow!(
+                    "source table {} not found in backup",
+                    table_plan.source_table
+                )
+            })?;
+        let source_columns = source_table
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<HashSet<_>>();
+
+        for mapping in &table_plan.columns {
+            let target_column = mapping.target_column.as_deref().unwrap_or_default().trim();
+            let source_column = mapping.source_column.trim();
+            if target_column.is_empty() || source_column.is_empty() {
+                continue;
+            }
+            if !source_columns.contains(source_column) {
+                return Err(anyhow!(
+                    "source table {} does not contain mapped source column {}",
+                    table_plan.source_table,
+                    source_column
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn prepare_new_table_import_plan(
     artifact: &DatabaseBackupArtifact,
     backup_path: &str,
@@ -170,7 +210,9 @@ pub fn prepare_existing_table_import_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::models::{DatabaseImportColumnMapping, DatabaseImportTablePlan};
+    use crate::database::models::{
+        DatabaseBackupArtifact, DatabaseImportColumnMapping, DatabaseImportTablePlan,
+    };
 
     #[test]
     fn accepts_field_rename_mapping_from_system_to_system1() {
@@ -230,5 +272,24 @@ mod tests {
         };
 
         validate_mysql_import_plan(&plan).expect("skipped source field");
+    }
+
+    #[test]
+    fn rejects_mapped_source_column_missing_from_backup_table() {
+        let artifact = DatabaseBackupArtifact::single_table_for_test(
+            "source_table",
+            vec![("id", "INTEGER")],
+            vec![vec![("id", Some("1"))]],
+        );
+        let plan = DatabaseImportPlan::single_table_for_test(
+            "source_table",
+            "target_table",
+            vec![("missing_column", "name")],
+        );
+
+        let err =
+            validate_mysql_import_sources(&plan, &artifact).expect_err("invalid source mapping");
+        assert!(err.to_string().contains("source_table"));
+        assert!(err.to_string().contains("missing_column"));
     }
 }
