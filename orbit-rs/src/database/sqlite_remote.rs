@@ -54,7 +54,7 @@ impl SqliteRemoteCommand {
             }
             Self::Read { path, sql } => {
                 format!(
-                    "sqlite3 -readonly -json {} {}",
+                    "sqlite3 -json {} {}",
                     shell_quote(path),
                     shell_quote(sql)
                 )
@@ -399,14 +399,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn quotes_remote_sqlite_path_and_sql_for_shell() {
+    fn quotes_remote_sqlite_path_and_sql_for_shell_without_readonly_flag() {
         assert_eq!(
             shell_quote("/tmp/prod's db.sqlite"),
             "'/tmp/prod'\"'\"'s db.sqlite'"
         );
         assert_eq!(
             SqliteRemoteCommand::read("/tmp/prod's db.sqlite", "SELECT 'ok'").to_shell(),
-            "sqlite3 -readonly -json '/tmp/prod'\"'\"'s db.sqlite' 'SELECT '\"'\"'ok'\"'\"''"
+            "sqlite3 -json '/tmp/prod'\"'\"'s db.sqlite' 'SELECT '\"'\"'ok'\"'\"''"
         );
     }
 
