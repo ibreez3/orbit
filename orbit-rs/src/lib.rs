@@ -1,4 +1,5 @@
 mod crypto;
+pub mod database;
 mod db;
 mod docker;
 mod ffi;

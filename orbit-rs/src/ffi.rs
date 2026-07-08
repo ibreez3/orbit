@@ -6,6 +6,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::database::{DatabaseConnectionInput, DatabaseStore};
 use crate::docker;
 use crate::models::*;
 use crate::monitor;
@@ -194,6 +195,170 @@ pub extern "C" fn orbit_delete_credential_group(app: *mut OrbitApp, id: *const c
     match app.db.delete_credential_group(id_str) {
         Ok(_) => 0,
         Err(_) => -3,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_list_connections(app: *mut OrbitApp, out_json: *mut *mut c_char) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if out_json.is_null() {
+        app.set_error("数据库连接列表输出指针为空");
+        return -1;
+    }
+    match DatabaseStore::list_connections(&app.db) {
+        Ok(connections) => {
+            let code = json_to_out(&connections, out_json);
+            if code != 0 {
+                app.set_error("序列化数据库连接列表失败");
+            }
+            code
+        }
+        Err(e) => {
+            app.set_error(format!("读取数据库连接列表失败: {}", e));
+            -2
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_add_connection(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_json.is_null() {
+        app.set_error("数据库连接新增参数为空");
+        return -1;
+    }
+    let input = match parse_json_input_with_error::<DatabaseConnectionInput>(json_input) {
+        Ok(input) => input,
+        Err(e) => {
+            app.set_error(format!("解析数据库连接新增 JSON 失败: {}", e));
+            return -2;
+        }
+    };
+    match DatabaseStore::add_connection(&app.db, &input) {
+        Ok(connection) => {
+            let code = json_to_out(&connection, out_json);
+            if code != 0 {
+                app.set_error("序列化新增数据库连接失败");
+            }
+            code
+        }
+        Err(e) => {
+            app.set_error(format!("新增数据库连接失败: {}", e));
+            -3
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_update_connection(
+    app: *mut OrbitApp,
+    id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("数据库连接更新参数为空");
+        return -1;
+    }
+    let id_str = match unsafe { CStr::from_ptr(id) }.to_str() {
+        Ok(s) => s,
+        Err(e) => {
+            app.set_error(format!("数据库连接 ID 不是有效 UTF-8: {}", e));
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<DatabaseConnectionInput>(json_input) {
+        Ok(input) => input,
+        Err(e) => {
+            app.set_error(format!("解析数据库连接更新 JSON 失败: {}", e));
+            return -3;
+        }
+    };
+    match DatabaseStore::update_connection(&app.db, id_str, &input) {
+        Ok(connection) => {
+            let code = json_to_out(&connection, out_json);
+            if code != 0 {
+                app.set_error("序列化更新数据库连接失败");
+            }
+            code
+        }
+        Err(e) => {
+            app.set_error(format!("更新数据库连接失败: {}", e));
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_delete_connection(app: *mut OrbitApp, id: *const c_char) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if id.is_null() {
+        app.set_error("数据库连接删除 ID 为空");
+        return -1;
+    }
+    let id_str = match unsafe { CStr::from_ptr(id) }.to_str() {
+        Ok(s) => s,
+        Err(e) => {
+            app.set_error(format!("数据库连接 ID 不是有效 UTF-8: {}", e));
+            return -2;
+        }
+    };
+    match DatabaseStore::delete_connection(&app.db, id_str) {
+        Ok(_) => 0,
+        Err(e) => {
+            app.set_error(format!("删除数据库连接失败: {}", e));
+            -3
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_db_list_backup_records(
+    app: *mut OrbitApp,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if out_json.is_null() {
+        app.set_error("数据库备份记录输出指针为空");
+        return -1;
+    }
+    match DatabaseStore::list_backup_records(&app.db) {
+        Ok(records) => {
+            let code = json_to_out(&records, out_json);
+            if code != 0 {
+                app.set_error("序列化数据库备份记录失败");
+            }
+            code
+        }
+        Err(e) => {
+            app.set_error(format!("读取数据库备份记录失败: {}", e));
+            -2
+        }
     }
 }
 
@@ -1540,6 +1705,15 @@ pub extern "C" fn orbit_free_string(s: *mut c_char) {
 fn parse_json_input<T: serde::de::DeserializeOwned>(json: *const c_char) -> Result<T, ()> {
     let s = unsafe { CStr::from_ptr(json) }.to_str().map_err(|_| ())?;
     serde_json::from_str(s).map_err(|_| ())
+}
+
+fn parse_json_input_with_error<T: serde::de::DeserializeOwned>(
+    json: *const c_char,
+) -> Result<T, String> {
+    let s = unsafe { CStr::from_ptr(json) }
+        .to_str()
+        .map_err(|e| format!("输入不是有效 UTF-8: {}", e))?;
+    serde_json::from_str(s).map_err(|e| e.to_string())
 }
 
 fn json_to_out<T: serde::Serialize>(value: &T, out: *mut *mut c_char) -> i32 {

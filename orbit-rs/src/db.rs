@@ -42,6 +42,34 @@ impl Database {
                 key_passphrase TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS database_connections (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                group_name TEXT NOT NULL DEFAULT '',
+                engine TEXT NOT NULL,
+                ssh_server_id TEXT NOT NULL DEFAULT '',
+                use_ssh_tunnel INTEGER NOT NULL DEFAULT 0,
+                host TEXT NOT NULL DEFAULT '',
+                port INTEGER NOT NULL DEFAULT 0,
+                database_name TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                password TEXT NOT NULL DEFAULT '',
+                sqlite_path TEXT NOT NULL DEFAULT '',
+                ssl_mode TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS database_backup_records (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL,
+                connection_name TEXT NOT NULL,
+                engine TEXT NOT NULL,
+                artifact_path TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                status TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );",
         )?;
 
@@ -151,6 +179,32 @@ impl Database {
             debug!("凭据加密迁移完成");
         } else {
             debug!("所有凭据已是加密状态");
+        }
+
+        let database_connections: Vec<(String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, password FROM database_connections")?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let mut database_password_count = 0;
+        for (id, password) in &database_connections {
+            if password.is_empty() || crypto::is_encrypted(password) {
+                continue;
+            }
+            let enc_password = crypto::encrypt(password);
+            conn.execute(
+                "UPDATE database_connections SET password=?1 WHERE id=?2",
+                rusqlite::params![enc_password, id],
+            )?;
+            database_password_count += 1;
+        }
+
+        if database_password_count > 0 {
+            info!(
+                count = database_password_count,
+                "已加密 database_connections 表中的明文密码"
+            );
         }
 
         drop(conn);
