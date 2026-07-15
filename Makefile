@@ -1,23 +1,12 @@
-.PHONY: dev debug build clean release
+DMG_PATH ?= release/Orbit-local-AppleSilicon.dmg
+VOLUME_NAME ?= Orbit
 
-release:
-	@./scripts/release.sh $(VERSION)
+build-rs:
+	@./scripts/build-rust.sh
 
-dev:
-	npx tauri dev
+build-app: build-rs
+	@./scripts/build-app.sh
 
-check:
-	@cd src-tauri && cargo check
-	@npx tsc --noEmit
-
-debug: check
-	@npx tauri build --debug
-
-build: check
-	npx tauri build
-
-build-arm:
-	npx tauri build --target aarch64-apple-darwin --debug
-
-clean:
-	rm -rf dist src-tauri/target
+build-dmg: build-app
+	@APP_PATH="$$(cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -showBuildSettings | grep -m1 "BUILT_PRODUCTS_DIR" | awk '{print $$3}')/Orbit.app"; \
+	./scripts/build-dmg.sh "$$APP_PATH" "$(DMG_PATH)" "$(VOLUME_NAME)"
