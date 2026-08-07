@@ -5,6 +5,7 @@ mod docker;
 mod ffi;
 mod models;
 mod monitor;
+pub mod server_organization;
 mod sftp;
 mod ssh;
 mod transport;

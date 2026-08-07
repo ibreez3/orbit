@@ -494,6 +494,13 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
         key_passphrase: input.key_passphrase.clone().unwrap_or_default(),
         credential_group_id: input.credential_group_id.clone().unwrap_or_default(),
         jump_server_id: input.jump_server_id.clone().unwrap_or_default(),
+        folder_id: input.folder_id.clone(),
+        is_pinned: false,
+        pin_order: None,
+        last_connected_at: None,
+        last_attempted_at: None,
+        last_connection_result: None,
+        last_connection_error: None,
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -1893,6 +1900,7 @@ pub extern "C" fn orbit_import_config(
                 key_passphrase: Some(server.key_passphrase.clone()),
                 credential_group_id: Some(credential_group_id),
                 jump_server_id: Some(jump_server_id),
+                folder_id: server.folder_id.clone(),
             };
 
             if let Some(existing_id) = existing_by_host.get(&host_key) {

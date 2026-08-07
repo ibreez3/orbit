@@ -16,6 +16,13 @@ pub struct Server {
     pub key_passphrase: String,
     pub credential_group_id: String,
     pub jump_server_id: String,
+    pub folder_id: Option<String>,
+    pub is_pinned: bool,
+    pub pin_order: Option<i64>,
+    pub last_connected_at: Option<String>,
+    pub last_attempted_at: Option<String>,
+    pub last_connection_result: Option<String>,
+    pub last_connection_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -35,6 +42,7 @@ pub struct ServerInput {
     pub key_passphrase: Option<String>,
     pub credential_group_id: Option<String>,
     pub jump_server_id: Option<String>,
+    pub folder_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
