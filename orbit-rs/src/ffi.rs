@@ -14,6 +14,10 @@ use crate::database::{DatabaseConnectionInput, DatabaseManager, DatabaseStore};
 use crate::docker;
 use crate::models::*;
 use crate::monitor;
+use crate::server_organization::{
+    FolderDeleteInput, FolderInput, FolderMoveInput, ServerMoveInput, ServerPinInput,
+    ServerTagsInput,
+};
 use crate::sftp;
 use crate::sftp::SftpManager;
 use crate::ssh;
@@ -124,6 +128,337 @@ pub extern "C" fn orbit_delete_server(app: *mut OrbitApp, id: *const c_char) -> 
         Ok(_) => 0,
         Err(_) => -3,
     }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_list_server_organization(
+    app: *mut OrbitApp,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if out_json.is_null() {
+        app.set_error("服务器组织列表输出指针为空");
+        return -1;
+    }
+    server_organization_json_result(
+        app,
+        out_json,
+        "读取服务器组织",
+        app.db.server_organization(),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_create_server_folder(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_json.is_null() {
+        app.set_error("创建服务器文件夹参数为空");
+        return -1;
+    }
+    let input = match parse_json_input_with_error::<FolderInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析创建服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "创建服务器文件夹",
+        app.db.create_server_folder(&input),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_rename_server_folder(
+    app: *mut OrbitApp,
+    folder_id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if folder_id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("重命名服务器文件夹参数为空");
+        return -1;
+    }
+    let folder_id = match cstr_to_str(folder_id, "文件夹 ID") {
+        Ok(folder_id) => folder_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<FolderInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析重命名服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "重命名服务器文件夹",
+        app.db.rename_server_folder(folder_id, &input),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_move_server_folder(
+    app: *mut OrbitApp,
+    folder_id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if folder_id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("移动服务器文件夹参数为空");
+        return -1;
+    }
+    let folder_id = match cstr_to_str(folder_id, "文件夹 ID") {
+        Ok(folder_id) => folder_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<FolderMoveInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析移动服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "移动服务器文件夹",
+        app.db
+            .move_server_folder(folder_id, input.parent_id.as_deref(), input.sort_order),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_delete_server_folder(
+    app: *mut OrbitApp,
+    folder_id: *const c_char,
+    json_input: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if folder_id.is_null() || json_input.is_null() {
+        app.set_error("删除服务器文件夹参数为空");
+        return -1;
+    }
+    let folder_id = match cstr_to_str(folder_id, "文件夹 ID") {
+        Ok(folder_id) => folder_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<FolderDeleteInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析删除服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_status_result(
+        app,
+        "删除服务器文件夹",
+        app.db.delete_server_folder(
+            folder_id,
+            input.destination_folder_id.as_deref(),
+            input.delete_servers,
+        ),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_create_server_tag(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_json.is_null() {
+        app.set_error("创建服务器标签参数为空");
+        return -1;
+    }
+    let name = match parse_json_input_with_error::<String>(json_input) {
+        Ok(name) => name,
+        Err(error) => {
+            app.set_error(format!("解析创建服务器标签 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "创建服务器标签",
+        app.db.create_server_tag(&name),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_delete_server_tag(app: *mut OrbitApp, tag_id: *const c_char) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if tag_id.is_null() {
+        app.set_error("删除服务器标签参数为空");
+        return -1;
+    }
+    let tag_id = match cstr_to_str(tag_id, "标签 ID") {
+        Ok(tag_id) => tag_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    server_organization_status_result(app, "删除服务器标签", app.db.delete_server_tag(tag_id))
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_set_server_tags(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    json_input: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if server_id.is_null() || json_input.is_null() {
+        app.set_error("设置服务器标签参数为空");
+        return -1;
+    }
+    let server_id = match cstr_to_str(server_id, "服务器 ID") {
+        Ok(server_id) => server_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<ServerTagsInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析设置服务器标签 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_status_result(
+        app,
+        "设置服务器标签",
+        app.db.set_server_tags(server_id, &input.tag_ids),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_move_server(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    json_input: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if server_id.is_null() || json_input.is_null() {
+        app.set_error("移动服务器参数为空");
+        return -1;
+    }
+    let server_id = match cstr_to_str(server_id, "服务器 ID") {
+        Ok(server_id) => server_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<ServerMoveInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析移动服务器 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_status_result(
+        app,
+        "移动服务器",
+        app.db.move_server(server_id, input.folder_id.as_deref()),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_set_server_pin(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if server_id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("设置服务器置顶参数为空");
+        return -1;
+    }
+    let server_id = match cstr_to_str(server_id, "服务器 ID") {
+        Ok(server_id) => server_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<ServerPinInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析设置服务器置顶 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "设置服务器置顶",
+        app.db
+            .set_server_pin(server_id, input.is_pinned, input.pin_order),
+    )
 }
 
 #[no_mangle]
@@ -1977,6 +2312,41 @@ fn database_json_operation<T: serde::Serialize>(
         Err(e) => {
             app.set_error(format!("数据库操作失败: {}", e));
             -2
+        }
+    }
+}
+
+fn server_organization_json_result<T: serde::Serialize>(
+    app: &OrbitApp,
+    out_json: *mut *mut c_char,
+    action: &str,
+    result: anyhow::Result<T>,
+) -> i32 {
+    match result {
+        Ok(value) => {
+            let code = json_to_out(&value, out_json);
+            if code != 0 {
+                app.set_error(format!("序列化{}结果失败", action));
+            }
+            code
+        }
+        Err(error) => {
+            app.set_error(format!("{}失败: {}", action, error));
+            -3
+        }
+    }
+}
+
+fn server_organization_status_result(
+    app: &OrbitApp,
+    action: &str,
+    result: anyhow::Result<()>,
+) -> i32 {
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            app.set_error(format!("{}失败: {}", action, error));
+            -3
         }
     }
 }

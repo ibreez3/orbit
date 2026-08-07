@@ -29,6 +29,26 @@ ORBIT_API int32_t orbit_update_server(struct OrbitApp *app, const char *id, cons
 
 ORBIT_API int32_t orbit_delete_server(struct OrbitApp *app, const char *id);
 
+ORBIT_API int32_t orbit_list_server_organization(struct OrbitApp *app, char **out_json);
+
+ORBIT_API int32_t orbit_create_server_folder(struct OrbitApp *app, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_rename_server_folder(struct OrbitApp *app, const char *folder_id, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_move_server_folder(struct OrbitApp *app, const char *folder_id, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_delete_server_folder(struct OrbitApp *app, const char *folder_id, const char *json_input);
+
+ORBIT_API int32_t orbit_create_server_tag(struct OrbitApp *app, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_delete_server_tag(struct OrbitApp *app, const char *tag_id);
+
+ORBIT_API int32_t orbit_set_server_tags(struct OrbitApp *app, const char *server_id, const char *json_input);
+
+ORBIT_API int32_t orbit_move_server(struct OrbitApp *app, const char *server_id, const char *json_input);
+
+ORBIT_API int32_t orbit_set_server_pin(struct OrbitApp *app, const char *server_id, const char *json_input, char **out_json);
+
 ORBIT_API int32_t orbit_list_credential_groups(struct OrbitApp *app, char **out_json);
 
 ORBIT_API int32_t orbit_add_credential_group(struct OrbitApp *app, const char *json_input, char **out_json);

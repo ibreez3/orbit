@@ -1,10 +1,11 @@
 use crate::crypto;
 use crate::models::*;
 use crate::server_organization::{
-    normalize_name, ServerFolder, ServerOrganizationSnapshot, ServerTag, ServerTagLink,
+    normalize_name, FolderInput, ServerFolder, ServerOrganizationSnapshot, ServerTag, ServerTagLink,
 };
-use anyhow::Result;
-use rusqlite::{Connection, OptionalExtension};
+use anyhow::{anyhow, bail, Result};
+use rusqlite::{params_from_iter, Connection, OptionalExtension, ToSql, Transaction};
+use std::collections::HashSet;
 use std::sync::Mutex;
 use tracing::{debug, info};
 
@@ -518,6 +519,283 @@ impl Database {
         })
     }
 
+    pub fn create_server_folder(&self, input: &FolderInput) -> Result<ServerFolder> {
+        let normalized_name = normalize_name(&input.name)?;
+        let name = input.name.trim();
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let parent_depth = folder_ancestors(&tx, input.parent_id.as_deref())?.len();
+        if parent_depth + 1 > 3 {
+            bail!("文件夹最多支持三层");
+        }
+        ensure_folder_name_available(&tx, input.parent_id.as_deref(), &normalized_name, None)?;
+        let sort_order = input.sort_order.unwrap_or(0);
+        tx.execute(
+            "INSERT INTO server_folders (id, name, normalized_name, parent_id, sort_order, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                id,
+                name,
+                normalized_name,
+                input.parent_id,
+                sort_order,
+                now,
+                now,
+            ],
+        )?;
+        let folder = folder_by_id(&tx, &id)?;
+        tx.commit()?;
+        Ok(folder)
+    }
+
+    pub fn rename_server_folder(&self, id: &str, input: &FolderInput) -> Result<ServerFolder> {
+        let normalized_name = normalize_name(&input.name)?;
+        let name = input.name.trim();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let folder = folder_by_id(&tx, id)?;
+        ensure_folder_name_available(&tx, folder.parent_id.as_deref(), &normalized_name, Some(id))?;
+        tx.execute(
+            "UPDATE server_folders SET name = ?1, normalized_name = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![name, normalized_name, now, id],
+        )?;
+        let folder = folder_by_id(&tx, id)?;
+        tx.commit()?;
+        Ok(folder)
+    }
+
+    pub fn move_server_folder(
+        &self,
+        id: &str,
+        parent_id: Option<&str>,
+        sort_order: i64,
+    ) -> Result<ServerFolder> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let folder = folder_by_id(&tx, id)?;
+        let descendants = folder_subtree(&tx, id)?;
+        let descendant_max_depth = descendants
+            .iter()
+            .map(|(_, depth)| *depth)
+            .max()
+            .unwrap_or(0);
+        let parent_depth = folder_ancestors(&tx, parent_id)?;
+        if parent_depth.iter().any(|ancestor| ancestor.id == id) {
+            bail!("不能将文件夹移动到自身或其子文件夹");
+        }
+        if parent_depth.len() + 1 + descendant_max_depth > 3 {
+            bail!("移动后文件夹层级不能超过三层");
+        }
+        ensure_folder_name_available(&tx, parent_id, &folder.normalized_name, Some(id))?;
+        tx.execute(
+            "UPDATE server_folders SET parent_id = ?1, sort_order = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![parent_id, sort_order, now, id],
+        )?;
+        let folder = folder_by_id(&tx, id)?;
+        tx.commit()?;
+        Ok(folder)
+    }
+
+    pub fn delete_server_folder(
+        &self,
+        id: &str,
+        destination_folder_id: Option<&str>,
+        delete_servers: bool,
+    ) -> Result<()> {
+        if destination_folder_id.is_some() && delete_servers {
+            bail!("删除文件夹时只能选择移动服务器或删除服务器");
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        folder_by_id(&tx, id)?;
+        let subtree = folder_subtree(&tx, id)?;
+        let folder_ids: Vec<String> = subtree
+            .into_iter()
+            .map(|(folder_id, _)| folder_id)
+            .collect();
+        if let Some(destination) = destination_folder_id {
+            if folder_ids.iter().any(|folder_id| folder_id == destination) {
+                bail!("不能将服务器移动到正在删除的文件夹中");
+            }
+            folder_by_id(&tx, destination)?;
+        }
+
+        let placeholders = placeholders(folder_ids.len());
+        let server_count: i64 = tx.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM servers WHERE folder_id IN ({})",
+                placeholders
+            ),
+            params_from_iter(folder_ids.iter()),
+            |row| row.get(0),
+        )?;
+        if server_count > 0 && destination_folder_id.is_none() && !delete_servers {
+            bail!("非空文件夹必须选择移动服务器或删除服务器");
+        }
+
+        if let Some(destination) = destination_folder_id {
+            let mut values: Vec<&dyn ToSql> = vec![&destination];
+            values.extend(folder_ids.iter().map(|folder_id| folder_id as &dyn ToSql));
+            tx.execute(
+                &format!(
+                    "UPDATE servers SET folder_id = ?1 WHERE folder_id IN ({})",
+                    placeholders
+                ),
+                params_from_iter(values),
+            )?;
+        } else if delete_servers {
+            tx.execute(
+                &format!(
+                    "DELETE FROM server_tag_links WHERE server_id IN (SELECT id FROM servers WHERE folder_id IN ({}))",
+                    placeholders
+                ),
+                params_from_iter(folder_ids.iter()),
+            )?;
+            tx.execute(
+                &format!("DELETE FROM servers WHERE folder_id IN ({})", placeholders),
+                params_from_iter(folder_ids.iter()),
+            )?;
+        }
+
+        for folder_id in folder_ids.iter().rev() {
+            tx.execute("DELETE FROM server_folders WHERE id = ?1", [folder_id])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn create_server_tag(&self, name: &str) -> Result<ServerTag> {
+        let normalized_name = normalize_name(name)?;
+        let name = name.trim();
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT id FROM server_tags WHERE normalized_name = ?1",
+                [&normalized_name],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if existing.is_some() {
+            bail!("标签名称已存在");
+        }
+        tx.execute(
+            "INSERT INTO server_tags (id, name, normalized_name, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, name, normalized_name, now, now],
+        )?;
+        let tag = tag_by_id(&tx, &id)?;
+        tx.commit()?;
+        Ok(tag)
+    }
+
+    pub fn delete_server_tag(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        if conn.execute("DELETE FROM server_tags WHERE id = ?1", [id])? == 0 {
+            bail!("标签不存在");
+        }
+        Ok(())
+    }
+
+    pub fn set_server_tags(&self, server_id: &str, tag_ids: &[String]) -> Result<()> {
+        let mut seen = HashSet::new();
+        if tag_ids.iter().any(|tag_id| !seen.insert(tag_id)) {
+            bail!("标签不能重复");
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        server_exists(&tx, server_id)?;
+        for tag_id in tag_ids {
+            tag_by_id(&tx, tag_id)?;
+        }
+        tx.execute(
+            "DELETE FROM server_tag_links WHERE server_id = ?1",
+            [server_id],
+        )?;
+        for tag_id in tag_ids {
+            tx.execute(
+                "INSERT INTO server_tag_links (server_id, tag_id) VALUES (?1, ?2)",
+                rusqlite::params![server_id, tag_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn server_tag_ids(&self, server_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT tag_id FROM server_tag_links WHERE server_id = ?1 ORDER BY tag_id")?;
+        let rows = stmt.query_map([server_id], |row| row.get(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub fn move_server(&self, server_id: &str, folder_id: Option<&str>) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        if let Some(folder_id) = folder_id {
+            let exists: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM server_folders WHERE id = ?1",
+                    [folder_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if exists.is_none() {
+                bail!("文件夹不存在");
+            }
+        }
+        if conn.execute(
+            "UPDATE servers SET folder_id = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![folder_id, now, server_id],
+        )? == 0
+        {
+            bail!("服务器不存在");
+        }
+        Ok(())
+    }
+
+    pub fn set_server_pin(
+        &self,
+        server_id: &str,
+        is_pinned: bool,
+        pin_order: Option<i64>,
+    ) -> Result<Server> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        server_exists(&tx, server_id)?;
+        let pin_order = if is_pinned {
+            match pin_order {
+                Some(pin_order) => Some(pin_order),
+                None => Some(tx.query_row(
+                    "SELECT COALESCE(MAX(pin_order), 0) + 1 FROM servers WHERE is_pinned = 1",
+                    [],
+                    |row| row.get(0),
+                )?),
+            }
+        } else {
+            None
+        };
+        tx.execute(
+            "UPDATE servers SET is_pinned = ?1, pin_order = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![is_pinned, pin_order, now, server_id],
+        )?;
+        let server = tx.query_row(
+            &format!("SELECT {} FROM servers WHERE id = ?1", Self::SERVER_COLUMNS),
+            [server_id],
+            |row| Self::row_to_server(row),
+        )?;
+        tx.commit()?;
+        Ok(server)
+    }
+
     fn row_to_credential_group(row: &rusqlite::Row) -> rusqlite::Result<CredentialGroup> {
         Ok(CredentialGroup {
             id: row.get(0)?,
@@ -639,6 +917,118 @@ impl Database {
         )?;
         Ok(())
     }
+}
+
+fn folder_by_id(tx: &Transaction<'_>, id: &str) -> Result<ServerFolder> {
+    tx.query_row(
+        "SELECT id, name, normalized_name, parent_id, sort_order, created_at, updated_at
+         FROM server_folders WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(ServerFolder {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                normalized_name: row.get(2)?,
+                parent_id: row.get(3)?,
+                sort_order: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| anyhow!("文件夹不存在"))
+}
+
+fn tag_by_id(tx: &Transaction<'_>, id: &str) -> Result<ServerTag> {
+    tx.query_row(
+        "SELECT id, name, normalized_name, created_at, updated_at FROM server_tags WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(ServerTag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                normalized_name: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| anyhow!("标签不存在"))
+}
+
+fn server_exists(tx: &Transaction<'_>, id: &str) -> Result<()> {
+    let server_id: Option<String> = tx
+        .query_row("SELECT id FROM servers WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    if server_id.is_none() {
+        bail!("服务器不存在");
+    }
+    Ok(())
+}
+
+fn folder_ancestors(tx: &Transaction<'_>, parent_id: Option<&str>) -> Result<Vec<ServerFolder>> {
+    let mut ancestors = Vec::new();
+    let mut seen = HashSet::new();
+    let mut current_id = parent_id.map(str::to_owned);
+    while let Some(id) = current_id {
+        if !seen.insert(id.clone()) {
+            bail!("文件夹层级存在循环");
+        }
+        let folder = folder_by_id(tx, &id)?;
+        current_id = folder.parent_id.clone();
+        ancestors.push(folder);
+    }
+    Ok(ancestors)
+}
+
+fn folder_subtree(tx: &Transaction<'_>, root_id: &str) -> Result<Vec<(String, usize)>> {
+    let mut folders = Vec::new();
+    let mut pending = vec![(root_id.to_owned(), 0)];
+    let mut seen = HashSet::new();
+    while let Some((folder_id, depth)) = pending.pop() {
+        if !seen.insert(folder_id.clone()) {
+            bail!("文件夹层级存在循环");
+        }
+        let children = {
+            let mut stmt = tx.prepare("SELECT id FROM server_folders WHERE parent_id = ?1")?;
+            let rows = stmt.query_map([&folder_id], |row| row.get::<_, String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        folders.push((folder_id, depth));
+        pending.extend(children.into_iter().map(|child_id| (child_id, depth + 1)));
+    }
+    Ok(folders)
+}
+
+fn ensure_folder_name_available(
+    tx: &Transaction<'_>,
+    parent_id: Option<&str>,
+    normalized_name: &str,
+    exclude_id: Option<&str>,
+) -> Result<()> {
+    let existing: Option<String> = tx
+        .query_row(
+            "SELECT id FROM server_folders
+             WHERE COALESCE(parent_id, '') = COALESCE(?1, '') AND normalized_name = ?2",
+            rusqlite::params![parent_id, normalized_name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing.as_deref().is_some_and(|id| Some(id) != exclude_id) {
+        bail!("同级文件夹名称已存在");
+    }
+    Ok(())
+}
+
+fn placeholders(count: usize) -> String {
+    std::iter::repeat("?")
+        .take(count)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[cfg(test)]
