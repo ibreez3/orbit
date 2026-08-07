@@ -486,6 +486,103 @@ impl Database {
         Ok(server)
     }
 
+    pub fn validate_temporary_connection(&self, input: &TemporaryConnectionInput) -> Result<()> {
+        input.validate()?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("数据库连接锁已损坏"))?;
+        validate_temporary_references(&conn, input)
+    }
+
+    pub fn promote_temporary_server(
+        &self,
+        descriptor: &crate::ssh::TemporarySessionDescriptor,
+        input: &PromoteTemporaryServerInput,
+    ) -> Result<Server> {
+        input.validate()?;
+        if !descriptor.matches(&input.connection) {
+            bail!("保存请求与当前临时会话不匹配");
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let enc_password = crypto::encrypt(&input.connection.password.clone().unwrap_or_default());
+        let enc_private_key =
+            crypto::encrypt(&input.connection.private_key.clone().unwrap_or_default());
+        let enc_key_passphrase =
+            crypto::encrypt(&input.connection.key_passphrase.clone().unwrap_or_default());
+        let mut server = input.connection.to_temporary_server(id);
+        server.name = input.name.trim().into();
+        server.folder_id = input
+            .folder_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned);
+        server.last_connected_at = Some(now.clone());
+        server.last_attempted_at = Some(now.clone());
+        server.last_connection_result = Some("success".into());
+        server.updated_at = now;
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("数据库连接锁已损坏"))?;
+        let tx = conn.transaction()?;
+        validate_temporary_references(&tx, &input.connection)?;
+        if let Some(folder_id) = server.folder_id.as_deref() {
+            folder_by_id(&tx, folder_id)?;
+        }
+        let mut seen = HashSet::new();
+        for tag_id in &input.tag_ids {
+            if !seen.insert(tag_id) {
+                bail!("标签不能重复");
+            }
+            tag_by_id(&tx, tag_id)?;
+        }
+
+        tx.execute(
+            &format!(
+                "INSERT INTO servers ({}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                Self::SERVER_COLUMNS
+            ),
+            rusqlite::params![
+                server.id,
+                server.name,
+                server.host,
+                server.port,
+                server.group_name,
+                server.auth_type,
+                server.username,
+                enc_password,
+                enc_private_key,
+                server.key_source,
+                server.key_file_path,
+                enc_key_passphrase,
+                server.credential_group_id,
+                server.jump_server_id,
+                server.folder_id,
+                server.is_pinned,
+                server.pin_order,
+                server.last_connected_at,
+                server.last_attempted_at,
+                server.last_connection_result,
+                server.last_connection_error,
+                server.created_at,
+                server.updated_at,
+            ],
+        )?;
+        for tag_id in &input.tag_ids {
+            tx.execute(
+                "INSERT INTO server_tag_links (server_id, tag_id) VALUES (?1, ?2)",
+                rusqlite::params![server.id, tag_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(server)
+    }
+
     pub fn update_server(&self, id: &str, input: &ServerInput) -> Result<Server> {
         let now = chrono::Utc::now().to_rfc3339();
         let enc_password = crypto::encrypt(&input.password.as_deref().unwrap_or(""));
@@ -977,6 +1074,37 @@ impl Database {
     }
 }
 
+fn validate_temporary_references(
+    conn: &Connection,
+    input: &TemporaryConnectionInput,
+) -> Result<()> {
+    if let Some(credential_group_id) = input.credential_group_id() {
+        let exists: Option<String> = conn
+            .query_row(
+                "SELECT id FROM credential_groups WHERE id = ?1",
+                [credential_group_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if exists.is_none() {
+            bail!("凭据组不存在");
+        }
+    }
+    if let Some(jump_server_id) = input.jump_server_id() {
+        let exists: Option<String> = conn
+            .query_row(
+                "SELECT id FROM servers WHERE id = ?1",
+                [jump_server_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if exists.is_none() {
+            bail!("跳板机服务器不存在");
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn sanitize_connection_error(error: &str) -> String {
     let normalized = error.to_ascii_lowercase();
     if normalized.contains("password")
@@ -1348,5 +1476,163 @@ mod server_organization_tests {
         assert!(!tables.iter().any(|table| table == "server_tag_links"));
         drop(conn);
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod temporary_connection_tests {
+    use super::Database;
+    use crate::models::{
+        CredentialGroupInput, PromoteTemporaryServerInput, ServerInput, TemporaryConnectionInput,
+    };
+    use crate::server_organization::FolderInput;
+    use crate::ssh::TemporarySessionDescriptor;
+
+    fn direct_connection(host: &str) -> TemporaryConnectionInput {
+        TemporaryConnectionInput {
+            host: host.into(),
+            port: 22,
+            username: "alice".into(),
+            auth_type: "password".into(),
+            password: Some("PROMOTION_SECRET".into()),
+            private_key: None,
+            key_source: None,
+            key_file_path: None,
+            key_passphrase: None,
+            credential_group_id: None,
+            jump_server_id: None,
+        }
+    }
+
+    fn promotion(host: &str) -> PromoteTemporaryServerInput {
+        PromoteTemporaryServerInput {
+            connection: direct_connection(host),
+            name: "Promoted".into(),
+            folder_id: None,
+            tag_ids: Vec::new(),
+        }
+    }
+
+    fn descriptor(host: &str) -> TemporarySessionDescriptor {
+        TemporarySessionDescriptor::new(host, 22, "alice", "password", None, None)
+    }
+
+    #[test]
+    fn temporary_references_must_exist() {
+        let db = Database::new(":memory:").unwrap();
+        let mut input = direct_connection("host");
+        input.password = None;
+        input.credential_group_id = Some("missing-group".into());
+        assert!(db.validate_temporary_connection(&input).is_err());
+
+        let group = db
+            .add_credential_group(&CredentialGroupInput {
+                name: "credential".into(),
+                auth_type: Some("password".into()),
+                username: "alice".into(),
+                password: Some("secret".into()),
+                private_key: None,
+                key_source: None,
+                key_file_path: None,
+                key_passphrase: None,
+            })
+            .unwrap();
+        input.credential_group_id = Some(group.id);
+        input.jump_server_id = Some("missing-jump".into());
+        assert!(db.validate_temporary_connection(&input).is_err());
+
+        let jump = db
+            .add_server(&ServerInput {
+                name: "jump".into(),
+                host: "jump.example".into(),
+                port: Some(22),
+                group_name: None,
+                auth_type: Some("password".into()),
+                username: "jump".into(),
+                password: Some("secret".into()),
+                private_key: None,
+                key_source: None,
+                key_file_path: None,
+                key_passphrase: None,
+                credential_group_id: None,
+                jump_server_id: None,
+                folder_id: None,
+            })
+            .unwrap();
+        input.jump_server_id = Some(jump.id);
+        assert!(db.validate_temporary_connection(&input).is_ok());
+    }
+
+    #[test]
+    fn temporary_promotion_requires_matching_descriptor_without_leaking_secrets() {
+        let db = Database::new(":memory:").unwrap();
+        let error = db
+            .promote_temporary_server(&descriptor("host"), &promotion("other-host"))
+            .expect_err("mismatched descriptor");
+
+        assert_eq!(db.list_servers().unwrap().len(), 0);
+        assert!(!error.to_string().contains("PROMOTION_SECRET"));
+    }
+
+    #[test]
+    fn temporary_promotion_atomically_saves_encrypted_server_links_and_success_metadata() {
+        let db = Database::new(":memory:").unwrap();
+        let folder = db
+            .create_server_folder(&FolderInput {
+                name: "Production".into(),
+                parent_id: None,
+                sort_order: None,
+            })
+            .unwrap();
+        let tag = db.create_server_tag("Linux").unwrap();
+        let mut input = promotion("host");
+        input.folder_id = Some(folder.id.clone());
+        input.tag_ids = vec![tag.id.clone()];
+
+        let server = db
+            .promote_temporary_server(&descriptor("host"), &input)
+            .unwrap();
+
+        assert_eq!(server.folder_id.as_deref(), Some(folder.id.as_str()));
+        assert_eq!(db.server_tag_ids(&server.id).unwrap(), vec![tag.id]);
+        assert_eq!(server.last_connection_result.as_deref(), Some("success"));
+        assert!(server.last_attempted_at.is_some());
+        assert!(server.last_connected_at.is_some());
+        let stored_password: String = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT password FROM servers WHERE id = ?1",
+                [&server.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(stored_password, "PROMOTION_SECRET");
+        assert!(!stored_password.contains("PROMOTION_SECRET"));
+    }
+
+    #[test]
+    fn temporary_promotion_rolls_back_when_a_link_write_fails() {
+        let db = Database::new(":memory:").unwrap();
+        let tag = db.create_server_tag("Linux").unwrap();
+        db.conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_temporary_tag_link
+                 BEFORE INSERT ON server_tag_links
+                 BEGIN SELECT RAISE(ABORT, 'forced link failure'); END;",
+            )
+            .unwrap();
+        let mut input = promotion("host");
+        input.tag_ids = vec![tag.id];
+
+        assert!(db
+            .promote_temporary_server(&descriptor("host"), &input)
+            .is_err());
+
+        assert_eq!(db.list_servers().unwrap().len(), 0);
+        assert!(db.server_organization().unwrap().tag_links.is_empty());
     }
 }

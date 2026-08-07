@@ -9,7 +9,7 @@ use serde::Serialize;
 use tracing::{debug, info, warn};
 
 use crate::db::Database;
-use crate::models::Server;
+use crate::models::{Server, TemporaryConnectionInput};
 use crate::transport;
 
 #[derive(Serialize, Clone)]
@@ -51,6 +51,31 @@ impl TemporarySessionDescriptor {
             jump_server_id,
         }
     }
+
+    pub fn from_input(input: &TemporaryConnectionInput) -> Self {
+        Self::new(
+            input.host.trim(),
+            input.port,
+            input.username.trim(),
+            input.auth_type.clone(),
+            input.credential_group_id().map(str::to_owned),
+            input.jump_server_id().map(str::to_owned),
+        )
+    }
+
+    pub fn matches(&self, input: &TemporaryConnectionInput) -> bool {
+        self == &Self::from_input(input)
+    }
+}
+
+fn promotable_descriptor<'a>(
+    pool_key: Option<&str>,
+    temporary: Option<&'a TemporarySessionDescriptor>,
+) -> Result<&'a TemporarySessionDescriptor> {
+    if pool_key.is_some() {
+        return Err(anyhow!("已保存服务器会话不能通过临时提升接口保存"));
+    }
+    temporary.ok_or_else(|| anyhow!("会话不是可提升的临时会话"))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -439,6 +464,25 @@ impl SshManager {
         })
     }
 
+    pub fn temporary_descriptor(&self, channel_id: &str) -> Result<TemporarySessionDescriptor> {
+        let session_key = self
+            .channel_to_session
+            .get(channel_id)
+            .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
+        let shared = self
+            .sessions
+            .get(session_key)
+            .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
+        let channel = shared
+            .channels
+            .get(channel_id)
+            .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
+        if !channel.running.load(Ordering::Relaxed) {
+            return Err(anyhow!("临时会话不存在或已关闭"));
+        }
+        Ok(promotable_descriptor(shared.pool_key.as_deref(), shared.temporary.as_ref())?.clone())
+    }
+
     pub fn disconnect(&mut self, channel_id: &str) -> Result<()> {
         let Some(session_key) = self.channel_to_session.get(channel_id).cloned() else {
             return Ok(());
@@ -601,6 +645,15 @@ mod tests {
         let debug = format!("{descriptor:?}");
         assert!(!debug.contains("password_value"));
         assert!(!debug.contains("private_key"));
+    }
+
+    #[test]
+    fn temporary_promotion_descriptor_requires_non_poolable_temporary_state() {
+        let descriptor =
+            TemporarySessionDescriptor::new("host", 22, "alice", "password", None, None);
+        assert!(promotable_descriptor(None, Some(&descriptor)).is_ok());
+        assert!(promotable_descriptor(Some("saved-1"), Some(&descriptor)).is_err());
+        assert!(promotable_descriptor(None, None).is_err());
     }
 
     #[test]

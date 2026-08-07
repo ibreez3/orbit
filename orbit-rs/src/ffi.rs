@@ -1047,6 +1047,123 @@ pub extern "C" fn orbit_connect_ssh(
 }
 
 #[no_mangle]
+pub extern "C" fn orbit_connect_ssh_temporary(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    data_cb: OrbitDataCallback,
+    closed_cb: OrbitClosedCallback,
+    userdata: *mut c_void,
+    out_session_id: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_session_id.is_null() {
+        app.set_error("临时 SSH 连接参数为空");
+        return -1;
+    }
+    let input = match parse_json_input_with_error::<TemporaryConnectionInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析临时 SSH 连接 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    if let Err(error) = app.db.validate_temporary_connection(&input) {
+        app.set_error(format!("临时 SSH 连接参数无效: {}", error));
+        return -3;
+    }
+
+    let descriptor = ssh::TemporarySessionDescriptor::from_input(&input);
+    let runtime_id = format!("temporary:{}", uuid::Uuid::new_v4());
+    let server = input.to_temporary_server(runtime_id);
+    match connect_server_session(
+        app,
+        server,
+        None,
+        Some(descriptor),
+        data_cb,
+        closed_cb,
+        userdata,
+    ) {
+        Ok(session_id) => {
+            let c_session_id = CString::new(session_id).unwrap_or_default();
+            unsafe { *out_session_id = c_session_id.into_raw() };
+            0
+        }
+        Err(error) => {
+            app.set_error(crate::db::sanitize_connection_error(&error.to_string()));
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_promote_temporary_server(
+    app: *mut OrbitApp,
+    session_id: *const c_char,
+    json_input: *const c_char,
+    out_server_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if session_id.is_null() || json_input.is_null() || out_server_json.is_null() {
+        app.set_error("临时服务器提升参数为空");
+        return -1;
+    }
+    let session_id = match cstr_to_str(session_id, "临时会话 ID") {
+        Ok(session_id) => session_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<PromoteTemporaryServerInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析临时服务器提升 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+
+    let manager = match app.ssh.lock() {
+        Ok(manager) => manager,
+        Err(error) => {
+            app.set_error(format!("SSH 会话管理器锁定失败: {}", error));
+            return -3;
+        }
+    };
+    let descriptor = match manager.temporary_descriptor(session_id) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -3;
+        }
+    };
+    let result = app.db.promote_temporary_server(&descriptor, &input);
+    drop(manager);
+
+    match result {
+        Ok(server) => {
+            let code = json_to_out(&server, out_server_json);
+            if code != 0 {
+                app.set_error("序列化已保存服务器失败");
+            }
+            code
+        }
+        Err(error) => {
+            app.set_error(crate::db::sanitize_connection_error(&error.to_string()));
+            -4
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn orbit_get_last_error(app: *mut OrbitApp, out_error: *mut *mut c_char) -> i32 {
     if app.is_null() || out_error.is_null() {
         return -1;

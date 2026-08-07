@@ -85,6 +85,10 @@ ORBIT_API int32_t orbit_test_connection(struct OrbitApp *app, const char *json_i
 
 ORBIT_API int32_t orbit_connect_ssh(struct OrbitApp *app, const char *server_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);
 
+ORBIT_API int32_t orbit_connect_ssh_temporary(struct OrbitApp *app, const char *json_input, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);
+
+ORBIT_API int32_t orbit_promote_temporary_server(struct OrbitApp *app, const char *session_id, const char *json_input, char **out_server_json);
+
 ORBIT_API int32_t orbit_get_last_error(struct OrbitApp *app, char **out_error);
 
 ORBIT_API int32_t orbit_spawn_channel(struct OrbitApp *app, const char *existing_session_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_channel_id);
