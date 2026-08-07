@@ -144,6 +144,11 @@ struct IdleSession {
     session_lock: Arc<std::sync::Mutex<()>>,
 }
 
+fn notify_channel_closed(channel_id: &str, running: &AtomicBool, closed_cb: &ClosedCallback) {
+    running.store(false, Ordering::Release);
+    closed_cb(channel_id);
+}
+
 pub(crate) fn spawn_channel_reader(
     channel_id: &str,
     channel: ssh2::Channel,
@@ -191,8 +196,7 @@ pub(crate) fn spawn_channel_reader(
                 }
                 Ok(_) => {
                     debug!(session_id = %sid, "SSH channel 正常关闭");
-                    closed_cb(&sid);
-                    run.store(false, Ordering::Relaxed);
+                    notify_channel_closed(&sid, &run, &closed_cb);
                     break;
                 }
                 Err(e) => {
@@ -202,8 +206,7 @@ pub(crate) fn spawn_channel_reader(
                         continue;
                     }
                     warn!(session_id = %sid, error = %e, "SSH channel 读取错误");
-                    closed_cb(&sid);
-                    run.store(false, Ordering::Relaxed);
+                    notify_channel_closed(&sid, &run, &closed_cb);
                     break;
                 }
             }
@@ -477,7 +480,7 @@ impl SshManager {
             .channels
             .get(channel_id)
             .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
-        if !channel.running.load(Ordering::Relaxed) {
+        if !channel.running.load(Ordering::Acquire) {
             return Err(anyhow!("临时会话不存在或已关闭"));
         }
         Ok(promotable_descriptor(shared.pool_key.as_deref(), shared.temporary.as_ref())?.clone())
@@ -654,6 +657,21 @@ mod tests {
         assert!(promotable_descriptor(None, Some(&descriptor)).is_ok());
         assert!(promotable_descriptor(Some("saved-1"), Some(&descriptor)).is_err());
         assert!(promotable_descriptor(None, None).is_err());
+    }
+
+    #[test]
+    fn temporary_promotion_close_callback_observes_stopped_channel() {
+        let running = Arc::new(AtomicBool::new(true));
+        let observed_running = Arc::new(AtomicBool::new(true));
+        let callback_running = running.clone();
+        let callback_observation = observed_running.clone();
+        let closed_cb: ClosedCallback = Box::new(move |_| {
+            callback_observation.store(callback_running.load(Ordering::Acquire), Ordering::Relaxed);
+        });
+
+        notify_channel_closed("temporary-session", &running, &closed_cb);
+
+        assert!(!observed_running.load(Ordering::Relaxed));
     }
 
     #[test]
