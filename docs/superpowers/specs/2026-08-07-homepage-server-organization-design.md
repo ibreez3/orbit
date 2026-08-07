@@ -46,7 +46,9 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 - 搜索服务器名称、主机地址、目录路径和标签。
 - 解析 `[user@]host[:port]` 临时连接地址。
 - `⌘K` 聚焦输入框。
-- `Esc` 关闭结果或临时认证面板，并将焦点还给当前终端。
+- `Esc` 按以下优先级处理：临时认证面板 → 搜索结果 → 输入框焦点 → 现有应用行为。
+- 输入框未聚焦且没有打开搜索结果或认证面板时，不拦截 `Esc`。
+- 关闭输入相关界面后，将焦点还给当前终端；无活动终端时取消输入框焦点即可。
 
 ### 3.2 左侧资产栏
 
@@ -57,7 +59,7 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 - 深层目录或长名称使用省略号，悬停显示完整路径。
 - 顶部“搜索资产”只过滤左侧资产树，不发起连接。
 
-服务器分类树使用新的目录与标签模型。数据库、凭据组和命令片段继续沿用当前结构。
+服务器分类树使用新的目录与标签模型。数据库继续使用自身的 `group_name` 分组，凭据组和命令片段继续沿用当前结构；这些模型只在同一资产栏并列展示，不共享目录或标签数据。
 
 ### 3.3 主内容区
 
@@ -71,7 +73,7 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 
 ### 3.4 右侧工具栏与底部状态栏
 
-- 右侧工具栏宽度 48pt。
+- 右侧工具栏保持现有 52pt 宽度。
 - AI 与文件、监控等扩展工具同层。
 - 所有纯图标入口必须提供 tooltip 和辅助功能标签。
 - 底部状态栏高度 24pt，左侧显示活动会话摘要，右侧显示核心快捷键。
@@ -82,6 +84,8 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 
 - 用户可以自由创建、命名、排序和移动目录。
 - 目录最多 3 级。
+- 目录名称去除首尾空白后不能为空。
+- 同一父目录下的标准化名称唯一，不同父目录允许同名。
 - 每台服务器最多属于一个实体目录。
 - 无目录服务器归入系统视图“未分类”。
 - 禁止把目录移动到自身或后代节点下。
@@ -105,6 +109,8 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 - 置顶。
 - 最近连接。
 - 未分类。
+
+系统视图在没有匹配服务器时隐藏，避免展示不可操作的空节点；“全部服务器”始终保留。
 
 ### 4.4 目录交互
 
@@ -131,6 +137,9 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 - 通过首页居中按钮或 `⌘⇧P` 打开。
 - 只处理应用操作和命令片段。
 - 不返回服务器快速连接结果。
+- 现有 `SpotlightView` 改造成命令面板，移除服务器与凭据结果段；添加服务器、添加数据库、新建凭据和切换主题等应用操作可以继续保留。
+- 现有 `spotlight` 快捷键配置迁移为命令面板动作，默认键从 `⌘K` 改为 `⌘⇧P`。
+- 应用菜单、状态栏提示、首页按钮和快捷键设置页必须同步使用新名称与新快捷键。
 
 ### 5.3 左侧资产搜索
 
@@ -143,8 +152,12 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 ### 6.1 已保存服务器
 
 - 搜索结果回车、最近连接整行点击或服务器树双击均使用已保存认证信息建立 SSH 会话。
-- 成功后更新最近连接顺序和最近成功结果。
-- 失败后记录最近一次连接失败状态与可展示的错误摘要。
+- Rust 连接入口在开始尝试时写入 `last_attempted_at`。
+- SSH 会话、PTY 和 shell 全部建立成功后，写入 `last_connected_at`、`last_connection_result = success` 并清空旧错误摘要。
+- TCP、握手、认证、PTY、shell 或读取线程启动失败时，写入 `last_connection_result = failed` 和经过清理的错误摘要。
+- 连接结果由 Rust 在既有 `orbit_connect_ssh` 调用内部持久化，Swift 不额外调用“更新连接状态”接口，避免两侧状态竞争。
+- 错误摘要不得包含密码、私钥、密钥口令或完整认证请求 JSON。
+- 元数据写入失败不得把已经建立成功的 SSH 会话改判为连接失败；Rust 记录不含秘密字段的警告，界面在本次运行中仍依据活动 session 显示绿色，持久化状态保持原值。
 
 ### 6.2 临时服务器
 
@@ -157,6 +170,118 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 7. 信息完整后再次回车或点击“连接”建立临时会话。
 
 临时连接不得强制打开完整的添加服务器表单。
+
+IPv6 使用标准方括号形式，例如 `user@[2001:db8::10]:22`，避免把地址内部冒号误判为端口分隔符。
+
+### 6.3 临时连接面板
+
+新增 `TemporaryConnectionPanel`，显示在顶部服务器输入框下方。它不是 sheet，不遮挡整个工作区。
+
+面板状态由 `TemporaryConnectionDraft` 管理：
+
+```text
+displayName
+host
+port
+username
+authType
+password
+privateKey
+keySource
+keyFilePath
+keyPassphrase
+credentialGroupId
+jumpServerId
+saveToAssets
+folderId
+tagIds
+isConnecting
+validationError
+connectionError
+```
+
+- `host`、`port` 和输入中明确提供的 `username` 来自顶部输入解析结果。
+- 选择凭据组时，面板不复制或展示凭据组中的秘密字段，只传递凭据组 ID。
+- `saveToAssets` 关闭时隐藏名称、目录和标签字段。
+- 连接中禁用重复提交，但允许取消尚未开始的请求；底层同步连接已经开始后不承诺强制取消。
+- 认证失败后保留草稿和输入焦点，允许直接修改并重试。
+- 面板关闭或对应临时 Tab 关闭时，清除未持久化的密码、私钥内容和密钥口令。
+
+### 6.4 临时连接 Rust/FFI 通路
+
+新增 JSON 请求模型 `TemporaryConnectionInput`。字段与建立 SSH 所需的 `ServerInput` 子集一致，但不包含目录、标签和保存行为；保存资产由 Swift 在连接成功后显式执行。
+
+新增 `PromoteTemporaryServerInput`：包含临时连接的原始连接与认证字段，以及保存所需的服务器名称、`folderId` 和 `tagIds`。Rust 不从活动 session 中反向提取密码或私钥，提升时由 Swift 从仍在内存中的草稿重新提交。
+
+新增 C ABI：
+
+```c
+int32_t orbit_connect_ssh_temporary(
+    OrbitApp *app,
+    const char *json_input,
+    OrbitDataCallback data_cb,
+    OrbitClosedCallback closed_cb,
+    void *userdata,
+    char **out_session_id
+);
+
+int32_t orbit_promote_temporary_server(
+    OrbitApp *app,
+    const char *session_id,
+    const char *json_input,
+    char **out_server_json
+);
+```
+
+数据通路：
+
+```text
+TemporaryConnectionPanel
+  → AppState.connectTemporarySSH(draft)
+  → OrbitBridge.connectTemporarySSHAsync(input)
+  → orbit_connect_ssh_temporary(json_input, callbacks)
+  → parse TemporaryConnectionInput
+  → 构造仅存在于内存中的临时 Server
+  → transport::create_session(server, db)
+  → 创建 PTY / shell / reader
+  → SshManager 注册为 non-poolable session
+  ← session_id
+  → TerminalView 使用现有读写、resize、关闭回调
+```
+
+Rust 实现要求：
+
+- `TemporaryConnectionInput` 必须校验 host 非空、端口在 1～65535、认证方式字段完整，并拒绝同时提交凭据组与直接秘密字段等互斥配置。
+- 从 `orbit_connect_ssh` 提取共享内部函数，接收已经解析的 `Server` 和可选连接池键，避免复制 PTY、回调和注册逻辑。
+- 已保存服务器传入 `Some(server.id)`，继续允许复用和归还空闲连接。
+- 临时服务器传入 `None`，`SshManager` 必须标记为不可池化；最后一个 channel 关闭后直接断开并释放连接，不进入 `idle_pool`。
+- 临时服务器使用仅用于当前进程的 `temporary:<uuid>` 标识，不查询或写入 `servers` 表。
+- `SshManager` 为临时 session 只保留非秘密描述信息：host、port、username、auth type、凭据组 ID 和跳板机 ID；不得保留密码、私钥内容或密钥口令。
+- 临时连接可以引用已保存的凭据组和跳板机 ID，由 `transport::create_session` 继续通过数据库解析这些引用。
+- 临时连接的密码、私钥和密钥口令不得写入数据库、UserDefaults、日志或错误文本。
+- `orbit_promote_temporary_server` 只接受仍然存在且不可池化的临时 session；它在一个数据库事务中新增服务器、写入成功的连接元数据并返回服务器 JSON。
+- 提升前必须验证 `PromoteTemporaryServerInput` 的非秘密连接描述与活动临时 session 一致，禁止把与当前会话无关的配置借该接口标记为已连接。
+- 提升失败不得断开或改变当前临时 session，也不得留下部分服务器、目录或标签数据。
+- 提升成功后当前底层连接仍保持不可池化，只有下一次使用新 `serverId` 重连时才进入正常连接池。
+- `orbit-rs/include/orbit.h` 由 cbindgen 重新生成，不手工维护函数声明。
+
+Swift 实现要求：
+
+- `OrbitBridge` 新增同步包装和 `connectTemporarySSHAsync`，编码 `TemporaryConnectionInput` 后调用新 C ABI。
+- `OrbitBridge` 新增 `promoteTemporaryServerAsync(sessionId:input:)`，调用 Rust 提升接口并解码返回的 `Server`。
+- Tab 和终端上下文必须显式区分已保存服务器、临时连接与本地终端，不得把 `temporary:<uuid>` 当成持久化 `serverId` 使用；提升成功后，Tab 的已保存服务器关联必须可以更新为返回的 `serverId`。
+- 临时连接草稿只保存在内存中，并按 Tab 生命周期管理；不得放入 UserDefaults 或其他持久化状态。
+- 临时 Tab 在未保存前只启用终端与基于现有 `session_id` 的分屏 channel；依赖持久化 `serverId` 的 SFTP、监控、Docker、端口转发和批量命令保持禁用。
+- 临时连接需要在当前 Tab 内重连时，复用该 Tab 的内存草稿；Tab 关闭后草稿销毁。
+- 用户启用“保存到资产”时，先建立临时连接；成功后调用临时会话提升接口，使用现有加密写入路径保存认证信息，并将 Tab 关联到返回的新 `serverId`。
+- 保存失败不关闭已建立的临时会话，Tab 保持临时状态并显示非阻塞错误，允许再次保存。
+- 保存成功后，当前临时底层连接仍保持不可池化；下一次重连开始使用新保存的 `serverId` 和正常连接池。
+
+### 6.5 临时连接生命周期
+
+- 未保存临时主机不进入最近连接列表；当前活动 Tab 是其唯一入口。
+- 临时连接失败只在认证面板中显示，不创建服务器、目录、标签或持久化失败记录。
+- 选择保存并由 Rust 成功提升为服务器后，才按照普通服务器规则写入最近连接和成功元数据。
 
 ## 7. 最近连接
 
@@ -179,6 +304,8 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 - 多个置顶服务器按用户置顶顺序排列。
 - 未置顶服务器按最近连接时间倒序排列。
 - 首页展示前 8 条，“查看全部”切换到服务器完整列表或对应系统视图。
+- 新版本以数据库中的 `last_attempted_at` 为最近顺序的权威来源，不再把新的最近记录写入 UserDefaults。
+- 旧版 UserDefaults 中的 `recentServers` 仅作为兼容回退：缺少 `last_attempted_at` 的旧条目排在有时间记录的条目之后，按旧数组顺序展示，时间文案显示“历史记录”；服务器产生新的连接尝试后自动由数据库时间接管。
 
 ### 7.3 状态语义
 
@@ -192,12 +319,13 @@ Orbit 启动后的首要任务是连接服务器并进入工作，不展示占�
 
 ## 8. 数据模型
 
-建议新增：
+新增：
 
 ```text
 server_folders
   id
   name
+  normalized_name
   parent_id nullable
   sort_order
   created_at
@@ -223,10 +351,16 @@ folder_id nullable
 is_pinned
 pin_order nullable
 last_connected_at nullable
+last_attempted_at nullable
 last_connection_result nullable
+last_connection_error nullable
 ```
 
 标签名称保存用户输入的展示形式，`normalized_name` 使用去除首尾空白后的不区分大小写值，防止产生视觉重复标签。
+
+目录使用相同的标准化规则，并保证同级唯一。由于 SQLite 普通联合唯一约束会允许多个 `NULL parent_id`，根目录唯一性必须使用等价于 `COALESCE(parent_id, '') + normalized_name` 的唯一索引或显式事务校验。
+
+`last_connection_result` 仅允许 `success`、`failed` 或 `NULL`。`last_connection_error` 只保存可向用户展示的清理后摘要。
 
 活动会话状态继续来源于运行时会话数据，不持久化为“在线”。
 
@@ -239,14 +373,17 @@ last_connection_result nullable
 - 空 `group_name` 保持 `folder_id = NULL`，显示在“未分类”。
 - 第一版迁移保留旧 `group_name` 列但不再作为界面数据源，避免不可逆地破坏旧数据；新目录操作只维护 `folder_id`。
 - 不根据旧分组名称自动生成标签，避免错误推断用户语义。
-- 重复目录名按标准化后的原始分组值合并，但不得修改服务器认证、跳板机或连接字段。
+- 迁移遇到同级同名目录时复用既有目录；重复旧分组按标准化后的原始值合并，但不得修改服务器认证、跳板机或连接字段。
 - 迁移必须可重复执行，不重复创建目录或标签关系。
+- 创建目录表、标签表、关联表、服务器新增列和旧分组转换必须处于同一事务；任何步骤失败时整体回滚。
+- 旧版 UserDefaults 最近服务器数组不进入 SQLite 结构迁移，也不在迁移时伪造连接时间。
 
 ## 10. 错误与空状态
 
 - 无最近连接：显示“暂无连接记录”，并提供添加服务器和打开本地终端两个入口；顶部输入框仍是首要操作。
 - 临时地址格式错误：在输入框下就地提示合法格式，不打开认证面板。
 - 临时认证失败：保留用户已填内容，展示失败原因，不自动保存资产。
+- 临时连接成功但保存失败：保持当前会话，继续显示为临时 Tab，并提供重试保存入口。
 - 目录移动非法：保持原位置并说明是循环或层级超限。
 - 删除目录失败：不改变树，展示后端错误。
 - 旧数据迁移失败：事务回滚，应用不得进入部分迁移状态。
@@ -256,6 +393,7 @@ last_connection_result nullable
 - 主要文字与背景对比满足 WCAG AA 的普通文本要求。
 - 不以颜色作为状态的唯一表达，状态点提供 tooltip 和辅助功能文本。
 - 目录展开、服务器连接和更多操作均可通过键盘访问。
+- `⌘K`、`⌘⇧P` 和 `Esc` 的优先级必须覆盖自动化键盘测试。
 - 行点击热区覆盖整行。
 - 目录折叠按钮、更多操作和右侧工具按钮具有不小于 28×28pt 的交互热区。
 
@@ -264,6 +402,9 @@ last_connection_result nullable
 - 首页不存在重复连接输入框。
 - 已保存服务器可通过一次点击或一次回车进入会话。
 - 未保存服务器无需先创建资产即可进入紧凑认证流程。
+- 临时连接通过独立 C ABI 使用内存配置建立会话，不向数据库、UserDefaults 或日志写入秘密字段。
+- 临时会话关闭后不进入 SSH 空闲连接池。
+- 临时连接通过 Rust 提升接口保存成功后才成为普通服务器；保存失败不终止已建立会话，也不留下部分资产数据。
 - 顶部服务器输入框、左侧资产搜索和命令面板职责无交叉。
 - 默认窗口完整展示 8 条最近连接和居中辅助按钮组。
 - 1024×640 下核心操作不被遮挡。
@@ -271,5 +412,36 @@ last_connection_result nullable
 - 目录最多 3 级，拖拽不能产生循环或超限层级。
 - 每台服务器支持一个目录和多个标签。
 - 状态点不宣称未经探测的在线状态。
+- 首页不再使用无条件绿色状态点；状态必须来自当前活动会话或持久化的最近连接结果。
+- 已保存服务器的连接尝试和结果由 Rust 连接入口写回，Swift 不维护第二份持久化状态。
 - 旧服务器迁移后数量、认证、跳板机和连接信息不变。
 - 数据库、凭据组和命令片段行为不发生变化。
+
+## 13. 验证策略
+
+### 13.1 Rust 单元与集成测试
+
+- 目录创建、同级唯一、三级深度、循环移动和非空删除事务。
+- 标签标准化、重复标签和服务器标签关联级联清理。
+- 旧 `group_name` 迁移的幂等性、同名复用和事务回滚。
+- 已保存服务器连接成功、失败及元数据写回，错误摘要不包含认证秘密。
+- 临时连接 JSON 校验、凭据组和跳板机解析。
+- 临时 session 不进入 `idle_pool`，关闭最后一个 channel 后释放。
+- 提升接口拒绝普通 session、已关闭 session 和连接描述不匹配请求。
+- 提升成功原子创建服务器、目录关联、标签关联和成功元数据；失败不留下部分数据且不关闭临时 session。
+
+### 13.2 Swift 单元测试
+
+- `[user@]host[:port]` 解析，包括默认端口、IPv4、域名、方括号 IPv6 和非法输入。
+- 顶部服务器搜索覆盖名称、host、目录路径和标签，不返回命令结果。
+- 最近连接的置顶顺序、数据库时间顺序和旧 UserDefaults 回退顺序。
+- 状态点优先级：活动 session 覆盖持久化失败；非活动时显示失败或未知。
+- 临时草稿关闭、Tab 关闭和保存成功后的秘密字段清理。
+
+### 13.3 UI 与构建验证
+
+- `⌘K` 聚焦顶部输入、`⌘⇧P` 打开命令面板、`Esc` 按优先级逐层退出。
+- 目录键盘操作、拖拽合法与非法路径、右键菜单和标签筛选。
+- 默认 1280×800 与最小 1024×640 下的首页布局、8 条最近连接和居中按钮组。
+- 深色主题文字对比、状态辅助文本和右侧工具 tooltip。
+- Rust 测试通过，重新生成 C 头文件和 Xcode 工程后，arm64 Release 构建通过。
