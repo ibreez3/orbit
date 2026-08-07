@@ -23,6 +23,7 @@
 		3BB68C6149D994286E514D35 /* UIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585377F6779F972D49C67F62 /* UIState.swift */; };
 		3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86934760741D5FA928C8E48 /* TabBarView.swift */; };
 		3F4D5B977572BFF569200D8B /* SftpDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */; };
+		40F5DBD740966DF62EF019BA /* AppStateWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */; };
 		44470406B6D8FC3478819B3B /* AIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592ABFA32AB4754E55D7B74E /* AIChatView.swift */; };
 		4A6B43D3BD124D0ADF70268A /* nord.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = FEF0CBEB3829B9B225431C77 /* nord.orbit-theme */; };
 		4E279BC7C85E1D4825D637F6 /* SplitPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */; };
@@ -59,6 +60,7 @@
 		CDFDA4DAD128B61524172E2A /* solarized-dark.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = C9A251128C8C2F5D900FF058 /* solarized-dark.orbit-theme */; };
 		D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */; };
 		D48895C458D1C1630C41D403 /* tokyo-night.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 5A58E42EA49E82B92FA0F9F1 /* tokyo-night.orbit-theme */; };
+		D60047F035E345596792754D /* OrbitBridgeCallbackBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6CD7E0F9A8ACF5E76C578F7 /* OrbitBridgeCallbackBufferTests.swift */; };
 		D7D532615E67DB652461D152 /* ToolState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95478DCB1F885FA5798B86BF /* ToolState.swift */; };
 		D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452C79E5111500BF24C41C53 /* SpotlightView.swift */; };
 		DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */; };
@@ -133,6 +135,7 @@
 		CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseConnectionDialog.swift; sourceTree = "<group>"; };
 		D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolOverlayView.swift; sourceTree = "<group>"; };
+		D6CD7E0F9A8ACF5E76C578F7 /* OrbitBridgeCallbackBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitBridgeCallbackBufferTests.swift; sourceTree = "<group>"; };
 		D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalShell.swift; sourceTree = "<group>"; };
 		D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -143,6 +146,7 @@
 		E6AC453107209B6B7049D5CA /* AIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIState.swift; sourceTree = "<group>"; };
 		E812A16C099009B7BB010371 /* ServerDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDialog.swift; sourceTree = "<group>"; };
 		EEA24CFFC112167739509011 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
+		F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateWorkspaceTests.swift; sourceTree = "<group>"; };
 		F86934760741D5FA928C8E48 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 		FEF0CBEB3829B9B225431C77 /* nord.orbit-theme */ = {isa = PBXFileReference; path = "nord.orbit-theme"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -227,6 +231,8 @@
 		AF6357FC3CFD2962A4B84D7C /* OrbitTests */ = {
 			isa = PBXGroup;
 			children = (
+				F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */,
+				D6CD7E0F9A8ACF5E76C578F7 /* OrbitBridgeCallbackBufferTests.swift */,
 				E627913BD2D922C460730268 /* ServerWorkspaceModelsTests.swift */,
 			);
 			path = OrbitTests;
@@ -446,6 +452,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				40F5DBD740966DF62EF019BA /* AppStateWorkspaceTests.swift in Sources */,
+				D60047F035E345596792754D /* OrbitBridgeCallbackBufferTests.swift in Sources */,
 				0F2FBDDDD8B03FE0BF5560D8 /* ServerWorkspaceModelsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

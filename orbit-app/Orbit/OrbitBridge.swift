@@ -30,6 +30,22 @@ class OrbitBridge {
     static let shared = OrbitBridge()
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
+    private static let maxPendingSSHSessions = 32
+    private static let maxPendingSSHEventsPerSession = 256
+    private static let maxPendingSSHDataBytesPerSession = 2 * 1024 * 1024
+    private static let maxClosedSSHSessions = 64
+    private static let maxIgnoredSSHSessions = 64
+
+    private enum PendingSSHEvent {
+        case data(Data)
+        case closed
+    }
+
+    private struct PendingSSHEventBuffer {
+        var events: [PendingSSHEvent] = []
+        var dataBytes = 0
+        var hasClosed = false
+    }
 
     private final class WeakViewBox {
         weak var view: NSView?
@@ -46,6 +62,13 @@ class OrbitBridge {
     var sshClosedHandlers: [String: () -> Void] = [:]
     var progressHandlers: [String: (UInt64, UInt64) -> Void] = [:]
     private var terminalViewCache: [String: WeakViewBox] = [:]
+    private var pendingSSHEvents: [String: PendingSSHEventBuffer] = [:]
+    private var pendingSSHSessionOrder: [String] = []
+    private var drainingSSHSessionIds: Set<String> = []
+    private var closedSSHSessionIds: Set<String> = []
+    private var closedSSHSessionOrder: [String] = []
+    private var ignoredSSHSessionIds: Set<String> = []
+    private var ignoredSSHSessionOrder: [String] = []
 
     private init() {}
 
@@ -111,6 +134,16 @@ class OrbitBridge {
 
     func handleSSHData(sessionId: String, data: Data) {
         handlersLock.lock()
+        guard !ignoredSSHSessionIds.contains(sessionId),
+              !closedSSHSessionIds.contains(sessionId) else {
+            handlersLock.unlock()
+            return
+        }
+        if drainingSSHSessionIds.contains(sessionId) || sshDataHandlers[sessionId] == nil {
+            bufferSSHEventLocked(.data(data), sessionId: sessionId)
+            handlersLock.unlock()
+            return
+        }
         let handler = sshDataHandlers[sessionId]
         handlersLock.unlock()
         handler?(data)
@@ -118,9 +151,68 @@ class OrbitBridge {
 
     func handleSSHClosed(sessionId: String) {
         handlersLock.lock()
+        guard !ignoredSSHSessionIds.contains(sessionId),
+              recordSSHClosedLocked(sessionId) else {
+            handlersLock.unlock()
+            return
+        }
+        if drainingSSHSessionIds.contains(sessionId) || sshClosedHandlers[sessionId] == nil {
+            bufferSSHEventLocked(.closed, sessionId: sessionId)
+            handlersLock.unlock()
+            return
+        }
         let handler = sshClosedHandlers[sessionId]
         handlersLock.unlock()
         handler?()
+    }
+
+    private func recordSSHClosedLocked(_ sessionId: String) -> Bool {
+        guard closedSSHSessionIds.insert(sessionId).inserted else { return false }
+        closedSSHSessionOrder.append(sessionId)
+        if closedSSHSessionOrder.count > Self.maxClosedSSHSessions {
+            let staleSessionId = closedSSHSessionOrder.removeFirst()
+            closedSSHSessionIds.remove(staleSessionId)
+        }
+        return true
+    }
+
+    private func bufferSSHEventLocked(_ event: PendingSSHEvent, sessionId: String) {
+        if pendingSSHEvents[sessionId] == nil {
+            if pendingSSHEvents.count >= Self.maxPendingSSHSessions,
+               let staleSessionId = pendingSSHSessionOrder.first(where: {
+                   !drainingSSHSessionIds.contains($0)
+               }) ?? pendingSSHSessionOrder.first {
+                pendingSSHEvents.removeValue(forKey: staleSessionId)
+                pendingSSHSessionOrder.removeAll { $0 == staleSessionId }
+            }
+            pendingSSHEvents[sessionId] = PendingSSHEventBuffer()
+            pendingSSHSessionOrder.append(sessionId)
+        }
+
+        guard var buffer = pendingSSHEvents[sessionId] else { return }
+        switch event {
+        case .data(let data):
+            guard buffer.events.count < Self.maxPendingSSHEventsPerSession else { return }
+            let availableBytes = Self.maxPendingSSHDataBytesPerSession - buffer.dataBytes
+            guard availableBytes > 0 else { return }
+            let boundedData = data.count <= availableBytes ? data : Data(data.prefix(availableBytes))
+            buffer.events.append(.data(boundedData))
+            buffer.dataBytes += boundedData.count
+        case .closed:
+            guard !buffer.hasClosed else { return }
+            if buffer.events.count >= Self.maxPendingSSHEventsPerSession,
+               let lastDataIndex = buffer.events.lastIndex(where: {
+                   if case .data = $0 { return true }
+                   return false
+               }) {
+                if case .data(let data) = buffer.events.remove(at: lastDataIndex) {
+                    buffer.dataBytes -= data.count
+                }
+            }
+            buffer.events.append(.closed)
+            buffer.hasClosed = true
+        }
+        pendingSSHEvents[sessionId] = buffer
     }
 
     func handleProgress(serverId: String, transferred: UInt64, total: UInt64) {
@@ -134,6 +226,18 @@ class OrbitBridge {
         handlersLock.lock()
         sshDataHandlers.removeValue(forKey: sessionId)
         sshClosedHandlers.removeValue(forKey: sessionId)
+        pendingSSHEvents.removeValue(forKey: sessionId)
+        pendingSSHSessionOrder.removeAll { $0 == sessionId }
+        drainingSSHSessionIds.remove(sessionId)
+        closedSSHSessionIds.remove(sessionId)
+        closedSSHSessionOrder.removeAll { $0 == sessionId }
+        if ignoredSSHSessionIds.insert(sessionId).inserted {
+            ignoredSSHSessionOrder.append(sessionId)
+            if ignoredSSHSessionOrder.count > Self.maxIgnoredSSHSessions {
+                let staleSessionId = ignoredSSHSessionOrder.removeFirst()
+                ignoredSSHSessionIds.remove(staleSessionId)
+            }
+        }
         handlersLock.unlock()
     }
 
@@ -162,9 +266,51 @@ class OrbitBridge {
 
     func setSSHHandlers(sessionId: String, dataHandler: @escaping (Data) -> Void, closedHandler: @escaping () -> Void) {
         handlersLock.lock()
+        ignoredSSHSessionIds.remove(sessionId)
+        ignoredSSHSessionOrder.removeAll { $0 == sessionId }
         sshDataHandlers[sessionId] = dataHandler
         sshClosedHandlers[sessionId] = closedHandler
+        let shouldDrain = pendingSSHEvents[sessionId] != nil
+            && !drainingSSHSessionIds.contains(sessionId)
+        if shouldDrain {
+            drainingSSHSessionIds.insert(sessionId)
+        }
         handlersLock.unlock()
+        if shouldDrain {
+            drainPendingSSHEvents(sessionId: sessionId)
+        }
+    }
+
+    private func drainPendingSSHEvents(sessionId: String) {
+        while true {
+            handlersLock.lock()
+            guard let dataHandler = sshDataHandlers[sessionId],
+                  let closedHandler = sshClosedHandlers[sessionId] else {
+                pendingSSHEvents.removeValue(forKey: sessionId)
+                pendingSSHSessionOrder.removeAll { $0 == sessionId }
+                drainingSSHSessionIds.remove(sessionId)
+                handlersLock.unlock()
+                return
+            }
+            guard let buffer = pendingSSHEvents.removeValue(forKey: sessionId),
+                  !buffer.events.isEmpty else {
+                pendingSSHSessionOrder.removeAll { $0 == sessionId }
+                drainingSSHSessionIds.remove(sessionId)
+                handlersLock.unlock()
+                return
+            }
+            pendingSSHSessionOrder.removeAll { $0 == sessionId }
+            handlersLock.unlock()
+
+            for event in buffer.events {
+                switch event {
+                case .data(let data):
+                    dataHandler(data)
+                case .closed:
+                    closedHandler()
+                }
+            }
+        }
     }
 
     // MARK: - Server CRUD

@@ -1585,7 +1585,14 @@ class AppState: ObservableObject {
     var currentServerId: String {
         if let activeId = activeTabId,
            let tab = tabs.first(where: { $0.id == activeId }) {
-            return tab.serverId ?? Self.standaloneServerId
+            switch tab.connectionTarget {
+            case .saved(let serverId):
+                return serverId
+            case .temporary(let tabId):
+                return "temporary:\(tabId)"
+            case .local:
+                return "local"
+            }
         }
         return Self.standaloneServerId
     }
