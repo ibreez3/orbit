@@ -441,6 +441,46 @@ class AppState: ObservableObject {
         }
     }
 
+    func setServerPinned(_ server: Server, isPinned: Bool) {
+        Task {
+            do {
+                let updated = try await bridge.setServerPinAsync(
+                    serverId: server.id,
+                    isPinned: isPinned,
+                    pinOrder: nil
+                )
+                await MainActor.run {
+                    servers = servers.map { $0.id == updated.id ? updated : $0 }
+                }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新服务器置顶状态: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func moveServer(_ server: Server, toFolderId folderId: String?) {
+        Task {
+            do {
+                try await bridge.moveServerAsync(serverId: server.id, folderId: folderId)
+                loadServers()
+                loadServerOrganization()
+            } catch {
+                await MainActor.run {
+                    alertTitle = "移动失败"
+                    alertMessage = "无法移动服务器: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func selectServerSystemView(_ view: ServerSystemView) {
+        uiState.assetTreeSearchQuery = ""
+        uiState.selectedServerSystemView = view
+    }
+
     func addCg(_ input: CredentialGroupInput) {
         Task {
             do {
@@ -1137,7 +1177,6 @@ class AppState: ObservableObject {
             tab.paneTree = nil
         }
         tabs.append(tab)
-        trackRecentServer(server.id)
         requestActivateTab(id)
     }
 
@@ -1153,7 +1192,6 @@ class AppState: ObservableObject {
         )
         tab.paneTree = nil
         tabs.append(tab)
-        trackRecentServer(server.id)
         requestActivateTab(id)
     }
 
@@ -2350,22 +2388,6 @@ class AppState: ObservableObject {
         }
         portForwardRules.removeAll { $0.id == rule.id }
         savePortForwardRules()
-    }
-
-    func saveRecentServers() {
-        do {
-            let data = try Self.encoder.encode(recentServers)
-            UserDefaults.standard.set(data, forKey: "recentServers")
-        } catch {
-            print("[Orbit] Failed to save recent servers: \(error)")
-        }
-    }
-
-    func trackRecentServer(_ serverId: String) {
-        recentServers.removeAll { $0 == serverId }
-        recentServers.insert(serverId, at: 0)
-        if recentServers.count > 6 { recentServers = Array(recentServers.prefix(6)) }
-        saveRecentServers()
     }
 
     func updateServerGroupName(oldName: String, newName: String) {

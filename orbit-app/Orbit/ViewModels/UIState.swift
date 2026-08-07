@@ -9,6 +9,7 @@ final class UIState: ObservableObject {
     @Published var pendingCloseTabId: String?
     @Published var assetTreeWidth: CGFloat = 220
     @Published var assetTreeSearchQuery = ""
+    @Published var selectedServerSystemView: ServerSystemView = .all
     @Published var recentServers: [String] = []
     @Published var alertMessage: String?
     @Published var alertTitle: String = ""

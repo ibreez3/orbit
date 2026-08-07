@@ -126,6 +126,132 @@ enum ServerSearchResult {
     case newServer(query: String)
 }
 
+enum ServerSystemView: String, Equatable {
+    case all
+    case pinned
+    case recent
+    case uncategorized
+}
+
+enum RecentConnectionStatus: Equatable {
+    case active
+    case failed
+    case unknown
+}
+
+struct RecentConnectionRow: Identifiable {
+    let server: Server
+    let status: RecentConnectionStatus
+    let relativeTime: String
+
+    var id: String { server.id }
+
+    var statusLabel: String {
+        switch status {
+        case .active:
+            return "活动中"
+        case .failed:
+            return "上次连接失败"
+        case .unknown:
+            return "未检测"
+        }
+    }
+}
+
+enum RecentConnectionProjector {
+    static func rows(
+        servers: [Server],
+        activeServerIds: Set<String>,
+        legacyIds: [String]
+    ) -> [RecentConnectionRow] {
+        let legacyOrder = Dictionary(
+            legacyIds.enumerated().map { ($0.element, $0.offset) },
+            uniquingKeysWith: min
+        )
+
+        return servers
+            .filter { $0.last_attempted_at != nil || legacyOrder[$0.id] != nil }
+            .sorted { lhs, rhs in
+                if lhs.is_pinned != rhs.is_pinned {
+                    return lhs.is_pinned
+                }
+                if lhs.is_pinned {
+                    let leftOrder = lhs.pin_order ?? Int64.max
+                    let rightOrder = rhs.pin_order ?? Int64.max
+                    if leftOrder != rightOrder { return leftOrder < rightOrder }
+                }
+
+                let leftHasAttempt = lhs.last_attempted_at != nil
+                let rightHasAttempt = rhs.last_attempted_at != nil
+                if leftHasAttempt != rightHasAttempt {
+                    return leftHasAttempt
+                }
+                if let leftTimestamp = lhs.last_attempted_at,
+                   let rightTimestamp = rhs.last_attempted_at,
+                   leftTimestamp != rightTimestamp {
+                    let leftDate = date(from: leftTimestamp) ?? .distantPast
+                    let rightDate = date(from: rightTimestamp) ?? .distantPast
+                    if leftDate != rightDate { return leftDate > rightDate }
+                    return leftTimestamp > rightTimestamp
+                }
+
+                let leftLegacyOrder = legacyOrder[lhs.id] ?? Int.max
+                let rightLegacyOrder = legacyOrder[rhs.id] ?? Int.max
+                if leftLegacyOrder != rightLegacyOrder {
+                    return leftLegacyOrder < rightLegacyOrder
+                }
+                return lhs.id < rhs.id
+            }
+            .map { server in
+                row(
+                    server: server,
+                    activeServerIds: activeServerIds,
+                    isLegacy: server.last_attempted_at == nil
+                )
+            }
+    }
+
+    static func row(
+        server: Server,
+        activeServerIds: Set<String>,
+        isLegacy: Bool
+    ) -> RecentConnectionRow {
+        let status: RecentConnectionStatus
+        if activeServerIds.contains(server.id) {
+            status = .active
+        } else if server.last_connection_result == "failed" {
+            status = .failed
+        } else {
+            status = .unknown
+        }
+
+        return RecentConnectionRow(
+            server: server,
+            status: status,
+            relativeTime: isLegacy ? "历史记录" : relativeTime(for: server.last_attempted_at)
+        )
+    }
+
+    private static func relativeTime(for timestamp: String?) -> String {
+        guard let timestamp, let attemptedAt = date(from: timestamp) else {
+            return "未知时间"
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: attemptedAt, relativeTo: Date())
+    }
+
+    private static func date(from timestamp: String) -> Date? {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: timestamp) {
+            return date
+        }
+        return ISO8601DateFormatter().date(from: timestamp)
+    }
+}
+
 struct ServerSearchIndex {
     private struct Entry {
         let server: Server

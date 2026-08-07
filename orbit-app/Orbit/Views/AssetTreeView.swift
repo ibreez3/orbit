@@ -527,7 +527,6 @@ private struct ServerNodeRow: View {
         }
         .onTapGesture(count: 2) {
             appState.addTab(server: server, type: .terminal)
-            appState.trackRecentServer(server.id)
         }
         .contextMenu {
             Button("SSH 终端") { appState.addTab(server: server, type: .terminal) }
