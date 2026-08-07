@@ -79,4 +79,26 @@ final class OrbitBridgeCallbackBufferTests: XCTestCase {
 
         XCTAssertTrue(events.isEmpty)
     }
+
+    func testRemovingHandlersDuringDrainCancelsRemainingExtractedEvents() {
+        let bridge = OrbitBridge.shared
+        let sessionId = "test-cancel-drain-\(UUID().uuidString)"
+        var received: [String] = []
+        defer { bridge.removeSSHHandlers(sessionId: sessionId) }
+
+        bridge.handleSSHData(sessionId: sessionId, data: Data("first".utf8))
+        bridge.handleSSHData(sessionId: sessionId, data: Data("second".utf8))
+        bridge.setSSHHandlers(
+            sessionId: sessionId,
+            dataHandler: { data in
+                received.append(String(decoding: data, as: UTF8.self))
+                if received.count == 1 {
+                    bridge.removeSSHHandlers(sessionId: sessionId)
+                }
+            },
+            closedHandler: {}
+        )
+
+        XCTAssertEqual(received, ["first"])
+    }
 }

@@ -1225,6 +1225,20 @@ class AppState: ObservableObject {
         }
     }
 
+    func installSSHSession(
+        tabId: String,
+        sessionId: String,
+        dataHandler: @escaping (Data) -> Void,
+        closedHandler: @escaping () -> Void
+    ) {
+        updateTabSessionId(tabId, sessionId: sessionId)
+        bridge.setSSHHandlers(
+            sessionId: sessionId,
+            dataHandler: dataHandler,
+            closedHandler: closedHandler
+        )
+    }
+
     func connectSSH(tabId: String, serverId: String) {
         Task {
             do {

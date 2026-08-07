@@ -43,4 +43,42 @@ final class AppStateWorkspaceTests: XCTestCase {
         XCTAssertEqual(state.currentServerId, "temporary:temporary-tab")
         XCTAssertNil(state.tabs[2].serverId)
     }
+
+    func testInstallingSessionPublishesOwnershipBeforeDrainingEarlyClose() {
+        let bridge = OrbitBridge.shared
+        let state = AppState()
+        let sessionId = "test-early-close-owner-\(UUID().uuidString)"
+        let tab = TabItem(
+            id: "saved-tab",
+            type: .terminal,
+            serverId: "server-1",
+            connectionTarget: .saved(serverId: "server-1"),
+            serverName: "Saved",
+            title: "Saved"
+        )
+        var lateDeliveryCount = 0
+        defer { bridge.removeSSHHandlers(sessionId: sessionId) }
+
+        state.tabs = [tab]
+        state.activeTabId = tab.id
+        bridge.handleSSHClosed(sessionId: sessionId)
+
+        state.installSSHSession(
+            tabId: tab.id,
+            sessionId: sessionId,
+            dataHandler: { _ in },
+            closedHandler: { state.handleChannelClosed(channelId: sessionId) }
+        )
+
+        XCTAssertTrue(state.tabs.isEmpty)
+        XCTAssertNil(state.activeTabId)
+
+        bridge.handleSSHData(sessionId: sessionId, data: Data("late".utf8))
+        bridge.setSSHHandlers(
+            sessionId: sessionId,
+            dataHandler: { _ in lateDeliveryCount += 1 },
+            closedHandler: {}
+        )
+        XCTAssertEqual(lateDeliveryCount, 0)
+    }
 }

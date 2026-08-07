@@ -529,13 +529,17 @@ struct TerminalView: NSViewRepresentable {
                 do {
                     let sid = try await OrbitBridge.shared.connectSSHAsync(serverId: serverId)
                     guard alive else { return }
-                    sessionId = sid
-                    OrbitBridge.shared.setSSHHandlers(sessionId: sid, dataHandler: dataHandler, closedHandler: closedHandler)
                     await MainActor.run {
+                        sessionId = sid
                         if let terminalView = self.terminalView {
                             OrbitBridge.shared.cacheTerminalView(terminalView, sessionId: sid)
                         }
-                        appState.updateTabSessionId(tabId, sessionId: sid)
+                        appState.installSSHSession(
+                            tabId: tabId,
+                            sessionId: sid,
+                            dataHandler: dataHandler,
+                            closedHandler: closedHandler
+                        )
                         if let tv = terminalView {
                             let term = tv.getTerminal()
                             do { try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(connect) failed: \(error)") }

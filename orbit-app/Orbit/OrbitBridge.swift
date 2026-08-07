@@ -47,6 +47,10 @@ class OrbitBridge {
         var hasClosed = false
     }
 
+    private final class SSHHandlerGeneration {
+        var cancelled = false
+    }
+
     private final class WeakViewBox {
         weak var view: NSView?
 
@@ -65,6 +69,7 @@ class OrbitBridge {
     private var pendingSSHEvents: [String: PendingSSHEventBuffer] = [:]
     private var pendingSSHSessionOrder: [String] = []
     private var drainingSSHSessionIds: Set<String> = []
+    private var sshHandlerGenerations: [String: SSHHandlerGeneration] = [:]
     private var closedSSHSessionIds: Set<String> = []
     private var closedSSHSessionOrder: [String] = []
     private var ignoredSSHSessionIds: Set<String> = []
@@ -224,6 +229,9 @@ class OrbitBridge {
 
     func removeSSHHandlers(sessionId: String) {
         handlersLock.lock()
+        if let generation = sshHandlerGenerations.removeValue(forKey: sessionId) {
+            generation.cancelled = true
+        }
         sshDataHandlers.removeValue(forKey: sessionId)
         sshClosedHandlers.removeValue(forKey: sessionId)
         pendingSSHEvents.removeValue(forKey: sessionId)
@@ -268,6 +276,14 @@ class OrbitBridge {
         handlersLock.lock()
         ignoredSSHSessionIds.remove(sessionId)
         ignoredSSHSessionOrder.removeAll { $0 == sessionId }
+        let generation: SSHHandlerGeneration
+        if let currentGeneration = sshHandlerGenerations[sessionId],
+           !currentGeneration.cancelled {
+            generation = currentGeneration
+        } else {
+            generation = SSHHandlerGeneration()
+            sshHandlerGenerations[sessionId] = generation
+        }
         sshDataHandlers[sessionId] = dataHandler
         sshClosedHandlers[sessionId] = closedHandler
         let shouldDrain = pendingSSHEvents[sessionId] != nil
@@ -277,18 +293,24 @@ class OrbitBridge {
         }
         handlersLock.unlock()
         if shouldDrain {
-            drainPendingSSHEvents(sessionId: sessionId)
+            drainPendingSSHEvents(sessionId: sessionId, generation: generation)
         }
     }
 
-    private func drainPendingSSHEvents(sessionId: String) {
+    private func drainPendingSSHEvents(sessionId: String, generation: SSHHandlerGeneration) {
         while true {
             handlersLock.lock()
-            guard let dataHandler = sshDataHandlers[sessionId],
-                  let closedHandler = sshClosedHandlers[sessionId] else {
+            guard let currentGeneration = sshHandlerGenerations[sessionId],
+                  currentGeneration === generation,
+                  !generation.cancelled,
+                  sshDataHandlers[sessionId] != nil,
+                  sshClosedHandlers[sessionId] != nil else {
                 pendingSSHEvents.removeValue(forKey: sessionId)
                 pendingSSHSessionOrder.removeAll { $0 == sessionId }
-                drainingSSHSessionIds.remove(sessionId)
+                if sshHandlerGenerations[sessionId] == nil
+                    || sshHandlerGenerations[sessionId] === generation {
+                    drainingSSHSessionIds.remove(sessionId)
+                }
                 handlersLock.unlock()
                 return
             }
@@ -303,11 +325,24 @@ class OrbitBridge {
             handlersLock.unlock()
 
             for event in buffer.events {
+                handlersLock.lock()
+                guard let currentGeneration = sshHandlerGenerations[sessionId],
+                      currentGeneration === generation,
+                      !generation.cancelled else {
+                    handlersLock.unlock()
+                    return
+                }
                 switch event {
                 case .data(let data):
-                    dataHandler(data)
+                    let handler = sshDataHandlers[sessionId]
+                    handlersLock.unlock()
+                    guard let handler else { return }
+                    handler(data)
                 case .closed:
-                    closedHandler()
+                    let handler = sshClosedHandlers[sessionId]
+                    handlersLock.unlock()
+                    guard let handler else { return }
+                    handler()
                 }
             }
         }
