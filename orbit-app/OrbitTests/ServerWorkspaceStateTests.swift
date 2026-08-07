@@ -66,15 +66,35 @@ final class ServerWorkspaceStateTests: XCTestCase {
     }
 
     func testSelectingAllClearsTagFilterAndExpandsSidebar() {
-        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+        let suiteName = "orbit.tests.sidebar.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set(222.0, forKey: SidebarPresentation.widthKey)
+        defaults.set(true, forKey: SidebarPresentation.collapsedKey)
+        let standardWidth = UserDefaults.standard.object(forKey: SidebarPresentation.widthKey) as? NSNumber
+        let standardCollapsed = UserDefaults.standard.object(forKey: SidebarPresentation.collapsedKey) as? NSNumber
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let state = AppState(
+            workspaceBridge: FakeServerWorkspaceBridge(),
+            sidebarDefaults: defaults
+        )
         state.uiState.selectedServerTagId = "prod"
-        state.uiState.assetTreeCollapsed = true
 
         state.selectServerSystemView(.all)
 
         XCTAssertNil(state.uiState.selectedServerTagId)
         XCTAssertFalse(state.uiState.assetTreeCollapsed)
         XCTAssertEqual(state.uiState.selectedServerSystemView, .all)
+        XCTAssertEqual(defaults.double(forKey: SidebarPresentation.widthKey), 222)
+        XCTAssertFalse(defaults.bool(forKey: SidebarPresentation.collapsedKey))
+        XCTAssertEqual(
+            UserDefaults.standard.object(forKey: SidebarPresentation.widthKey) as? NSNumber,
+            standardWidth
+        )
+        XCTAssertEqual(
+            UserDefaults.standard.object(forKey: SidebarPresentation.collapsedKey) as? NSNumber,
+            standardCollapsed
+        )
     }
 
     func testFailedNewServerSaveBindsPersistedRecordAndRetryUpdatesWithoutDuplicateAdd() async throws {

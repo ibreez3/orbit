@@ -6,7 +6,7 @@ class AppState: ObservableObject {
     private static let encoder = JSONEncoder()
 
     let tabState = TabState()
-    let uiState = UIState()
+    let uiState: UIState
     let themeState = ThemeState()
     let inventoryState: InventoryState
     let snippetState = SnippetState()
@@ -109,6 +109,7 @@ class AppState: ObservableObject {
 
     let bridge = OrbitBridge.shared
     let workspaceBridge: any ServerWorkspaceBridge
+    private let sidebarDefaults: UserDefaults
     let textEditorWC = TextEditorWindowController()
 
     // MARK: - Inventory forwarding
@@ -329,8 +330,13 @@ class AppState: ObservableObject {
         )
     }
 
-    init(workspaceBridge: any ServerWorkspaceBridge = OrbitBridge.shared) {
+    init(
+        workspaceBridge: any ServerWorkspaceBridge = OrbitBridge.shared,
+        sidebarDefaults: UserDefaults = .standard
+    ) {
         self.workspaceBridge = workspaceBridge
+        self.sidebarDefaults = sidebarDefaults
+        self.uiState = UIState(defaults: sidebarDefaults)
         self.inventoryState = InventoryState(bridge: workspaceBridge)
         ThemeManager.shared.loadThemes()
         loadServers()
@@ -2455,7 +2461,7 @@ class AppState: ObservableObject {
     // MARK: - Asset Tree & Recent Servers
 
     func loadAssetTreeWidth() {
-        let presentation = SidebarPresentation.restore()
+        let presentation = SidebarPresentation.restore(from: sidebarDefaults)
         assetTreeWidth = presentation.width
         assetTreeCollapsed = presentation.collapsed
     }
@@ -2466,7 +2472,7 @@ class AppState: ObservableObject {
     }
 
     func saveAssetTreePresentation() {
-        SidebarPresentation(collapsed: assetTreeCollapsed, width: assetTreeWidth).save()
+        SidebarPresentation(collapsed: assetTreeCollapsed, width: assetTreeWidth).save(to: sidebarDefaults)
     }
 
     func loadRecentServers() {
