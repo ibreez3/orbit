@@ -893,10 +893,18 @@ class AppState: ObservableObject {
         failure.isRetrying = true
         tabState.temporaryPromotionFailures[tabId] = failure
         do {
-            _ = try await promoteTemporaryTab(
+            let outcome = try await promoteTemporaryTab(
                 tabId: tabId,
                 sessionId: failure.sessionId
             )
+            switch outcome {
+            case .promoted:
+                tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            case .persistedAfterTabClosed:
+                tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            case .persistedWithoutRebinding:
+                tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            }
         } catch {
             recordTemporaryPromotionFailure(
                 error,

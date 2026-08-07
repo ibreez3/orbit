@@ -133,6 +133,47 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertEqual(bridge.promotionCallCount, 2)
     }
 
+    func testSessionReplacementDuringPromotionRetryClearsRetryStateWithoutRepersisting() async {
+        let retryStarted = expectation(description: "promotion retry started")
+        let bridge = FakeServerWorkspaceBridge(
+            promotionErrors: [FakeError.promotionFailed],
+            promotionStarted: retryStarted,
+            promotionSuspendCall: 2
+        )
+        let state = AppState(workspaceBridge: bridge)
+        state.presentTemporaryConnectionPanel(
+            address: .init(host: "10.0.0.1", port: 2222, username: "alice")
+        )
+        state.uiState.temporaryConnectionDraft?.password = "secret"
+        state.uiState.temporaryConnectionDraft?.saveToAssets = true
+        state.uiState.temporaryConnectionDraft?.displayName = "Temporary host"
+
+        let submission = state.submitTemporaryConnection()
+        await submission?.value
+
+        guard let tabId = state.tabs.first?.id else {
+            return XCTFail("Expected a connected temporary tab")
+        }
+        let retry = Task { await state.retryTemporaryPromotion(tabId: tabId) }
+        await fulfillment(of: [retryStarted], timeout: 1)
+        state.tabs[0].sessionId = "replacement-session"
+        bridge.resumePromotion()
+        await retry.value
+
+        XCTAssertNil(state.temporaryPromotionFailure(for: tabId))
+        XCTAssertEqual(
+            state.tabState.tab(id: tabId)?.connectionTarget,
+            .temporary(tabId: tabId)
+        )
+        XCTAssertEqual(state.tabState.tab(id: tabId)?.sessionId, "replacement-session")
+        XCTAssertNotNil(state.temporaryDraft(for: tabId))
+        XCTAssertEqual(bridge.promotionCallCount, 2)
+
+        await state.retryTemporaryPromotion(tabId: tabId)
+
+        XCTAssertEqual(bridge.promotionCallCount, 2)
+    }
+
     func testClosingTabWhileTemporaryConnectIsPendingDiscardsCreatedSession() async throws {
         let connectStarted = expectation(description: "temporary connect started")
         let disconnected = expectation(description: "orphan session disconnected")
@@ -344,6 +385,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private var promotionErrors: [Error]
     private let connectStarted: XCTestExpectation?
     private let promotionStarted: XCTestExpectation?
+    private let promotionSuspendCall: Int
     private let spawnStarted: XCTestExpectation?
     private let disconnected: XCTestExpectation?
 
@@ -365,6 +407,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         promotionErrors: [Error] = [],
         connectStarted: XCTestExpectation? = nil,
         promotionStarted: XCTestExpectation? = nil,
+        promotionSuspendCall: Int = 1,
         spawnStarted: XCTestExpectation? = nil,
         disconnected: XCTestExpectation? = nil
     ) {
@@ -373,6 +416,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         self.promotionErrors = promotionError.map { [$0] } ?? promotionErrors
         self.connectStarted = connectStarted
         self.promotionStarted = promotionStarted
+        self.promotionSuspendCall = promotionSuspendCall
         self.spawnStarted = spawnStarted
         self.disconnected = disconnected
     }
@@ -403,7 +447,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         if !promotionErrors.isEmpty {
             throw promotionErrors.removeFirst()
         }
-        if let promotionStarted, promotionCallCount == 1 {
+        if let promotionStarted, promotionCallCount == promotionSuspendCall {
             promotionStarted.fulfill()
             return await withCheckedContinuation { continuation in
                 promotionContinuation = continuation
