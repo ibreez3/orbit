@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		060FE66BA0E797B7B1ECFA6E /* LocalShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */; };
+		065EDAC135F08F98B3B4EC9D /* ServerTreeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34C28DD7D1E3FF0866DEC706 /* ServerTreeSection.swift */; };
 		0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */; };
 		0B108A04325E375330215A8F /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495DCA72659439056D676B45 /* HomeView.swift */; };
 		0EC2179A038ECDE8E22EBF35 /* WorkbenchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E803F410398610C4BEAD1D /* WorkbenchModels.swift */; };
@@ -101,6 +102,7 @@
 		20E9630F023416DA2028BB98 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchExecutionView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
+		34C28DD7D1E3FF0866DEC706 /* ServerTreeSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTreeSection.swift; sourceTree = "<group>"; };
 		38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneView.swift; sourceTree = "<group>"; };
 		3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingToolCard.swift; sourceTree = "<group>"; };
 		3A329973670FE763965019E7 /* OrbitTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitTerminalView.swift; sourceTree = "<group>"; };
@@ -268,6 +270,7 @@
 				C8D3062BC2E157D41B97644B /* RecentConnectionsView.swift */,
 				E812A16C099009B7BB010371 /* ServerDialog.swift */,
 				BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */,
+				34C28DD7D1E3FF0866DEC706 /* ServerTreeSection.swift */,
 				8D7C11206A070E05D66487CD /* SessionToolDockView.swift */,
 				D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
@@ -438,6 +441,7 @@
 				6AF16C19A7FFDB43DCC4421C /* RecentConnectionsView.swift in Sources */,
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
 				1E63C225E7A9F5E72D019DCF /* ServerQuickConnectView.swift in Sources */,
+				065EDAC135F08F98B3B4EC9D /* ServerTreeSection.swift in Sources */,
 				660C9D142C35B06F1C55B5AB /* ServerWorkspaceModels.swift in Sources */,
 				0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */,
 				0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */,

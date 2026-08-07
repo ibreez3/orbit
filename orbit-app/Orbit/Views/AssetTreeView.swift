@@ -1,22 +1,33 @@
 import SwiftUI
 
 struct AssetTreeView: View {
-    let appState: AppState
+    @ObservedObject var appState: AppState
     @EnvironmentObject var uiState: UIState
     @EnvironmentObject var inventoryState: InventoryState
     @EnvironmentObject var snippetState: SnippetState
     @EnvironmentObject var tabState: TabState
 
-    @State private var serversExpanded: Bool = true
     @State private var databasesExpanded: Bool = true
     @State private var credentialsExpanded: Bool = false
     @State private var snippetsExpanded: Bool = false
-    @State private var expandedSubGroups: Set<String> = []
     @State private var expandedDatabaseGroups: Set<String> = []
-    @State private var renameTarget: String? = nil
-    @State private var renameText: String = ""
 
     var body: some View {
+        Group {
+            if uiState.assetTreeCollapsed {
+                collapsedTree
+            } else {
+                expandedTree
+            }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+        .sheet(isPresented: $snippetState.snippetEditorOpen) {
+            SnippetEditorView(appState: appState)
+                .environmentObject(appState.snippetState)
+        }
+    }
+
+    private var expandedTree: some View {
         VStack(spacing: 0) {
             // Search bar
             HStack {
@@ -73,74 +84,85 @@ struct AssetTreeView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("添加服务器")
                 Spacer()
+                Button {
+                    uiState.assetTreeCollapsed = true
+                    appState.saveAssetTreePresentation()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("折叠资产栏")
+                .accessibilityLabel("折叠资产栏")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }
-        .frame(minWidth: 160)
-        .background(Color(NSColor.controlBackgroundColor))
-        .sheet(isPresented: $snippetState.snippetEditorOpen) {
-            SnippetEditorView(appState: appState)
-                .environmentObject(appState.snippetState)
-        }
-        .alert("重命名分组", isPresented: Binding(
-            get: { renameTarget != nil },
-            set: { if !$0 { renameTarget = nil } }
-        )) {
-            TextField("分组名", text: $renameText)
-            Button("确定") {
-                if let oldName = renameTarget, !renameText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    appState.updateServerGroupName(oldName: oldName, newName: renameText.trimmingCharacters(in: .whitespaces))
-                }
-                renameTarget = nil
+        .frame(minWidth: 180)
+    }
+
+    private var collapsedTree: some View {
+        VStack(spacing: 8) {
+            Button {
+                uiState.assetTreeCollapsed = false
+                appState.saveAssetTreePresentation()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .frame(width: 32, height: 32)
             }
-            Button("取消", role: .cancel) { renameTarget = nil }
-        } message: {
-            Text("修改后，该分组下的所有服务器将更新分组名")
+            .buttonStyle(.plain)
+            .help("展开资产栏")
+            .accessibilityLabel("展开资产栏")
+
+            Divider().padding(.horizontal, 8)
+
+            collapsedButton(icon: "desktopcomputer", label: "服务器") {
+                uiState.assetTreeCollapsed = false
+                appState.selectServerSystemView(.all)
+                appState.saveAssetTreePresentation()
+            }
+            collapsedButton(icon: "cylinder.split.1x2", label: "数据库") {
+                uiState.assetTreeCollapsed = false
+                appState.saveAssetTreePresentation()
+            }
+            collapsedButton(icon: "lock.shield", label: "凭据组") {
+                uiState.assetTreeCollapsed = false
+                appState.saveAssetTreePresentation()
+            }
+            collapsedButton(icon: "text.insert", label: "命令片段") {
+                uiState.assetTreeCollapsed = false
+                appState.saveAssetTreePresentation()
+            }
+
+            Spacer()
+
+            Button { appState.openDialog() } label: {
+                Image(systemName: "plus")
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .help("添加服务器")
+            .accessibilityLabel("添加服务器")
         }
+        .padding(.vertical, 8)
+        .frame(width: 48)
+    }
+
+    private func collapsedButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     // MARK: - Category: Servers
 
     private var categoryServers: some View {
-        VStack(spacing: 0) {
-            // Category header — click to expand
-            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { serversExpanded.toggle() } }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(serversExpanded ? 90 : 0))
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.blue)
-                    Text("服务器")
-                        .font(.system(size: 12, weight: .semibold))
-                    Spacer()
-                    Text("\(inventoryState.servers.count)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if serversExpanded {
-                let groups = Dictionary(grouping: inventoryState.servers) {
-                    $0.group_name.isEmpty ? "默认" : $0.group_name
-                }
-                let sorted = groups.sorted { $0.key < $1.key }
-
-                ForEach(sorted, id: \.key) { groupName, servers in
-                    serverSubGroup(groupName: groupName, servers: servers)
-                }
-            }
-
-            Divider()
-                .padding(.leading, 12)
-        }
+        ServerTreeSection(appState: appState)
     }
 
     // MARK: - Category: Databases
@@ -236,52 +258,6 @@ struct AssetTreeView: View {
             if isExpanded {
                 ForEach(connections) { connection in
                     DatabaseNodeRow(connection: connection, appState: appState, indent: 40)
-                }
-            }
-        }
-    }
-
-    private func serverSubGroup(groupName: String, servers: [Server]) -> some View {
-        let isExpanded = expandedSubGroups.contains(groupName)
-
-        return VStack(spacing: 0) {
-            // Sub-group header — click to expand
-            Button(action: {
-                if isExpanded { expandedSubGroups.remove(groupName) }
-                else { expandedSubGroups.insert(groupName) }
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    Image(systemName: "folder")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.blue)
-                    Text(groupName)
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
-                    Spacer()
-                    Text("\(servers.count)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.leading, 28)
-                .padding(.trailing, 12)
-                .padding(.vertical, 5)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                Button("重命名") {
-                    renameTarget = groupName
-                    renameText = groupName
-                }
-            }
-
-            if isExpanded {
-                ForEach(servers) { server in
-                    ServerNodeRow(server: server, appState: appState, indent: 40)
                 }
             }
         }
@@ -465,9 +441,6 @@ struct AssetTreeView: View {
 
     private var searchResults: some View {
         let q = uiState.assetTreeSearchQuery.lowercased()
-        let matchedServers = inventoryState.servers.filter {
-            $0.name.lowercased().contains(q) || $0.host.lowercased().contains(q)
-        }
         let matchedDatabases = inventoryState.databaseConnections.filter {
             $0.name.lowercased().contains(q)
                 || $0.group_name.lowercased().contains(q)
@@ -477,9 +450,7 @@ struct AssetTreeView: View {
         }
 
         return VStack(spacing: 0) {
-            ForEach(matchedServers) { server in
-                ServerNodeRow(server: server, appState: appState, indent: 12)
-            }
+            ServerTreeSection(appState: appState, searchQuery: q, showsHeader: false)
             ForEach(matchedDatabases) { connection in
                 DatabaseNodeRow(connection: connection, appState: appState, indent: 12)
             }
@@ -489,7 +460,7 @@ struct AssetTreeView: View {
 
 // MARK: - Server Node Row
 
-private struct ServerNodeRow: View {
+struct ServerNodeRow: View {
     let server: Server
     let appState: AppState
     var indent: CGFloat = 12
@@ -535,8 +506,23 @@ private struct ServerNodeRow: View {
             Button("Docker") { appState.addTab(server: server, type: .docker) }
             Divider()
             Button("编辑") { appState.openDialog(server: server) }
+            Button(server.is_pinned ? "取消置顶" : "置顶") {
+                appState.setServerPinned(server, isPinned: !server.is_pinned)
+            }
+            Menu("移动到") {
+                Button("未分类") { appState.moveServer(server, toFolderId: nil) }
+                ForEach(appState.serverOrganization.folders.sorted(by: folderOrder)) { folder in
+                    Button(folder.name) { appState.moveServer(server, toFolderId: folder.id) }
+                }
+            }
+            Divider()
             Button("删除", role: .destructive) { appState.deleteServer(server.id) }
         }
+    }
+
+    private func folderOrder(_ lhs: ServerFolder, _ rhs: ServerFolder) -> Bool {
+        if lhs.sort_order != rhs.sort_order { return lhs.sort_order < rhs.sort_order }
+        return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
     }
 }
 

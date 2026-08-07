@@ -71,6 +71,11 @@ class AppState: ObservableObject {
         set { uiState.assetTreeWidth = newValue }
     }
 
+    var assetTreeCollapsed: Bool {
+        get { uiState.assetTreeCollapsed }
+        set { uiState.assetTreeCollapsed = newValue }
+    }
+
     var assetTreeSearchQuery: String {
         get { uiState.assetTreeSearchQuery }
         set { uiState.assetTreeSearchQuery = newValue }
@@ -462,6 +467,12 @@ class AppState: ObservableObject {
     }
 
     func moveServer(_ server: Server, toFolderId folderId: String?) {
+        let projection = ServerTreeProjection(snapshot: serverOrganization, servers: servers)
+        guard projection.canMoveServer(toFolderId: folderId) else {
+            alertTitle = "移动失败"
+            alertMessage = "目标目录不存在或层级无效"
+            return
+        }
         Task {
             do {
                 try await bridge.moveServerAsync(serverId: server.id, folderId: folderId)
@@ -474,6 +485,145 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    func createServerFolder(name: String, parentId: String?) {
+        Task {
+            do {
+                _ = try await bridge.createServerFolderAsync(
+                    input: FolderInput(name: name, parent_id: parentId, sort_order: nil)
+                )
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "创建失败", error: error)
+            }
+        }
+    }
+
+    func renameServerFolder(_ folder: ServerFolder, name: String) {
+        Task {
+            do {
+                _ = try await bridge.renameServerFolderAsync(
+                    id: folder.id,
+                    input: FolderInput(name: name, parent_id: folder.parent_id, sort_order: folder.sort_order)
+                )
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "重命名失败", error: error)
+            }
+        }
+    }
+
+    func moveServerFolder(_ folder: ServerFolder, toParentId parentId: String?) {
+        let projection = ServerTreeProjection(snapshot: serverOrganization, servers: servers)
+        guard projection.canMoveFolder(folder.id, toParentId: parentId) else {
+            alertTitle = "移动失败"
+            alertMessage = "不能移动到自身、后代目录，或生成超过三级的目录"
+            return
+        }
+        let siblingOrder = serverOrganization.folders
+            .filter { $0.parent_id == parentId && $0.id != folder.id }
+            .map(\.sort_order)
+            .max()
+            .map { $0 + 1 } ?? 0
+        Task {
+            do {
+                _ = try await bridge.moveServerFolderAsync(
+                    id: folder.id,
+                    input: FolderMoveInput(parent_id: parentId, sort_order: siblingOrder)
+                )
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "移动失败", error: error)
+            }
+        }
+    }
+
+    func reorderServerFolder(_ folder: ServerFolder, direction: Int) {
+        let siblings = serverOrganization.folders
+            .filter { $0.parent_id == folder.parent_id }
+            .sorted {
+                if $0.sort_order != $1.sort_order { return $0.sort_order < $1.sort_order }
+                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+        guard let index = siblings.firstIndex(where: { $0.id == folder.id }) else { return }
+        let destinationIndex = index + direction
+        guard siblings.indices.contains(destinationIndex) else { return }
+        let destination = siblings[destinationIndex]
+        Task {
+            do {
+                _ = try await bridge.moveServerFolderAsync(
+                    id: folder.id,
+                    input: FolderMoveInput(parent_id: folder.parent_id, sort_order: destination.sort_order)
+                )
+                _ = try await bridge.moveServerFolderAsync(
+                    id: destination.id,
+                    input: FolderMoveInput(parent_id: destination.parent_id, sort_order: folder.sort_order)
+                )
+                loadServerOrganization()
+            } catch {
+                loadServerOrganization()
+                await showServerOrganizationError(title: "排序失败", error: error)
+            }
+        }
+    }
+
+    func deleteServerFolder(_ folder: ServerFolder, destinationFolderId: String?, deleteServers: Bool) {
+        Task {
+            do {
+                try await bridge.deleteServerFolderAsync(
+                    id: folder.id,
+                    input: FolderDeleteInput(
+                        destination_folder_id: destinationFolderId,
+                        delete_servers: deleteServers
+                    )
+                )
+                loadServers()
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "删除失败", error: error)
+            }
+        }
+    }
+
+    func createServerTag(name: String) async throws -> ServerTag {
+        let tag = try await bridge.createServerTagAsync(name: name)
+        let snapshot = try await workspaceBridge.listServerOrganizationAsync()
+        await MainActor.run { serverOrganization = snapshot }
+        return tag
+    }
+
+    func saveServer(_ input: ServerInput, tagIds: [String], editingId: String?) async throws -> Server {
+        let saved: Server
+        if let editingId {
+            saved = try bridge.updateServer(id: editingId, input: input)
+        } else {
+            saved = try bridge.addServer(input: input)
+        }
+
+        do {
+            try await bridge.setServerTagsAsync(serverId: saved.id, tagIds: tagIds)
+            let snapshot = try await workspaceBridge.listServerOrganizationAsync()
+            await MainActor.run {
+                servers = servers.filter { $0.id != saved.id } + [saved]
+                serverOrganization = snapshot
+            }
+            return saved
+        } catch {
+            let refreshedServers = try? bridge.listServers()
+            let refreshedOrganization = try? await workspaceBridge.listServerOrganizationAsync()
+            await MainActor.run {
+                if let refreshedServers { servers = refreshedServers }
+                if let refreshedOrganization { serverOrganization = refreshedOrganization }
+            }
+            throw error
+        }
+    }
+
+    @MainActor
+    private func showServerOrganizationError(title: String, error: Error) {
+        alertTitle = title
+        alertMessage = error.localizedDescription
     }
 
     func selectServerSystemView(_ view: ServerSystemView) {
@@ -2304,12 +2454,18 @@ class AppState: ObservableObject {
     // MARK: - Asset Tree & Recent Servers
 
     func loadAssetTreeWidth() {
-        let w = UserDefaults.standard.double(forKey: "assetTreeWidth")
-        if w >= 160 && w <= 350 { assetTreeWidth = w }
+        let presentation = SidebarPresentation.restore()
+        assetTreeWidth = presentation.width
+        assetTreeCollapsed = presentation.collapsed
     }
 
     func saveAssetTreeWidth(_ width: CGFloat) {
-        UserDefaults.standard.set(Double(width), forKey: "assetTreeWidth")
+        assetTreeWidth = SidebarPresentation.clampedWidth(width)
+        saveAssetTreePresentation()
+    }
+
+    func saveAssetTreePresentation() {
+        SidebarPresentation(collapsed: assetTreeCollapsed, width: assetTreeWidth).save()
     }
 
     func loadRecentServers() {

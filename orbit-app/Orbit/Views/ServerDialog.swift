@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ServerDialog: View {
     @EnvironmentObject var inventoryState: InventoryState
-    let appState: AppState
+    @ObservedObject var appState: AppState
     @Environment(\.dismiss) var dismiss
 
     @State private var form = ServerInput(
@@ -16,8 +16,9 @@ struct ServerDialog: View {
     @State private var testing = false
     @State private var testResult: String?
     @State private var saving = false
-    @State private var isCreatingGroup = false
-    @State private var newGroupName = ""
+    @State private var selectedTagIds: Set<String> = []
+    @State private var newTagName = ""
+    @State private var saveError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,7 +32,7 @@ struct ServerDialog: View {
             if let server = inventoryState.editingServer {
                 form = ServerInput(
                     name: server.name, host: server.host, port: server.port,
-                    group_name: server.group_name.isEmpty ? nil : server.group_name,
+                    group_name: nil,
                     auth_type: server.auth_type, username: server.username,
                     password: server.password.isEmpty ? nil : server.password,
                     private_key: server.private_key.isEmpty ? nil : server.private_key,
@@ -39,10 +40,17 @@ struct ServerDialog: View {
                     key_file_path: server.key_file_path.isEmpty ? nil : server.key_file_path,
                     key_passphrase: server.key_passphrase.isEmpty ? nil : server.key_passphrase,
                     credential_group_id: server.credential_group_id.isEmpty ? nil : server.credential_group_id,
-                    jump_server_id: server.jump_server_id.isEmpty ? nil : server.jump_server_id
+                    jump_server_id: server.jump_server_id.isEmpty ? nil : server.jump_server_id,
+                    folder_id: server.folder_id
+                )
+                selectedTagIds = Set(
+                    appState.serverOrganization.tag_links
+                        .filter { $0.server_id == server.id }
+                        .map(\.tag_id)
                 )
             } else if let defaults = inventoryState.dialogDefaults {
                 form = defaults
+                form.group_name = nil
             }
         }
     }
@@ -66,7 +74,8 @@ struct ServerDialog: View {
     private var formContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                nameAndGroup
+                nameAndFolder
+                tagsEditor
                 hostAndPort
                 jumpServer
                 credentialSource
@@ -77,6 +86,15 @@ struct ServerDialog: View {
                 }
                 if let result = testResult {
                     testResultView(result)
+                }
+                if let saveError {
+                    Text(saveError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
             .padding(16)
@@ -120,7 +138,7 @@ struct ServerDialog: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private var nameAndGroup: some View {
+    private var nameAndFolder: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("名称 *").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -128,36 +146,62 @@ struct ServerDialog: View {
                     .textFieldStyle(.roundedBorder)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("分组").font(.system(size: 11)).foregroundStyle(.secondary)
-                if isCreatingGroup {
-                    TextField("输入新分组名称", text: $newGroupName, onCommit: {
-                        if !newGroupName.trimmingCharacters(in: .whitespaces).isEmpty {
-                            form.group_name = newGroupName
-                        } else {
-                            isCreatingGroup = false
-                            form.group_name = nil
-                        }
-                    })
-                    .textFieldStyle(.roundedBorder)
-                } else {
-                    Picker(selection: Binding(
-                        get: { form.group_name ?? "" },
-                        set: { v in
-                            if v == "__new__" {
-                                isCreatingGroup = true
-                                newGroupName = ""
-                            } else {
-                                form.group_name = v.isEmpty ? nil : v
-                            }
-                        }
-                    )) {
-                        Text("默认分组").tag("")
-                        ForEach(existingGroups, id: \.self) { g in
-                            Text(g).tag(g)
-                        }
-                        Text("+ 新建分组").tag("__new__")
-                    } label: { EmptyView() }
+                Text("目录").font(.system(size: 11)).foregroundStyle(.secondary)
+                Picker(selection: Binding(
+                    get: { form.folder_id ?? "" },
+                    set: { form.folder_id = $0.isEmpty ? nil : $0 }
+                )) {
+                    Text("未分类").tag("")
+                    ForEach(sortedFolders) { folder in
+                        Text(folderPath(folder)).tag(folder.id)
+                    }
+                } label: {
+                    EmptyView()
                 }
+            }
+        }
+    }
+
+    private var tagsEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("标签").font(.system(size: 11)).foregroundStyle(.secondary)
+
+            if appState.serverOrganization.tags.isEmpty {
+                Text("暂无标签")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 6)], alignment: .leading, spacing: 6) {
+                    ForEach(sortedTags) { tag in
+                        Button {
+                            if selectedTagIds.contains(tag.id) { selectedTagIds.remove(tag.id) }
+                            else { selectedTagIds.insert(tag.id) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: selectedTagIds.contains(tag.id) ? "checkmark.circle.fill" : "circle")
+                                Text(tag.name).lineLimit(1)
+                            }
+                            .font(.system(size: 10))
+                            .padding(.horizontal, 7)
+                            .frame(height: 24)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                selectedTagIds.contains(tag.id)
+                                    ? Color.accentColor.opacity(0.14)
+                                    : Color.primary.opacity(0.04)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack(spacing: 6) {
+                TextField("新建标签", text: $newTagName)
+                    .textFieldStyle(.roundedBorder)
+                Button("创建") { createTag() }
+                    .disabled(newTagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -386,9 +430,41 @@ struct ServerDialog: View {
         return inventoryState.credentialGroups.first(where: { $0.id == id })
     }
 
-    private var existingGroups: [String] {
-        let set = Set(inventoryState.servers.compactMap { $0.group_name.isEmpty ? nil : $0.group_name })
-        return set.sorted()
+    private var sortedFolders: [ServerFolder] {
+        appState.serverOrganization.folders.sorted {
+            folderPath($0).localizedCaseInsensitiveCompare(folderPath($1)) == .orderedAscending
+        }
+    }
+
+    private var sortedTags: [ServerTag] {
+        appState.serverOrganization.tags.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func folderPath(_ folder: ServerFolder) -> String {
+        let projection = ServerTreeProjection(
+            snapshot: appState.serverOrganization,
+            servers: inventoryState.servers
+        )
+        return projection.path(forFolderId: folder.id) ?? folder.name
+    }
+
+    private func createTag() {
+        let name = newTagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        saveError = nil
+        Task {
+            do {
+                let tag = try await appState.createServerTag(name: name)
+                await MainActor.run {
+                    selectedTagIds.insert(tag.id)
+                    newTagName = ""
+                }
+            } catch {
+                await MainActor.run { saveError = "创建标签失败：\(error.localizedDescription)" }
+            }
+        }
     }
 
     private func handleTest() {
@@ -409,15 +485,24 @@ struct ServerDialog: View {
         guard !form.name.isEmpty, !form.host.isEmpty else { return }
         if !useCg && form.username.isEmpty { return }
         saving = true
+        saveError = nil
+        form.group_name = nil
         Task {
-            if let server = inventoryState.editingServer {
-                appState.updateServer(id: server.id, input: form)
-            } else {
-                appState.addServer(form)
-            }
-            await MainActor.run {
-                saving = false
-                dismiss()
+            do {
+                _ = try await appState.saveServer(
+                    form,
+                    tagIds: selectedTagIds.sorted(),
+                    editingId: inventoryState.editingServer?.id
+                )
+                await MainActor.run {
+                    saving = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    saving = false
+                    saveError = "保存服务器失败：\(error.localizedDescription)"
+                }
             }
         }
     }

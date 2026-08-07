@@ -8,6 +8,7 @@ struct MainView: View {
     @ObservedObject private var inventoryState: InventoryState
     @ObservedObject private var toolState: ToolState
     @State private var batchExecutionVisible: Bool = false
+    @State private var assetTreeDragStartWidth: CGFloat?
 
     init(appState: AppState = AppState()) {
         _appState = StateObject(wrappedValue: appState)
@@ -183,9 +184,14 @@ struct MainView: View {
     private var workspaceLayout: some View {
         HStack(spacing: 0) {
             AssetTreeView(appState: appState)
-                .frame(width: uiState.assetTreeWidth)
+                .frame(width: SidebarPresentation(
+                    collapsed: uiState.assetTreeCollapsed,
+                    width: uiState.assetTreeWidth
+                ).displayWidth)
 
-            resizeHandle
+            if !uiState.assetTreeCollapsed {
+                resizeHandle
+            }
 
             Divider()
 
@@ -231,11 +237,17 @@ struct MainView: View {
             .gesture(
                 DragGesture()
                     .onChanged { value in
-                        let newWidth = uiState.assetTreeWidth + value.translation.width
-                        uiState.assetTreeWidth = min(350, max(160, newWidth))
+                        if assetTreeDragStartWidth == nil {
+                            assetTreeDragStartWidth = uiState.assetTreeWidth
+                        }
+                        let startWidth = assetTreeDragStartWidth ?? uiState.assetTreeWidth
+                        uiState.assetTreeWidth = SidebarPresentation.clampedWidth(
+                            startWidth + value.translation.width
+                        )
                     }
                     .onEnded { _ in
-                        appState.saveAssetTreeWidth(uiState.assetTreeWidth)
+                        assetTreeDragStartWidth = nil
+                        appState.saveAssetTreePresentation()
                     }
             )
     }

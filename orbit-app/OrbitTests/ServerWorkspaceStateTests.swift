@@ -3,6 +3,74 @@ import XCTest
 
 @MainActor
 final class ServerWorkspaceStateTests: XCTestCase {
+    func testTreeBuildsThreeLevelsAndSearchPreservesPath() {
+        let tree = ServerTreeProjection(
+            snapshot: .threeLevelFixture(),
+            servers: [.fixture(id: "s1", name: "Edge Web", folderId: "leaf")]
+        )
+
+        XCTAssertEqual(tree.roots.first?.children.first?.children.first?.depth, 3)
+        XCTAssertEqual(tree.path(forServerId: "s1"), "客户 / 生产 / Web")
+        XCTAssertEqual(tree.search("web").first?.path, "客户 / 生产 / Web")
+        XCTAssertEqual(tree.search("k8s").first?.server.id, "s1")
+    }
+
+    func testTreeOnlyShowsNonEmptyDerivedViewsAndFiltersOneTag() {
+        let servers = [
+            Server.fixture(id: "pinned", isPinned: true),
+            Server.fixture(id: "recent", lastAttemptedAt: "2026-08-07T00:00:00Z"),
+            Server.fixture(id: "plain", folderId: nil)
+        ]
+        let snapshot = ServerOrganizationSnapshot(
+            folders: [],
+            tags: [ServerTag.fixture(id: "prod", name: "生产")],
+            tag_links: [.init(server_id: "plain", tag_id: "prod")]
+        )
+        let tree = ServerTreeProjection(snapshot: snapshot, servers: servers)
+
+        XCTAssertEqual(tree.visibleSystemViews, [.all, .pinned, .recent, .uncategorized])
+        XCTAssertEqual(tree.servers(tagged: "prod").map(\.id), ["plain"])
+        XCTAssertEqual(
+            ServerTreeProjection(snapshot: .empty, servers: []).visibleSystemViews,
+            [.all]
+        )
+    }
+
+    func testRecentSystemViewIncludesLegacyHistoryFallback() {
+        let server = Server.fixture(id: "legacy", folderId: nil)
+        let tree = ServerTreeProjection(
+            snapshot: .empty,
+            servers: [server],
+            legacyRecentIds: ["legacy"]
+        )
+
+        XCTAssertTrue(tree.visibleSystemViews.contains(.recent))
+        XCTAssertEqual(tree.servers(for: .recent).map(\.id), ["legacy"])
+    }
+
+    func testFolderDropValidationRejectsCyclesAndDepthOverflow() {
+        let tree = ServerTreeProjection(snapshot: .threeLevelFixture(), servers: [])
+
+        XCTAssertFalse(tree.canMoveFolder("root", toParentId: "middle"))
+        XCTAssertFalse(tree.canMoveFolder("middle", toParentId: "leaf"))
+        XCTAssertFalse(tree.canMoveFolder("root", toParentId: "leaf"))
+        XCTAssertTrue(tree.canMoveFolder("leaf", toParentId: nil))
+        XCTAssertFalse(tree.canCreateChild(in: "leaf"))
+    }
+
+    func testSidebarWidthClampsPersistsAndRestoresCollapse() {
+        let suiteName = "ServerWorkspaceStateTests.Sidebar.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(SidebarPresentation.clampedWidth(120), 180)
+        XCTAssertEqual(SidebarPresentation.clampedWidth(420), 360)
+        XCTAssertEqual(SidebarPresentation(collapsed: true, width: 240).displayWidth, 48)
+
+        SidebarPresentation(collapsed: true, width: 320).save(to: defaults)
+        XCTAssertEqual(SidebarPresentation.restore(from: defaults), .init(collapsed: true, width: 320))
+    }
+
     func testTemporaryTabOwnsDraftUntilClosed() {
         let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
         let draft = TemporaryConnectionDraft.fixture(password: "secret")
@@ -505,7 +573,13 @@ private extension TemporaryConnectionDraft {
 }
 
 private extension Server {
-    static func fixture(id: String = "saved-1", name: String = "Saved host") -> Self {
+    static func fixture(
+        id: String = "saved-1",
+        name: String = "Saved host",
+        folderId: String? = "folder-1",
+        isPinned: Bool = false,
+        lastAttemptedAt: String? = nil
+    ) -> Self {
         .init(
             id: id,
             name: name,
@@ -521,13 +595,58 @@ private extension Server {
             key_passphrase: "",
             credential_group_id: "",
             jump_server_id: "jump-1",
-            folder_id: "folder-1",
-            is_pinned: false,
+            folder_id: folderId,
+            is_pinned: isPinned,
             pin_order: nil,
             last_connected_at: nil,
-            last_attempted_at: nil,
+            last_attempted_at: lastAttemptedAt,
             last_connection_result: nil,
             last_connection_error: nil,
+            created_at: "2026-08-07T00:00:00Z",
+            updated_at: "2026-08-07T00:00:00Z"
+        )
+    }
+}
+
+private extension ServerOrganizationSnapshot {
+    static func threeLevelFixture() -> Self {
+        .init(
+            folders: [
+                .fixture(id: "root", name: "客户", parentId: nil, sortOrder: 0),
+                .fixture(id: "middle", name: "生产", parentId: "root", sortOrder: 0),
+                .fixture(id: "leaf", name: "Web", parentId: "middle", sortOrder: 0)
+            ],
+            tags: [.fixture(id: "k8s", name: "K8S")],
+            tag_links: [.init(server_id: "s1", tag_id: "k8s")]
+        )
+    }
+}
+
+private extension ServerFolder {
+    static func fixture(
+        id: String,
+        name: String,
+        parentId: String?,
+        sortOrder: Int64
+    ) -> Self {
+        .init(
+            id: id,
+            name: name,
+            normalized_name: name.lowercased(),
+            parent_id: parentId,
+            sort_order: sortOrder,
+            created_at: "2026-08-07T00:00:00Z",
+            updated_at: "2026-08-07T00:00:00Z"
+        )
+    }
+}
+
+private extension ServerTag {
+    static func fixture(id: String, name: String) -> Self {
+        .init(
+            id: id,
+            name: name,
+            normalized_name: name.lowercased(),
             created_at: "2026-08-07T00:00:00Z",
             updated_at: "2026-08-07T00:00:00Z"
         )
