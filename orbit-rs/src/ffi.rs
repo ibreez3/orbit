@@ -885,6 +885,122 @@ fn fail_connection(
     status
 }
 
+fn open_server_terminal_channel(
+    guard: &crate::transport::SessionGuard,
+    session_lock: &Arc<std::sync::Mutex<()>>,
+) -> anyhow::Result<ssh2::Channel> {
+    let _lock = session_lock
+        .lock()
+        .map_err(|error| anyhow::anyhow!("SSH session lock failed: {}", error))?;
+    guard.session.set_blocking(true);
+    let channel_result = (|| {
+        let mut channel = guard
+            .session
+            .channel_session()
+            .map_err(|error| anyhow::anyhow!("创建 SSH channel 失败: {}", error))?;
+        let _ = channel.setenv("LANG", "en_US.UTF-8");
+        let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
+        channel
+            .request_pty("xterm-256color", None, None)
+            .map_err(|error| anyhow::anyhow!("请求远端 PTY 失败: {}", error))?;
+        channel
+            .shell()
+            .map_err(|error| anyhow::anyhow!("启动远端 shell 失败: {}", error))?;
+        Ok(channel)
+    })();
+    guard.session.set_blocking(false);
+    channel_result
+}
+
+fn connect_server_session(
+    app: &OrbitApp,
+    server: Server,
+    pool_key: Option<String>,
+    temporary: Option<ssh::TemporarySessionDescriptor>,
+    data_cb: OrbitDataCallback,
+    closed_cb: OrbitClosedCallback,
+    userdata: *mut c_void,
+) -> anyhow::Result<String> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let reused = match pool_key.as_deref() {
+        Some(pool_key) => {
+            let mut manager = app
+                .ssh
+                .lock()
+                .map_err(|error| anyhow::anyhow!("SSH 会话管理器锁定失败: {}", error))?;
+            manager.take_idle_session(pool_key)
+        }
+        None => None,
+    };
+
+    let reusable_channel = reused.and_then(|(guard, session_lock)| {
+        match open_server_terminal_channel(&guard, &session_lock) {
+            Ok(channel) => Some((guard, session_lock, channel)),
+            Err(error) => {
+                info!(
+                    pool_key = pool_key.as_deref().unwrap_or_default(),
+                    error = %error,
+                    "空闲连接已失效，创建新连接"
+                );
+                None
+            }
+        }
+    });
+
+    let (guard, session_lock, channel) = match reusable_channel {
+        Some(reused) => reused,
+        None => {
+            let guard = crate::transport::create_session(&server, &app.db)?;
+            let session_lock = Arc::new(std::sync::Mutex::new(()));
+            let channel = open_server_terminal_channel(&guard, &session_lock)?;
+            (guard, session_lock, channel)
+        }
+    };
+
+    let userdata = userdata as usize;
+    let ffi_data_cb: ssh::DataCallback = Box::new(move |session_id: &str, data: &[u8]| {
+        let c_session_id = match CString::new(session_id) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        data_cb(
+            c_session_id.as_ptr(),
+            data.as_ptr(),
+            data.len(),
+            userdata as *mut c_void,
+        );
+    });
+    let ffi_closed_cb: ssh::ClosedCallback = Box::new(move |session_id: &str| {
+        let c_session_id = match CString::new(session_id) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        closed_cb(c_session_id.as_ptr(), userdata as *mut c_void);
+    });
+    let active_channel = ssh::spawn_channel_reader(
+        &session_id,
+        channel,
+        ffi_data_cb,
+        ffi_closed_cb,
+        session_lock.clone(),
+    )?;
+
+    let mut manager = app
+        .ssh
+        .lock()
+        .map_err(|error| anyhow::anyhow!("SSH 会话管理器锁定失败: {}", error))?;
+    manager.register_session(
+        &session_id,
+        pool_key,
+        temporary,
+        guard,
+        active_channel,
+        session_lock,
+    );
+    info!(session_id, server = %server.name, "SSH 终端连接成功");
+    Ok(session_id)
+}
+
 #[no_mangle]
 pub extern "C" fn orbit_connect_ssh(
     app: *mut OrbitApp,
@@ -918,157 +1034,16 @@ pub extern "C" fn orbit_connect_ssh(
             );
         }
     };
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let sid_for_cb = session_id.clone();
-    let ud = userdata as usize;
-
-    // --- Try to reuse idle connection from pool ---
-    let reused = {
-        let mut mgr = match app.ssh.lock() {
-            Ok(m) => m,
-            Err(e) => return fail_connection(app, sid_str, -4, e),
-        };
-        mgr.take_idle_session(sid_str)
-    };
-
-    if let Some((guard, session_lock)) = reused {
-        let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
-            let c_sid = match CString::new(sid) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
-        });
-
-        let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
-            let c_sid = match CString::new(sid) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            closed_cb(c_sid.as_ptr(), ud as *mut c_void);
-        });
-
-        let channel_result = {
-            let _lock = match session_lock.lock() {
-                Ok(l) => l,
-                Err(e) => return fail_connection(app, sid_str, -6, e),
-            };
-            guard.session.set_blocking(true);
-            let result: anyhow::Result<ssh2::Channel> = (|| {
-                let mut channel = guard.session.channel_session()?;
-                channel.setenv("LANG", "en_US.UTF-8")?;
-                channel.setenv("LC_ALL", "en_US.UTF-8")?;
-                channel.request_pty("xterm-256color", None, None)?;
-                channel.shell()?;
-                Ok(channel)
-            })();
-            guard.session.set_blocking(false);
-            drop(_lock);
-            result
-        };
-
-        match channel_result {
-            Ok(channel) => {
-                match ssh::spawn_channel_reader(
-                    &session_id,
-                    channel,
-                    data_cb,
-                    closed_cb,
-                    session_lock.clone(),
-                ) {
-                    Ok(active_channel) => {
-                        let mut mgr = match app.ssh.lock() {
-                            Ok(m) => m,
-                            Err(e) => return fail_connection(app, sid_str, -4, e),
-                        };
-                        mgr.register_session(
-                            &session_id,
-                            sid_str,
-                            guard,
-                            active_channel,
-                            session_lock,
-                        );
-                        let c_id = CString::new(sid_for_cb).unwrap_or_default();
-                        unsafe { *out_session_id = c_id.into_raw() };
-                        record_connection_success(app, sid_str);
-                        return 0;
-                    }
-                    Err(e) => {
-                        record_connection_failure(app, sid_str, e);
-                    }
-                }
-            }
-            Err(e) => {
-                record_connection_failure(app, sid_str, e);
-                info!(server_id = sid_str, "空闲连接已失效，创建新连接");
-            }
+    let pool_key = Some(server.id.clone());
+    match connect_server_session(app, server, pool_key, None, data_cb, closed_cb, userdata) {
+        Ok(session_id) => {
+            let c_session_id = CString::new(session_id).unwrap_or_default();
+            unsafe { *out_session_id = c_session_id.into_raw() };
+            record_connection_success(app, sid_str);
+            0
         }
-        // Reuse failed — guard dropped, stale connection cleaned up. Fall through.
+        Err(error) => fail_connection(app, sid_str, -5, error),
     }
-
-    // --- No idle session → create new connection ---
-    let guard = match crate::transport::create_session(&server, &app.db) {
-        Ok(g) => g,
-        Err(e) => return fail_connection(app, sid_str, -5, e),
-    };
-
-    let mut channel: ssh2::Channel = match guard.session.channel_session() {
-        Ok(ch) => ch,
-        Err(e) => {
-            return fail_connection(app, sid_str, -6, format!("创建 SSH channel 失败: {}", e))
-        }
-    };
-    let _ = channel.setenv("LANG", "en_US.UTF-8");
-    let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
-    if channel.request_pty("xterm-256color", None, None).is_err() {
-        return fail_connection(app, sid_str, -7, "请求远端 PTY 失败");
-    }
-    if channel.shell().is_err() {
-        return fail_connection(app, sid_str, -8, "启动远端 shell 失败");
-    }
-    guard.session.set_blocking(false);
-
-    let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
-        let c_sid = match CString::new(sid) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
-    });
-
-    let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
-        let c_sid = match CString::new(sid) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        closed_cb(c_sid.as_ptr(), ud as *mut c_void);
-    });
-
-    let session_lock = std::sync::Arc::new(std::sync::Mutex::new(()));
-    let active_channel = match ssh::spawn_channel_reader(
-        &session_id,
-        channel,
-        data_cb,
-        closed_cb,
-        session_lock.clone(),
-    ) {
-        Ok(ac) => ac,
-        Err(e) => {
-            return fail_connection(app, sid_str, -9, format!("启动 SSH 读取线程失败: {}", e))
-        }
-    };
-
-    let mut mgr = match app.ssh.lock() {
-        Ok(m) => m,
-        Err(e) => {
-            return fail_connection(app, sid_str, -4, format!("SSH 会话管理器锁定失败: {}", e))
-        }
-    };
-    mgr.register_session(&session_id, sid_str, guard, active_channel, session_lock);
-    let c_id = CString::new(sid_for_cb).unwrap_or_default();
-    unsafe { *out_session_id = c_id.into_raw() };
-    record_connection_success(app, sid_str);
-    0
 }
 
 #[no_mangle]

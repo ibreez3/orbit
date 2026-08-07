@@ -20,6 +20,52 @@ pub struct TrafficStats {
 
 pub type DataCallback = Box<dyn Fn(&str, &[u8]) + Send + Sync>;
 pub type ClosedCallback = Box<dyn Fn(&str) + Send + Sync>;
+pub type SessionPoolKey = Option<String>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporarySessionDescriptor {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_type: String,
+    pub credential_group_id: Option<String>,
+    pub jump_server_id: Option<String>,
+}
+
+impl TemporarySessionDescriptor {
+    #[allow(dead_code)]
+    pub fn new(
+        host: impl Into<String>,
+        port: u16,
+        username: impl Into<String>,
+        auth_type: impl Into<String>,
+        credential_group_id: Option<String>,
+        jump_server_id: Option<String>,
+    ) -> Self {
+        Self {
+            host: host.into(),
+            port,
+            username: username.into(),
+            auth_type: auth_type.into(),
+            credential_group_id,
+            jump_server_id,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DisconnectDisposition {
+    Pool,
+    Close,
+}
+
+fn disconnect_disposition(pool_key: Option<&str>) -> DisconnectDisposition {
+    if pool_key.is_some() {
+        DisconnectDisposition::Pool
+    } else {
+        DisconnectDisposition::Close
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SshCommandOutput {
@@ -64,7 +110,8 @@ struct SharedSession {
     guard: transport::SessionGuard,
     channels: HashMap<String, ActiveChannel>,
     session_lock: Arc<std::sync::Mutex<()>>,
-    server_id: String,
+    pool_key: SessionPoolKey,
+    temporary: Option<TemporarySessionDescriptor>,
 }
 
 struct IdleSession {
@@ -167,7 +214,8 @@ impl SshManager {
     pub(crate) fn register_session(
         &mut self,
         session_id: &str,
-        server_id: &str,
+        pool_key: Option<String>,
+        temporary: Option<TemporarySessionDescriptor>,
         guard: transport::SessionGuard,
         active_channel: ActiveChannel,
         session_lock: Arc<std::sync::Mutex<()>>,
@@ -182,7 +230,8 @@ impl SshManager {
                     .into_iter()
                     .collect(),
                 session_lock,
-                server_id: server_id.to_string(),
+                pool_key,
+                temporary,
             },
         );
     }
@@ -235,18 +284,13 @@ impl SshManager {
             session_lock.clone(),
         )?;
 
-        self.channel_to_session
-            .insert(session_id.to_string(), session_id.to_string());
-        self.sessions.insert(
-            session_id.to_string(),
-            SharedSession {
-                guard,
-                channels: [(session_id.to_string(), active_channel)]
-                    .into_iter()
-                    .collect(),
-                session_lock,
-                server_id: server.id.clone(),
-            },
+        self.register_session(
+            session_id,
+            Some(server.id.clone()),
+            None,
+            guard,
+            active_channel,
+            session_lock,
         );
         Ok(())
     }
@@ -415,15 +459,25 @@ impl SshManager {
 
         if should_pool_session {
             if let Some(shared) = self.sessions.remove(&session_key) {
-                let server_id = shared.server_id;
-                self.idle_pool
-                    .entry(server_id)
-                    .or_default()
-                    .push(IdleSession {
-                        guard: shared.guard,
-                        session_lock: shared.session_lock,
-                    });
-                info!(channel_id, "SSH 连接已归还连接池");
+                match disconnect_disposition(shared.pool_key.as_deref()) {
+                    DisconnectDisposition::Pool => {
+                        let pool_key = shared.pool_key.expect("pool key checked above");
+                        self.idle_pool
+                            .entry(pool_key)
+                            .or_default()
+                            .push(IdleSession {
+                                guard: shared.guard,
+                                session_lock: shared.session_lock,
+                            });
+                        info!(channel_id, "SSH 连接已归还连接池");
+                    }
+                    DisconnectDisposition::Close => {
+                        shared.guard.session.set_blocking(true);
+                        let _ = shared.guard.session.disconnect(None, "bye", None);
+                        info!(channel_id, "非池化 SSH 连接已关闭");
+                    }
+                }
+                drop(shared.temporary);
             }
         }
         Ok(())
@@ -530,6 +584,24 @@ impl Drop for SshManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_session_is_poolable_but_temporary_session_is_not() {
+        assert_eq!(
+            disconnect_disposition(Some("server-1")),
+            DisconnectDisposition::Pool
+        );
+        assert_eq!(disconnect_disposition(None), DisconnectDisposition::Close);
+    }
+
+    #[test]
+    fn temporary_descriptor_contains_no_secret_fields() {
+        let descriptor =
+            TemporarySessionDescriptor::new("host", 22, "alice", "password", None, None);
+        let debug = format!("{descriptor:?}");
+        assert!(!debug.contains("password_value"));
+        assert!(!debug.contains("private_key"));
+    }
 
     #[test]
     fn checked_command_output_rejects_nonzero_exit_with_stderr() {
