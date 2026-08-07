@@ -98,6 +98,12 @@ impl Database {
     }
 
     fn migrate_server_organization(conn: &mut Connection) -> Result<()> {
+        let needs_legacy_group_migration = {
+            let mut stmt = conn.prepare("PRAGMA table_info(servers)")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let columns = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+            !columns.iter().any(|column| column == "folder_id")
+        };
         let tx = conn.unchecked_transaction()?;
         tx.execute_batch(
             "CREATE TABLE IF NOT EXISTS server_folders (
@@ -144,40 +150,42 @@ impl Database {
              ON server_folders (COALESCE(parent_id, ''), normalized_name);",
         )?;
 
-        let legacy_groups: Vec<(String, String)> = {
-            let mut stmt =
-                tx.prepare("SELECT id, group_name FROM servers WHERE TRIM(group_name) <> ''")?;
-            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-            rows.collect::<std::result::Result<Vec<_>, _>>()?
-        };
-
-        for (server_id, group_name) in legacy_groups {
-            let name = group_name.trim();
-            let normalized_name = normalize_name(name)?;
-            let folder_id = tx
-                .query_row(
-                    "SELECT id FROM server_folders WHERE parent_id IS NULL AND normalized_name = ?1",
-                    [&normalized_name],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
-            let folder_id = match folder_id {
-                Some(id) => id,
-                None => {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let now = chrono::Utc::now().to_rfc3339();
-                    tx.execute(
-                        "INSERT INTO server_folders (id, name, normalized_name, parent_id, sort_order, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5)",
-                        rusqlite::params![id, name, normalized_name, now, now],
-                    )?;
-                    id
-                }
+        if needs_legacy_group_migration {
+            let legacy_groups: Vec<(String, String)> = {
+                let mut stmt =
+                    tx.prepare("SELECT id, group_name FROM servers WHERE TRIM(group_name) <> ''")?;
+                let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                rows.collect::<std::result::Result<Vec<_>, _>>()?
             };
-            tx.execute(
-                "UPDATE servers SET folder_id = ?1 WHERE id = ?2 AND folder_id IS NULL",
-                rusqlite::params![folder_id, server_id],
-            )?;
+
+            for (server_id, group_name) in legacy_groups {
+                let name = group_name.trim();
+                let normalized_name = normalize_name(name)?;
+                let folder_id = tx
+                    .query_row(
+                        "SELECT id FROM server_folders WHERE parent_id IS NULL AND normalized_name = ?1",
+                        [&normalized_name],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                let folder_id = match folder_id {
+                    Some(id) => id,
+                    None => {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let now = chrono::Utc::now().to_rfc3339();
+                        tx.execute(
+                            "INSERT INTO server_folders (id, name, normalized_name, parent_id, sort_order, created_at, updated_at)
+                             VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5)",
+                            rusqlite::params![id, name, normalized_name, now, now],
+                        )?;
+                        id
+                    }
+                };
+                tx.execute(
+                    "UPDATE servers SET folder_id = ?1 WHERE id = ?2 AND folder_id IS NULL",
+                    rusqlite::params![folder_id, server_id],
+                )?;
+            }
         }
 
         tx.commit()?;
@@ -429,7 +437,7 @@ impl Database {
         let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.as_deref().unwrap_or(""));
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE servers SET name=?1,host=?2,port=?3,group_name=?4,auth_type=?5,username=?6,password=?7,private_key=?8,key_source=?9,key_file_path=?10,key_passphrase=?11,credential_group_id=?12,jump_server_id=?13,folder_id=?14,updated_at=?15 WHERE id=?16",
+            "UPDATE servers SET name=?1,host=?2,port=?3,group_name=?4,auth_type=?5,username=?6,password=?7,private_key=?8,key_source=?9,key_file_path=?10,key_passphrase=?11,credential_group_id=?12,jump_server_id=?13,folder_id=COALESCE(?14, folder_id),updated_at=?15 WHERE id=?16",
             rusqlite::params![
                 input.name, input.host, input.port.unwrap_or(22),
                 input.group_name.as_deref().unwrap_or(""),
@@ -441,7 +449,7 @@ impl Database {
                 enc_key_passphrase,
                 input.credential_group_id.as_deref().unwrap_or(""),
                 input.jump_server_id.as_deref().unwrap_or(""),
-                input.folder_id,
+                input.folder_id.as_deref(),
                 now, id,
             ],
         )?;
@@ -637,6 +645,7 @@ impl Database {
 mod server_organization_tests {
     use super::Database;
     use crate::crypto;
+    use crate::models::ServerInput;
     use rusqlite::{params, Connection};
 
     fn create_legacy_database(
@@ -699,10 +708,56 @@ mod server_organization_tests {
             server.folder_id.as_deref(),
             Some(snapshot.folders[0].id.as_str())
         );
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM server_folders WHERE id = ?1",
+                [&snapshot.folders[0].id],
+            )
+            .unwrap();
+        }
+        assert_eq!(db.get_server("s1").unwrap().folder_id, None);
         drop(db);
         let reopened = Database::new(path.to_str().unwrap()).unwrap();
-        assert_eq!(reopened.server_organization().unwrap().folders.len(), 1);
+        assert!(reopened.server_organization().unwrap().folders.is_empty());
+        assert_eq!(reopened.get_server("s1").unwrap().folder_id, None);
         drop(reopened);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn server_organization_update_preserves_folder_when_input_omits_it() {
+        let path = std::env::temp_dir().join(format!(
+            "orbit-migration-update-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        create_legacy_database(&path, "s1", "Prod", "10.0.0.1", "jump-1");
+        let db = Database::new(path.to_str().unwrap()).unwrap();
+        let folder_id = db.get_server("s1").unwrap().folder_id;
+
+        db.update_server(
+            "s1",
+            &ServerInput {
+                name: "renamed".into(),
+                host: "10.0.0.2".into(),
+                port: Some(2222),
+                group_name: Some("Prod".into()),
+                auth_type: Some("password".into()),
+                username: "root".into(),
+                password: Some("".into()),
+                private_key: Some("".into()),
+                key_source: Some("content".into()),
+                key_file_path: Some("".into()),
+                key_passphrase: Some("".into()),
+                credential_group_id: Some("".into()),
+                jump_server_id: Some("jump-1".into()),
+                folder_id: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(db.get_server("s1").unwrap().folder_id, folder_id);
+        drop(db);
         std::fs::remove_file(path).unwrap();
     }
 
