@@ -367,7 +367,10 @@ impl Database {
 
     pub fn mark_connection_attempt(&self, id: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("数据库连接锁已损坏"))?;
         if conn.execute(
             "UPDATE servers SET last_attempted_at = ?1, updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, id],
@@ -380,7 +383,10 @@ impl Database {
 
     pub fn mark_connection_success(&self, id: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("数据库连接锁已损坏"))?;
         if conn.execute(
             "UPDATE servers
              SET last_connected_at = ?1, last_connection_result = 'success',
@@ -397,7 +403,10 @@ impl Database {
     pub fn mark_connection_failure(&self, id: &str, error: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         let error = sanitize_connection_error(error);
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("数据库连接锁已损坏"))?;
         if conn.execute(
             "UPDATE servers
              SET last_connection_result = 'failed', last_connection_error = ?1,
@@ -1107,6 +1116,7 @@ mod server_organization_tests {
     use crate::crypto;
     use crate::models::ServerInput;
     use rusqlite::{params, Connection};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     fn seeded_server_db() -> (Database, String) {
         let db = Database::new(":memory:").unwrap();
@@ -1161,6 +1171,36 @@ mod server_organization_tests {
         assert_eq!(success.last_connection_result.as_deref(), Some("success"));
         assert!(success.last_connected_at.is_some());
         assert_eq!(success.last_connection_error, None);
+    }
+
+    fn poison_connection_lock(db: &Database) {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = db.conn.lock().unwrap();
+            panic!("poison database connection lock");
+        }));
+    }
+
+    #[test]
+    fn connection_metadata_writes_return_errors_for_poisoned_locks() {
+        let (db, server_id) = seeded_server_db();
+        poison_connection_lock(&db);
+        let attempt = catch_unwind(AssertUnwindSafe(|| db.mark_connection_attempt(&server_id)));
+        assert!(attempt.is_ok());
+        assert!(attempt.unwrap().is_err());
+
+        let (db, server_id) = seeded_server_db();
+        poison_connection_lock(&db);
+        let success = catch_unwind(AssertUnwindSafe(|| db.mark_connection_success(&server_id)));
+        assert!(success.is_ok());
+        assert!(success.unwrap().is_err());
+
+        let (db, server_id) = seeded_server_db();
+        poison_connection_lock(&db);
+        let failure = catch_unwind(AssertUnwindSafe(|| {
+            db.mark_connection_failure(&server_id, "failed")
+        }));
+        assert!(failure.is_ok());
+        assert!(failure.unwrap().is_err());
     }
 
     fn create_legacy_database(
