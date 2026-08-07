@@ -103,7 +103,11 @@ struct MainView: View {
             .modifier(ReconnectModifier(appState: appState))
             .onReceive(nc(.openSettings)) { _ in SettingsWindowController.shared.open(with: appState) }
             .onReceive(nc(.toggleAIPanel)) { _ in appState.toggleAIPanel() }
-            .onReceive(nc(.openBatchExecution)) { _ in batchExecutionVisible = true }
+            .onReceive(nc(.openBatchExecution)) { _ in
+                if appState.canUsePersistedServerTools {
+                    batchExecutionVisible = true
+                }
+            }
     }
 
     private func nc(_ name: Notification.Name) -> NotificationCenter.Publisher {
@@ -185,12 +189,13 @@ struct MainView: View {
     private var contentArea: some View {
         if let activeTab = tabState.tabs.first(where: { $0.id == tabState.activeTabId }) {
             if let tree = activeTab.paneTree {
-                if let serverId = terminalRuntimeServerId(for: activeTab) {
-                    SplitPaneView(node: tree, serverId: serverId, tabId: activeTab.id, appState: appState)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Color.clear
-                }
+                SplitPaneView(
+                    node: tree,
+                    connectionTarget: activeTab.connectionTarget,
+                    tabId: activeTab.id,
+                    appState: appState
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 tabContent(activeTab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -205,12 +210,13 @@ struct MainView: View {
         switch tab.type {
         case .terminal:
             ZStack(alignment: .bottomTrailing) {
-                if let serverId = terminalRuntimeServerId(for: tab) {
-                    TerminalView(channelId: tab.sessionId, serverId: serverId, tabId: tab.id, appState: appState)
-                        .id(tab.id)
-                } else {
-                    Color.clear
-                }
+                TerminalView(
+                    channelId: tab.sessionId,
+                    connectionTarget: tab.connectionTarget,
+                    tabId: tab.id,
+                    appState: appState
+                )
+                .id(tab.id)
                 if tabState.activeTabError != nil, tab.id == tabState.activeTabId {
                     AIErrorBanner(errorText: tabState.activeTabError!, appState: appState)
                         .padding(12)
@@ -228,17 +234,6 @@ struct MainView: View {
         case .docker:
             DockerView(appState: appState, tab: tab)
                 .id(tab.id)
-        }
-    }
-
-    private func terminalRuntimeServerId(for tab: TabItem) -> String? {
-        switch tab.connectionTarget {
-        case .saved(let serverId):
-            return serverId
-        case .local:
-            return "local"
-        case .temporary:
-            return nil
         }
     }
 

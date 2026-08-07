@@ -295,7 +295,7 @@ enum KeywordInjector {
 
 struct TerminalView: NSViewRepresentable {
     let channelId: String?
-    let serverId: String
+    let connectionTarget: ServerConnectionTarget
     let tabId: String
     @EnvironmentObject var tabState: TabState
     @EnvironmentObject var themeState: ThemeState
@@ -353,12 +353,17 @@ struct TerminalView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(channelId: channelId, serverId: serverId, tabId: tabId, appState: appState)
+        Coordinator(
+            channelId: channelId,
+            connectionTarget: connectionTarget,
+            tabId: tabId,
+            appState: appState
+        )
     }
 
     class Coordinator: NSObject, TerminalViewDelegate {
         let channelId: String?
-        let serverId: String
+        let connectionTarget: ServerConnectionTarget
         let tabId: String
         let appState: AppState
         weak var terminalView: SwiftTerm.TerminalView?
@@ -375,11 +380,21 @@ struct TerminalView: NSViewRepresentable {
         private var _lastErrorScanTime: Date = .distantPast
         private var _lastErrorSetTime: Date = .distantPast
 
-        var isLocal: Bool { serverId == "local" }
+        var isLocal: Bool {
+            if case .local = connectionTarget {
+                return true
+            }
+            return false
+        }
 
-        init(channelId: String?, serverId: String, tabId: String, appState: AppState) {
+        init(
+            channelId: String?,
+            connectionTarget: ServerConnectionTarget,
+            tabId: String,
+            appState: AppState
+        ) {
             self.channelId = channelId
-            self.serverId = serverId
+            self.connectionTarget = connectionTarget
             self.tabId = tabId
             self.appState = appState
         }
@@ -527,7 +542,7 @@ struct TerminalView: NSViewRepresentable {
             let closedHandler = makeClosedHandler()
             Task {
                 do {
-                    let sid = try await OrbitBridge.shared.connectSSHAsync(serverId: serverId)
+                    let sid = try await appState.connectSSH(for: connectionTarget)
                     guard alive else { return }
                     await MainActor.run {
                         sessionId = sid

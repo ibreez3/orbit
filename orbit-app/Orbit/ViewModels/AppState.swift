@@ -8,7 +8,7 @@ class AppState: ObservableObject {
     let tabState = TabState()
     let uiState = UIState()
     let themeState = ThemeState()
-    let inventoryState = InventoryState()
+    let inventoryState: InventoryState
     let snippetState = SnippetState()
     let toolState = ToolState()
     let aiState = AIState()
@@ -102,6 +102,7 @@ class AppState: ObservableObject {
     }
 
     let bridge = OrbitBridge.shared
+    let workspaceBridge: any ServerWorkspaceBridge
     let textEditorWC = TextEditorWindowController()
 
     // MARK: - Inventory forwarding
@@ -278,6 +279,24 @@ class AppState: ObservableObject {
             )
         }
 
+        if case .temporary(let tabId) = tab.connectionTarget {
+            let draft = temporaryDraft(for: tabId)
+            return ActiveSessionContext(
+                kind: .terminal,
+                tabId: tab.id,
+                paneId: focusedSessionId,
+                sessionId: focusedSessionId,
+                serverId: nil,
+                serverName: tab.serverName,
+                host: draft?.host,
+                username: draft?.username,
+                port: draft?.port,
+                connectionStatus: focusedSessionId == nil ? .connecting : .connected,
+                workingDirectory: nil,
+                capabilities: [.ai, .logs, .snippets]
+            )
+        }
+
         let server = servers.first(where: { $0.id == tab.serverId })
         let status: ConnectionStatus
         if focusedSessionId != nil {
@@ -304,7 +323,9 @@ class AppState: ObservableObject {
         )
     }
 
-    init() {
+    init(workspaceBridge: any ServerWorkspaceBridge = OrbitBridge.shared) {
+        self.workspaceBridge = workspaceBridge
+        self.inventoryState = InventoryState(bridge: workspaceBridge)
         ThemeManager.shared.loadThemes()
         loadServers()
         loadCredentialGroups()
@@ -763,6 +784,56 @@ class AppState: ObservableObject {
         requestActivateTab(id)
     }
 
+    @discardableResult
+    func addTemporaryTerminalTab(draft: TemporaryConnectionDraft) -> String {
+        let id = "temporary-\(UUID().uuidString)"
+        let name = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = name.isEmpty ? draft.host : name
+        let tab = TabItem(
+            id: id,
+            type: .terminal,
+            serverId: nil,
+            connectionTarget: .temporary(tabId: id),
+            serverName: displayName,
+            title: "SSH: \(displayName)"
+        )
+        tabState.temporaryDrafts[id] = draft
+        tabs.append(tab)
+        requestActivateTab(id)
+        return id
+    }
+
+    func temporaryDraft(for tabId: String) -> TemporaryConnectionDraft? {
+        tabState.temporaryDrafts[tabId]
+    }
+
+    func promoteTemporaryTab(tabId: String, sessionId: String) async throws {
+        guard let draft = temporaryDraft(for: tabId),
+              tabState.tab(id: tabId)?.connectionTarget == .temporary(tabId: tabId) else {
+            throw WorkspaceError.missingTemporaryDraft
+        }
+
+        let server = try await workspaceBridge.promoteTemporaryServerAsync(
+            sessionId: sessionId,
+            input: draft.promotionInput
+        )
+
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else {
+            throw WorkspaceError.missingTemporaryDraft
+        }
+        tabs[tabIndex].serverId = server.id
+        tabs[tabIndex].connectionTarget = .saved(serverId: server.id)
+        tabs[tabIndex].serverName = server.name
+        tabs[tabIndex].title = "SSH: \(server.name)"
+        if let serverIndex = servers.firstIndex(where: { $0.id == server.id }) {
+            servers[serverIndex] = server
+        } else {
+            servers.append(server)
+        }
+        loadServers()
+        clearTemporaryDraft(tabId: tabId)
+    }
+
     func addTab(server: Server, type: TabType) {
         if type == .monitor || type == .docker {
             if let existing = tabs.first(where: { $0.type == type && $0.serverId == server.id }) {
@@ -972,6 +1043,14 @@ class AppState: ObservableObject {
             return disabledReason(for: tool, context: context)
         }
         return nil
+    }
+
+    var canUsePersistedServerTools: Bool {
+        guard let activeTab = tabState.activeTab else { return false }
+        if case .saved = activeTab.connectionTarget {
+            return true
+        }
+        return false
     }
 
     private func capability(for tool: SessionTool) -> SessionCapabilities {
@@ -1206,6 +1285,7 @@ class AppState: ObservableObject {
         }
         dockerPanelSnapshots.removeValue(forKey: id)
         databasePanelSnapshots.removeValue(forKey: id)
+        clearTemporaryDraft(tabId: id)
         tabs.removeAll { $0.id == id }
         if activeTabId == id {
             closeSessionScopedTools()
@@ -1239,6 +1319,20 @@ class AppState: ObservableObject {
         )
     }
 
+    func connectSSH(for connectionTarget: ServerConnectionTarget) async throws -> String {
+        switch connectionTarget {
+        case .saved(let serverId):
+            return try await bridge.connectSSHAsync(serverId: serverId)
+        case .temporary(let tabId):
+            guard let draft = temporaryDraft(for: tabId) else {
+                throw WorkspaceError.missingTemporaryDraft
+            }
+            return try await workspaceBridge.connectTemporarySSHAsync(input: draft.connectionInput)
+        case .local:
+            throw WorkspaceError.localConnectionHandledSeparately
+        }
+    }
+
     func connectSSH(tabId: String, serverId: String) {
         Task {
             do {
@@ -1251,6 +1345,13 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    private func clearTemporaryDraft(tabId: String) {
+        guard var draft = tabState.temporaryDrafts[tabId] else { return }
+        draft.clearSecrets()
+        tabState.temporaryDrafts[tabId] = draft
+        tabState.temporaryDrafts.removeValue(forKey: tabId)
     }
 
     func openDialog(server: Server? = nil, defaults: ServerInput? = nil) {
@@ -1961,5 +2062,57 @@ class AppState: ObservableObject {
             )
             updateServer(id: server.id, input: input)
         }
+    }
+}
+
+enum WorkspaceError: LocalizedError {
+    case missingTemporaryDraft
+    case localConnectionHandledSeparately
+
+    var errorDescription: String? {
+        switch self {
+        case .missingTemporaryDraft:
+            return "临时连接草稿不存在"
+        case .localConnectionHandledSeparately:
+            return "本地终端由本地 Shell 建立连接"
+        }
+    }
+}
+
+extension TemporaryConnectionDraft {
+    var connectionInput: TemporaryConnectionInput {
+        let credentialId = credentialGroupId?.nonempty
+        let usesCredentialGroup = credentialId != nil
+        let usesPassword = !usesCredentialGroup && authType == "password"
+        let usesKey = !usesCredentialGroup && authType == "key"
+
+        return TemporaryConnectionInput(
+            host: host,
+            port: port,
+            username: username,
+            auth_type: authType,
+            password: usesPassword ? password.nonempty : nil,
+            private_key: usesKey && keySource == "content" ? privateKey.nonempty : nil,
+            key_source: usesKey ? keySource.nonempty : nil,
+            key_file_path: usesKey && keySource == "file" ? keyFilePath.nonempty : nil,
+            key_passphrase: usesKey ? keyPassphrase.nonempty : nil,
+            credential_group_id: credentialId,
+            jump_server_id: jumpServerId?.nonempty
+        )
+    }
+
+    var promotionInput: PromoteTemporaryServerInput {
+        PromoteTemporaryServerInput(
+            connection: connectionInput,
+            name: displayName.trimmingCharacters(in: .whitespacesAndNewlines).nonempty ?? host,
+            folder_id: folderId?.nonempty,
+            tag_ids: tagIds
+        )
+    }
+}
+
+private extension String {
+    var nonempty: String? {
+        isEmpty ? nil : self
     }
 }
