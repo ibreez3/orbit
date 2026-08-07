@@ -18,6 +18,71 @@ struct ServerFolderNode: Identifiable {
     var id: String { folder.id }
 }
 
+struct ServerFolderOrderMove: Equatable {
+    let folderId: String
+    let parentId: String?
+    let sortOrder: Int64
+}
+
+enum ServerFolderOrdering {
+    static func reorderedMoves(
+        folders: [ServerFolder],
+        movingId: String,
+        direction: Int
+    ) -> [ServerFolderOrderMove] {
+        let sorted = folders.sorted {
+            if $0.sort_order != $1.sort_order { return $0.sort_order < $1.sort_order }
+            let comparison = $0.name.localizedCaseInsensitiveCompare($1.name)
+            return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+        }
+        guard let sourceIndex = sorted.firstIndex(where: { $0.id == movingId }) else { return [] }
+        let destinationIndex = sourceIndex + direction
+        guard sorted.indices.contains(destinationIndex) else { return [] }
+
+        var reordered = sorted
+        let moving = reordered.remove(at: sourceIndex)
+        reordered.insert(moving, at: destinationIndex)
+        return reordered.enumerated().map { index, folder in
+            ServerFolderOrderMove(
+                folderId: folder.id,
+                parentId: folder.parent_id,
+                sortOrder: Int64(index)
+            )
+        }
+    }
+}
+
+struct ServerDialogPersistence {
+    private(set) var savedServerId: String?
+    private(set) var savedServer: Server?
+    private(set) var selectedTagIds: Set<String> = []
+
+    mutating func bind(
+        serverId: String,
+        servers: [Server],
+        snapshot: ServerOrganizationSnapshot
+    ) {
+        savedServerId = serverId
+        savedServer = servers.first(where: { $0.id == serverId })
+        selectedTagIds = Set(
+            snapshot.tag_links
+                .filter { $0.server_id == serverId }
+                .map(\.tag_id)
+        )
+    }
+
+    func targetServerId(fallback: String?) -> String? {
+        savedServerId ?? fallback
+    }
+}
+
+struct ServerSaveFailure: LocalizedError {
+    let serverId: String
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 struct ServerTreeProjection {
     let roots: [ServerFolderNode]
     let visibleSystemViews: [ServerSystemView]

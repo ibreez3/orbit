@@ -9,7 +9,6 @@ struct ServerTreeSection: View {
     var showsHeader = true
 
     @State private var expandedFolderIds: Set<String> = []
-    @State private var selectedTagId: String?
     @State private var folderEditor: FolderEditor?
     @State private var folderName = ""
     @State private var emptyDeletion: ServerFolder?
@@ -120,7 +119,6 @@ struct ServerTreeSection: View {
         VStack(spacing: 0) {
             ForEach(projection.visibleSystemViews, id: \.rawValue) { view in
                 Button {
-                    selectedTagId = nil
                     appState.selectServerSystemView(view)
                 } label: {
                     HStack(spacing: 8) {
@@ -138,14 +136,14 @@ struct ServerTreeSection: View {
                     .frame(height: 28)
                     .contentShape(Rectangle())
                     .background(
-                        uiState.selectedServerSystemView == view && selectedTagId == nil
+                        uiState.selectedServerSystemView == view && uiState.selectedServerTagId == nil
                             ? Color.accentColor.opacity(0.12)
                             : Color.clear
                     )
                 }
                 .buttonStyle(.plain)
 
-                if uiState.selectedServerSystemView == view && selectedTagId == nil && view != .all {
+                if uiState.selectedServerSystemView == view && uiState.selectedServerTagId == nil && view != .all {
                     ForEach(projection.servers(for: view)) { server in
                         ServerNodeRow(server: server, appState: appState, indent: 30)
                             .draggable("server:\(server.id)")
@@ -241,7 +239,7 @@ struct ServerTreeSection: View {
 
             ForEach(projection.tags) { tag in
                 Button {
-                    selectedTagId = selectedTagId == tag.id ? nil : tag.id
+                    uiState.selectedServerTagId = uiState.selectedServerTagId == tag.id ? nil : tag.id
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "tag")
@@ -257,11 +255,11 @@ struct ServerTreeSection: View {
                     .padding(.horizontal, 12)
                     .frame(height: 28)
                     .contentShape(Rectangle())
-                    .background(selectedTagId == tag.id ? Color.accentColor.opacity(0.12) : Color.clear)
+                    .background(uiState.selectedServerTagId == tag.id ? Color.accentColor.opacity(0.12) : Color.clear)
                 }
                 .buttonStyle(.plain)
 
-                if selectedTagId == tag.id {
+                if uiState.selectedServerTagId == tag.id {
                     ForEach(projection.servers(tagged: tag.id)) { server in
                         ServerNodeRow(server: server, appState: appState, indent: 30)
                             .draggable("server:\(server.id)")

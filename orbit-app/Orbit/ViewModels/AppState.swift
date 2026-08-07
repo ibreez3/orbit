@@ -350,7 +350,7 @@ class AppState: ObservableObject {
     func loadServers() {
         Task {
             do {
-                let result = try bridge.listServers()
+                let result = try workspaceBridge.listServers()
                 await MainActor.run { self.servers = result }
             } catch {
                 await MainActor.run {
@@ -392,7 +392,7 @@ class AppState: ObservableObject {
     func addServer(_ input: ServerInput) {
         Task {
             do {
-                let server = try bridge.addServer(input: input)
+                let server = try workspaceBridge.addServer(input: input)
                 await MainActor.run { servers.append(server) }
             } catch {
                 await MainActor.run {
@@ -406,7 +406,7 @@ class AppState: ObservableObject {
     func updateServer(id: String, input: ServerInput) {
         Task {
             do {
-                let server = try bridge.updateServer(id: id, input: input)
+                let server = try workspaceBridge.updateServer(id: id, input: input)
                 await MainActor.run { servers = servers.map { $0.id == id ? server : $0 } }
             } catch {
                 await MainActor.run {
@@ -449,7 +449,7 @@ class AppState: ObservableObject {
     func setServerPinned(_ server: Server, isPinned: Bool) {
         Task {
             do {
-                let updated = try await bridge.setServerPinAsync(
+                let updated = try await workspaceBridge.setServerPinAsync(
                     serverId: server.id,
                     isPinned: isPinned,
                     pinOrder: nil
@@ -475,7 +475,7 @@ class AppState: ObservableObject {
         }
         Task {
             do {
-                try await bridge.moveServerAsync(serverId: server.id, folderId: folderId)
+                try await workspaceBridge.moveServerAsync(serverId: server.id, folderId: folderId)
                 loadServers()
                 loadServerOrganization()
             } catch {
@@ -490,7 +490,7 @@ class AppState: ObservableObject {
     func createServerFolder(name: String, parentId: String?) {
         Task {
             do {
-                _ = try await bridge.createServerFolderAsync(
+                _ = try await workspaceBridge.createServerFolderAsync(
                     input: FolderInput(name: name, parent_id: parentId, sort_order: nil)
                 )
                 loadServerOrganization()
@@ -503,7 +503,7 @@ class AppState: ObservableObject {
     func renameServerFolder(_ folder: ServerFolder, name: String) {
         Task {
             do {
-                _ = try await bridge.renameServerFolderAsync(
+                _ = try await workspaceBridge.renameServerFolderAsync(
                     id: folder.id,
                     input: FolderInput(name: name, parent_id: folder.parent_id, sort_order: folder.sort_order)
                 )
@@ -528,7 +528,7 @@ class AppState: ObservableObject {
             .map { $0 + 1 } ?? 0
         Task {
             do {
-                _ = try await bridge.moveServerFolderAsync(
+                _ = try await workspaceBridge.moveServerFolderAsync(
                     id: folder.id,
                     input: FolderMoveInput(parent_id: parentId, sort_order: siblingOrder)
                 )
@@ -542,24 +542,20 @@ class AppState: ObservableObject {
     func reorderServerFolder(_ folder: ServerFolder, direction: Int) {
         let siblings = serverOrganization.folders
             .filter { $0.parent_id == folder.parent_id }
-            .sorted {
-                if $0.sort_order != $1.sort_order { return $0.sort_order < $1.sort_order }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
-        guard let index = siblings.firstIndex(where: { $0.id == folder.id }) else { return }
-        let destinationIndex = index + direction
-        guard siblings.indices.contains(destinationIndex) else { return }
-        let destination = siblings[destinationIndex]
+        let moves = ServerFolderOrdering.reorderedMoves(
+            folders: siblings,
+            movingId: folder.id,
+            direction: direction
+        )
+        guard !moves.isEmpty else { return }
         Task {
             do {
-                _ = try await bridge.moveServerFolderAsync(
-                    id: folder.id,
-                    input: FolderMoveInput(parent_id: folder.parent_id, sort_order: destination.sort_order)
-                )
-                _ = try await bridge.moveServerFolderAsync(
-                    id: destination.id,
-                    input: FolderMoveInput(parent_id: destination.parent_id, sort_order: folder.sort_order)
-                )
+                for move in moves {
+                    _ = try await workspaceBridge.moveServerFolderAsync(
+                        id: move.folderId,
+                        input: FolderMoveInput(parent_id: move.parentId, sort_order: move.sortOrder)
+                    )
+                }
                 loadServerOrganization()
             } catch {
                 loadServerOrganization()
@@ -571,7 +567,7 @@ class AppState: ObservableObject {
     func deleteServerFolder(_ folder: ServerFolder, destinationFolderId: String?, deleteServers: Bool) {
         Task {
             do {
-                try await bridge.deleteServerFolderAsync(
+                try await workspaceBridge.deleteServerFolderAsync(
                     id: folder.id,
                     input: FolderDeleteInput(
                         destination_folder_id: destinationFolderId,
@@ -587,7 +583,7 @@ class AppState: ObservableObject {
     }
 
     func createServerTag(name: String) async throws -> ServerTag {
-        let tag = try await bridge.createServerTagAsync(name: name)
+        let tag = try await workspaceBridge.createServerTagAsync(name: name)
         let snapshot = try await workspaceBridge.listServerOrganizationAsync()
         await MainActor.run { serverOrganization = snapshot }
         return tag
@@ -596,27 +592,29 @@ class AppState: ObservableObject {
     func saveServer(_ input: ServerInput, tagIds: [String], editingId: String?) async throws -> Server {
         let saved: Server
         if let editingId {
-            saved = try bridge.updateServer(id: editingId, input: input)
+            saved = try workspaceBridge.updateServer(id: editingId, input: input)
         } else {
-            saved = try bridge.addServer(input: input)
+            saved = try workspaceBridge.addServer(input: input)
         }
 
         do {
-            try await bridge.setServerTagsAsync(serverId: saved.id, tagIds: tagIds)
+            try await workspaceBridge.moveServerAsync(serverId: saved.id, folderId: input.folder_id)
+            try await workspaceBridge.setServerTagsAsync(serverId: saved.id, tagIds: tagIds)
+            let refreshedServers = try workspaceBridge.listServers()
             let snapshot = try await workspaceBridge.listServerOrganizationAsync()
             await MainActor.run {
-                servers = servers.filter { $0.id != saved.id } + [saved]
+                servers = refreshedServers
                 serverOrganization = snapshot
             }
-            return saved
+            return refreshedServers.first(where: { $0.id == saved.id }) ?? saved
         } catch {
-            let refreshedServers = try? bridge.listServers()
+            let refreshedServers = try? workspaceBridge.listServers()
             let refreshedOrganization = try? await workspaceBridge.listServerOrganizationAsync()
             await MainActor.run {
                 if let refreshedServers { servers = refreshedServers }
                 if let refreshedOrganization { serverOrganization = refreshedOrganization }
             }
-            throw error
+            throw ServerSaveFailure(serverId: saved.id, message: error.localizedDescription)
         }
     }
 
@@ -628,7 +626,10 @@ class AppState: ObservableObject {
 
     func selectServerSystemView(_ view: ServerSystemView) {
         uiState.assetTreeSearchQuery = ""
+        uiState.selectedServerTagId = nil
         uiState.selectedServerSystemView = view
+        uiState.assetTreeCollapsed = false
+        saveAssetTreePresentation()
     }
 
     func addCg(_ input: CredentialGroupInput) {

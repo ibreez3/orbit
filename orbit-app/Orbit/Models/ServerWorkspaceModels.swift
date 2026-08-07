@@ -462,7 +462,18 @@ struct PromoteTemporaryServerInput: Codable, Equatable {
 }
 
 protocol ServerWorkspaceBridge {
+    func listServers() throws -> [Server]
+    func addServer(input: ServerInput) throws -> Server
+    func updateServer(id: String, input: ServerInput) throws -> Server
     func listServerOrganizationAsync() async throws -> ServerOrganizationSnapshot
+    func createServerFolderAsync(input: FolderInput) async throws -> ServerFolder
+    func renameServerFolderAsync(id: String, input: FolderInput) async throws -> ServerFolder
+    func moveServerFolderAsync(id: String, input: FolderMoveInput) async throws -> ServerFolder
+    func deleteServerFolderAsync(id: String, input: FolderDeleteInput) async throws
+    func createServerTagAsync(name: String) async throws -> ServerTag
+    func setServerTagsAsync(serverId: String, tagIds: [String]) async throws
+    func moveServerAsync(serverId: String, folderId: String?) async throws
+    func setServerPinAsync(serverId: String, isPinned: Bool, pinOrder: Int64?) async throws -> Server
     func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String
     func spawnChannelAsync(existingSessionId: String) async throws -> String
     func disconnectSSHAsync(sessionId: String) async throws

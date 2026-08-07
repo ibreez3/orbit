@@ -192,7 +192,7 @@ private struct RecentConnectionRowView: View {
                 }
 
                 ForEach(folders.sorted(by: folderOrder)) { folder in
-                    Button(folder.name) {
+                    Button(folderPath(folder)) {
                         appState.moveServer(row.server, toFolderId: folder.id)
                     }
                 }
@@ -231,5 +231,12 @@ private struct RecentConnectionRowView: View {
             return lhs.sort_order < rhs.sort_order
         }
         return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+    }
+
+    private func folderPath(_ folder: ServerFolder) -> String {
+        ServerTreeProjection(
+            snapshot: .init(folders: folders, tags: [], tag_links: []),
+            servers: []
+        ).path(forFolderId: folder.id) ?? folder.name
     }
 }

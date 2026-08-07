@@ -48,6 +48,131 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertEqual(tree.servers(for: .recent).map(\.id), ["legacy"])
     }
 
+    func testEqualSortOrderReorderProducesUniqueContinuousOrder() {
+        let folders = [
+            ServerFolder.fixture(id: "a", name: "A", parentId: nil, sortOrder: 0),
+            ServerFolder.fixture(id: "b", name: "B", parentId: nil, sortOrder: 0),
+            ServerFolder.fixture(id: "c", name: "C", parentId: nil, sortOrder: 0)
+        ]
+
+        let moves = ServerFolderOrdering.reorderedMoves(
+            folders: folders,
+            movingId: "b",
+            direction: -1
+        )
+
+        XCTAssertEqual(moves.map(\.folderId), ["b", "a", "c"])
+        XCTAssertEqual(moves.map(\.sortOrder), [0, 1, 2])
+    }
+
+    func testSelectingAllClearsTagFilterAndExpandsSidebar() {
+        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+        state.uiState.selectedServerTagId = "prod"
+        state.uiState.assetTreeCollapsed = true
+
+        state.selectServerSystemView(.all)
+
+        XCTAssertNil(state.uiState.selectedServerTagId)
+        XCTAssertFalse(state.uiState.assetTreeCollapsed)
+        XCTAssertEqual(state.uiState.selectedServerSystemView, .all)
+    }
+
+    func testFailedNewServerSaveBindsPersistedRecordAndRetryUpdatesWithoutDuplicateAdd() async throws {
+        let authoritativeServer = Server.fixture(id: "persisted", folderId: nil)
+        let authoritativeSnapshot = ServerOrganizationSnapshot(
+            folders: [],
+            tags: [ServerTag.fixture(id: "old", name: "旧标签")],
+            tag_links: [.init(server_id: "persisted", tag_id: "old")]
+        )
+        let bridge = FakeServerWorkspaceBridge(
+            savedServer: authoritativeServer,
+            organization: authoritativeSnapshot,
+            setTagErrors: [FakeError.tagReplacementFailed]
+        )
+        let state = AppState(workspaceBridge: bridge)
+        var persistence = ServerDialogPersistence()
+
+        do {
+            _ = try await state.saveServer(.fixture(folderId: nil), tagIds: ["new"], editingId: nil)
+            XCTFail("Expected tag replacement to fail")
+        } catch let failure as ServerSaveFailure {
+            persistence.bind(
+                serverId: failure.serverId,
+                servers: state.servers,
+                snapshot: state.serverOrganization
+            )
+        }
+
+        XCTAssertEqual(bridge.addServerCallCount, 1)
+        XCTAssertEqual(bridge.movedServerFolders, [nil])
+        XCTAssertEqual(persistence.savedServerId, "persisted")
+        XCTAssertEqual(persistence.selectedTagIds, ["old"])
+
+        _ = try await state.saveServer(
+            .fixture(folderId: nil),
+            tagIds: Array(persistence.selectedTagIds),
+            editingId: persistence.targetServerId(fallback: nil)
+        )
+
+        XCTAssertEqual(bridge.addServerCallCount, 1)
+        XCTAssertEqual(bridge.updateServerCallCount, 1)
+        XCTAssertEqual(bridge.movedServerFolders, [nil, nil])
+    }
+
+    func testEditingServerToUncategorizedUsesExplicitMoveAndReloadsRecord() async throws {
+        let bridge = FakeServerWorkspaceBridge(
+            savedServer: .fixture(id: "persisted", folderId: nil)
+        )
+        let state = AppState(workspaceBridge: bridge)
+
+        let saved = try await state.saveServer(
+            .fixture(folderId: nil),
+            tagIds: [],
+            editingId: "persisted"
+        )
+
+        XCTAssertEqual(saved.folder_id, nil)
+        XCTAssertEqual(bridge.addServerCallCount, 0)
+        XCTAssertEqual(bridge.updateServerCallCount, 1)
+        XCTAssertEqual(bridge.movedServerFolders, [nil])
+        XCTAssertEqual(state.servers.first?.folder_id, nil)
+    }
+
+    func testSnapshotRefreshFailureKeepsSavedIdentityAndRecoversAuthoritativeTags() async {
+        let initialOrganizationLoaded = expectation(description: "initial organization loaded")
+        let bridge = FakeServerWorkspaceBridge(
+            savedServer: .fixture(id: "persisted", folderId: nil),
+            organization: .init(
+                folders: [],
+                tags: [.fixture(id: "new", name: "新标签")],
+                tag_links: []
+            ),
+            initialOrganizationLoaded: initialOrganizationLoaded
+        )
+        let state = AppState(workspaceBridge: bridge)
+        await fulfillment(of: [initialOrganizationLoaded], timeout: 1)
+        bridge.failNextOrganizationRefresh()
+        var persistence = ServerDialogPersistence()
+
+        do {
+            _ = try await state.saveServer(.fixture(folderId: nil), tagIds: ["new"], editingId: nil)
+            XCTFail("Expected the post-save snapshot refresh to fail")
+        } catch let failure as ServerSaveFailure {
+            persistence.bind(
+                serverId: failure.serverId,
+                servers: state.servers,
+                snapshot: state.serverOrganization
+            )
+        } catch {
+            XCTFail("Expected ServerSaveFailure, got \(error)")
+        }
+
+        XCTAssertEqual(persistence.savedServerId, "persisted")
+        XCTAssertEqual(persistence.selectedTagIds, ["new"])
+        XCTAssertEqual(bridge.addServerCallCount, 1)
+        XCTAssertEqual(bridge.updateServerCallCount, 0)
+    }
+
     func testFolderDropValidationRejectsCyclesAndDepthOverflow() {
         let tree = ServerTreeProjection(snapshot: .threeLevelFixture(), servers: [])
 
@@ -445,6 +570,8 @@ final class ServerWorkspaceStateTests: XCTestCase {
 
 private enum FakeError: Error, Equatable {
     case promotionFailed
+    case tagReplacementFailed
+    case snapshotRefreshFailed
 }
 
 private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
@@ -467,6 +594,16 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private(set) var promotedInput: PromoteTemporaryServerInput?
     private(set) var promotionCallCount = 0
     private(set) var disconnectedSessionIds: [String] = []
+    private(set) var addServerCallCount = 0
+    private(set) var updateServerCallCount = 0
+    private(set) var movedServerFolders: [String?] = []
+
+    private let savedServer: Server
+    private var organization: ServerOrganizationSnapshot
+    private var setTagErrors: [Error]
+    private let initialOrganizationLoaded: XCTestExpectation?
+    private var organizationCallCount = 0
+    private var failNextOrganization = false
 
     init(
         temporarySessionId: String = "temporary-session",
@@ -477,7 +614,11 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         promotionStarted: XCTestExpectation? = nil,
         promotionSuspendCall: Int = 1,
         spawnStarted: XCTestExpectation? = nil,
-        disconnected: XCTestExpectation? = nil
+        disconnected: XCTestExpectation? = nil,
+        savedServer: Server = .fixture(),
+        organization: ServerOrganizationSnapshot = .empty,
+        setTagErrors: [Error] = [],
+        initialOrganizationLoaded: XCTestExpectation? = nil
     ) {
         self.temporarySessionId = temporarySessionId
         self.promotedServer = promotedServer
@@ -487,10 +628,75 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         self.promotionSuspendCall = promotionSuspendCall
         self.spawnStarted = spawnStarted
         self.disconnected = disconnected
+        self.savedServer = savedServer
+        self.organization = organization
+        self.setTagErrors = setTagErrors
+        self.initialOrganizationLoaded = initialOrganizationLoaded
     }
 
     func listServerOrganizationAsync() async throws -> ServerOrganizationSnapshot {
-        .init(folders: [], tags: [], tag_links: [])
+        organizationCallCount += 1
+        if organizationCallCount == 1 { initialOrganizationLoaded?.fulfill() }
+        if failNextOrganization {
+            failNextOrganization = false
+            throw FakeError.snapshotRefreshFailed
+        }
+        return organization
+    }
+
+    func listServers() throws -> [Server] { [savedServer] }
+
+    func addServer(input: ServerInput) throws -> Server {
+        addServerCallCount += 1
+        return savedServer
+    }
+
+    func updateServer(id: String, input: ServerInput) throws -> Server {
+        updateServerCallCount += 1
+        return savedServer
+    }
+
+    func moveServerAsync(serverId: String, folderId: String?) async throws {
+        movedServerFolders.append(folderId)
+    }
+
+    func setServerTagsAsync(serverId: String, tagIds: [String]) async throws {
+        if !setTagErrors.isEmpty { throw setTagErrors.removeFirst() }
+        organization = .init(
+            folders: organization.folders,
+            tags: organization.tags,
+            tag_links: tagIds.map { .init(server_id: serverId, tag_id: $0) }
+        )
+    }
+
+    func failNextOrganizationRefresh() {
+        failNextOrganization = true
+    }
+
+    func createServerFolderAsync(input: FolderInput) async throws -> ServerFolder {
+        .fixture(id: "folder", name: input.name, parentId: input.parent_id, sortOrder: input.sort_order ?? 0)
+    }
+
+    func renameServerFolderAsync(id: String, input: FolderInput) async throws -> ServerFolder {
+        .fixture(id: id, name: input.name, parentId: input.parent_id, sortOrder: input.sort_order ?? 0)
+    }
+
+    func moveServerFolderAsync(id: String, input: FolderMoveInput) async throws -> ServerFolder {
+        .fixture(id: id, name: id, parentId: input.parent_id, sortOrder: input.sort_order)
+    }
+
+    func deleteServerFolderAsync(id: String, input: FolderDeleteInput) async throws {}
+
+    func createServerTagAsync(name: String) async throws -> ServerTag {
+        .fixture(id: "tag", name: name)
+    }
+
+    func setServerPinAsync(
+        serverId: String,
+        isPinned: Bool,
+        pinOrder: Int64?
+    ) async throws -> Server {
+        savedServer
     }
 
     func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String {
@@ -649,6 +855,27 @@ private extension ServerTag {
             normalized_name: name.lowercased(),
             created_at: "2026-08-07T00:00:00Z",
             updated_at: "2026-08-07T00:00:00Z"
+        )
+    }
+}
+
+private extension ServerInput {
+    static func fixture(folderId: String?) -> Self {
+        .init(
+            name: "Saved host",
+            host: "10.0.0.1",
+            port: 22,
+            group_name: nil,
+            auth_type: "password",
+            username: "alice",
+            password: "secret",
+            private_key: nil,
+            key_source: "content",
+            key_file_path: nil,
+            key_passphrase: nil,
+            credential_group_id: nil,
+            jump_server_id: nil,
+            folder_id: folderId
         )
     }
 }

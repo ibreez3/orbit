@@ -512,7 +512,7 @@ struct ServerNodeRow: View {
             Menu("移动到") {
                 Button("未分类") { appState.moveServer(server, toFolderId: nil) }
                 ForEach(appState.serverOrganization.folders.sorted(by: folderOrder)) { folder in
-                    Button(folder.name) { appState.moveServer(server, toFolderId: folder.id) }
+                    Button(folderPath(folder)) { appState.moveServer(server, toFolderId: folder.id) }
                 }
             }
             Divider()
@@ -523,6 +523,13 @@ struct ServerNodeRow: View {
     private func folderOrder(_ lhs: ServerFolder, _ rhs: ServerFolder) -> Bool {
         if lhs.sort_order != rhs.sort_order { return lhs.sort_order < rhs.sort_order }
         return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+    }
+
+    private func folderPath(_ folder: ServerFolder) -> String {
+        ServerTreeProjection(
+            snapshot: appState.serverOrganization,
+            servers: []
+        ).path(forFolderId: folder.id) ?? folder.name
     }
 }
 

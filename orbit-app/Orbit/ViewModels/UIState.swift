@@ -45,6 +45,7 @@ final class UIState: ObservableObject {
     @Published var assetTreeCollapsed: Bool
     @Published var assetTreeSearchQuery = ""
     @Published var selectedServerSystemView: ServerSystemView = .all
+    @Published var selectedServerTagId: String?
     @Published var recentServers: [String] = []
     @Published var alertMessage: String?
     @Published var alertTitle: String = ""

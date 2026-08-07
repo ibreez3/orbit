@@ -17,6 +17,7 @@ struct ServerDialog: View {
     @State private var testResult: String?
     @State private var saving = false
     @State private var selectedTagIds: Set<String> = []
+    @State private var persistence = ServerDialogPersistence()
     @State private var newTagName = ""
     @State private var saveError: String?
 
@@ -30,24 +31,13 @@ struct ServerDialog: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             if let server = inventoryState.editingServer {
-                form = ServerInput(
-                    name: server.name, host: server.host, port: server.port,
-                    group_name: nil,
-                    auth_type: server.auth_type, username: server.username,
-                    password: server.password.isEmpty ? nil : server.password,
-                    private_key: server.private_key.isEmpty ? nil : server.private_key,
-                    key_source: server.key_source.isEmpty ? "content" : server.key_source,
-                    key_file_path: server.key_file_path.isEmpty ? nil : server.key_file_path,
-                    key_passphrase: server.key_passphrase.isEmpty ? nil : server.key_passphrase,
-                    credential_group_id: server.credential_group_id.isEmpty ? nil : server.credential_group_id,
-                    jump_server_id: server.jump_server_id.isEmpty ? nil : server.jump_server_id,
-                    folder_id: server.folder_id
+                persistence.bind(
+                    serverId: server.id,
+                    servers: inventoryState.servers,
+                    snapshot: appState.serverOrganization
                 )
-                selectedTagIds = Set(
-                    appState.serverOrganization.tag_links
-                        .filter { $0.server_id == server.id }
-                        .map(\.tag_id)
-                )
+                applyAuthoritativeServer(server)
+                selectedTagIds = persistence.selectedTagIds
             } else if let defaults = inventoryState.dialogDefaults {
                 form = defaults
                 form.group_name = nil
@@ -57,7 +47,7 @@ struct ServerDialog: View {
 
     private var header: some View {
         HStack {
-            Text(inventoryState.editingServer != nil ? "编辑服务器" : "添加服务器")
+            Text(targetServerId != nil ? "编辑服务器" : "添加服务器")
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
             Button(action: { dismiss() }) {
@@ -119,12 +109,10 @@ struct ServerDialog: View {
 
             Spacer()
 
-            if inventoryState.editingServer != nil {
+            if let serverId = targetServerId {
                 Button("删除", role: .destructive) {
-                    if let server = inventoryState.editingServer {
-                        appState.deleteServer(server.id)
-                        dismiss()
-                    }
+                    appState.deleteServer(serverId)
+                    dismiss()
                 }
             }
 
@@ -425,6 +413,9 @@ struct ServerDialog: View {
     }
 
     private var useCg: Bool { form.credential_group_id != nil }
+    private var targetServerId: String? {
+        persistence.targetServerId(fallback: inventoryState.editingServer?.id)
+    }
     private var selectedCg: CredentialGroup? {
         guard let id = form.credential_group_id else { return nil }
         return inventoryState.credentialGroups.first(where: { $0.id == id })
@@ -492,11 +483,25 @@ struct ServerDialog: View {
                 _ = try await appState.saveServer(
                     form,
                     tagIds: selectedTagIds.sorted(),
-                    editingId: inventoryState.editingServer?.id
+                    editingId: targetServerId
                 )
                 await MainActor.run {
                     saving = false
                     dismiss()
+                }
+            } catch let failure as ServerSaveFailure {
+                await MainActor.run {
+                    persistence.bind(
+                        serverId: failure.serverId,
+                        servers: appState.servers,
+                        snapshot: appState.serverOrganization
+                    )
+                    if let savedServer = persistence.savedServer {
+                        applyAuthoritativeServer(savedServer)
+                    }
+                    selectedTagIds = persistence.selectedTagIds
+                    saving = false
+                    saveError = "保存服务器失败：\(failure.localizedDescription)"
                 }
             } catch {
                 await MainActor.run {
@@ -505,6 +510,25 @@ struct ServerDialog: View {
                 }
             }
         }
+    }
+
+    private func applyAuthoritativeServer(_ server: Server) {
+        form = ServerInput(
+            name: server.name,
+            host: server.host,
+            port: server.port,
+            group_name: nil,
+            auth_type: server.auth_type,
+            username: server.username,
+            password: server.password.isEmpty ? nil : server.password,
+            private_key: server.private_key.isEmpty ? nil : server.private_key,
+            key_source: server.key_source.isEmpty ? "content" : server.key_source,
+            key_file_path: server.key_file_path.isEmpty ? nil : server.key_file_path,
+            key_passphrase: server.key_passphrase.isEmpty ? nil : server.key_passphrase,
+            credential_group_id: server.credential_group_id.isEmpty ? nil : server.credential_group_id,
+            jump_server_id: server.jump_server_id.isEmpty ? nil : server.jump_server_id,
+            folder_id: server.folder_id
+        )
     }
 
     private func toggleButtonStyle(isActive: Bool) -> some ButtonStyle {
