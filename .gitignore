@@ -23,6 +23,7 @@ dist/
 Orbit.app/
 release/
 .claude/
+.worktrees/
 build/
 *.dmg
 *.zip
