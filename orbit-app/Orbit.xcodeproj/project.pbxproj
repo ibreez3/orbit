@@ -15,6 +15,8 @@
 		0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7C11206A070E05D66487CD /* SessionToolDockView.swift */; };
 		0FB0DFBB67F6C3A9AA63CEF0 /* AIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AC453107209B6B7049D5CA /* AIState.swift */; };
 		1062C1837AEDF5F4036823C8 /* QuickTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DD037D568D1130F776EA29 /* QuickTerminal.swift */; };
+		189F64B9A12BCB0C087A72BD /* TemporaryConnectionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F10DE289871AF61C037B71D /* TemporaryConnectionPanel.swift */; };
+		1E63C225E7A9F5E72D019DCF /* ServerQuickConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */; };
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		277D07614AF08EA716071858 /* SnippetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E598CB14BB36E079220CE3C /* SnippetEditorView.swift */; };
 		2F169B27AC1ECA61187A4C2C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */; };
@@ -102,6 +104,7 @@
 		3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingToolCard.swift; sourceTree = "<group>"; };
 		3A329973670FE763965019E7 /* OrbitTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitTerminalView.swift; sourceTree = "<group>"; };
 		3E211E0FB4CACF3E509DF3AD /* ServerWorkspaceStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerWorkspaceStateTests.swift; sourceTree = "<group>"; };
+		3F10DE289871AF61C037B71D /* TemporaryConnectionPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryConnectionPanel.swift; sourceTree = "<group>"; };
 		3FADD919EE5ECC5150989E91 /* dracula.orbit-theme */ = {isa = PBXFileReference; path = "dracula.orbit-theme"; sourceTree = "<group>"; };
 		452C79E5111500BF24C41C53 /* SpotlightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightView.swift; sourceTree = "<group>"; };
 		45A2E5B671212BFF1F59E2FA /* light.orbit-theme */ = {isa = PBXFileReference; path = "light.orbit-theme"; sourceTree = "<group>"; };
@@ -133,6 +136,7 @@
 		B24FD058B7D00E7C9D29DA78 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		B501D9CF2A7FD9520D50F015 /* SnippetState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetState.swift; sourceTree = "<group>"; };
 		B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */ = {isa = PBXFileReference; path = "catppuccin-mocha.orbit-theme"; sourceTree = "<group>"; };
+		BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerQuickConnectView.swift; sourceTree = "<group>"; };
 		C9A251128C8C2F5D900FF058 /* solarized-dark.orbit-theme */ = {isa = PBXFileReference; path = "solarized-dark.orbit-theme"; sourceTree = "<group>"; };
 		CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseConnectionDialog.swift; sourceTree = "<group>"; };
@@ -260,6 +264,7 @@
 				3A329973670FE763965019E7 /* OrbitTerminalView.swift */,
 				57DD037D568D1130F776EA29 /* QuickTerminal.swift */,
 				E812A16C099009B7BB010371 /* ServerDialog.swift */,
+				BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */,
 				8D7C11206A070E05D66487CD /* SessionToolDockView.swift */,
 				D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
@@ -271,6 +276,7 @@
 				452C79E5111500BF24C41C53 /* SpotlightView.swift */,
 				0773DA574B3B4BD620488CE0 /* StatusBarView.swift */,
 				F86934760741D5FA928C8E48 /* TabBarView.swift */,
+				3F10DE289871AF61C037B71D /* TemporaryConnectionPanel.swift */,
 				CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */,
 				1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */,
 			);
@@ -427,6 +433,7 @@
 				F71C69B4875E03688CF85C57 /* OrbitTerminalView.swift in Sources */,
 				1062C1837AEDF5F4036823C8 /* QuickTerminal.swift in Sources */,
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
+				1E63C225E7A9F5E72D019DCF /* ServerQuickConnectView.swift in Sources */,
 				660C9D142C35B06F1C55B5AB /* ServerWorkspaceModels.swift in Sources */,
 				0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */,
 				0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */,
@@ -442,6 +449,7 @@
 				CD6B6211AA058507413B987F /* StatusBarView.swift in Sources */,
 				3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */,
 				CBCE70CFCE9E50623D0D1F52 /* TabState.swift in Sources */,
+				189F64B9A12BCB0C087A72BD /* TemporaryConnectionPanel.swift in Sources */,
 				82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */,
 				9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */,
 				65E634D64926AEFC05F1E0EC /* ThemeState.swift in Sources */,

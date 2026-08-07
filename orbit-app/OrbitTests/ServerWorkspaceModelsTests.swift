@@ -2,6 +2,101 @@ import XCTest
 @testable import Orbit
 
 final class ServerWorkspaceModelsTests: XCTestCase {
+    func testAddressParserSupportsDefaultsAndBracketedIPv6() throws {
+        XCTAssertEqual(
+            try ServerAddressParser.parse("host").get(),
+            .init(host: "host", port: 22, username: nil)
+        )
+        XCTAssertEqual(
+            try ServerAddressParser.parse("alice@host:2202").get(),
+            .init(host: "host", port: 2202, username: "alice")
+        )
+        XCTAssertEqual(
+            try ServerAddressParser.parse("alice@[2001:db8::10]:22").get(),
+            .init(host: "2001:db8::10", port: 22, username: "alice")
+        )
+    }
+
+    func testAddressParserRejectsEmptyAmbiguousAndInvalidAddresses() {
+        let invalid = [
+            "",
+            "   ",
+            "@host",
+            "alice@",
+            "alice@@host",
+            "host name",
+            "host:",
+            "host:0",
+            "host:65536",
+            "host:not-a-port",
+            "[2001:db8::10]",
+            "[not::ipv6]:22",
+            "2001:db8::10:22",
+        ]
+
+        for address in invalid {
+            XCTAssertThrowsError(
+                try ServerAddressParser.parse(address).get(),
+                "Expected \(address.debugDescription) to be rejected"
+            )
+        }
+    }
+
+    func testServerSearchUsesApprovedFieldsAndDeterministicRanking() {
+        let servers = [
+            Server.fixture(id: "exact", name: "prod", host: "exact.example"),
+            Server.fixture(id: "name-prefix", name: "Production", host: "name.example"),
+            Server.fixture(id: "host-prefix", name: "Host match", host: "prod.example"),
+            Server.fixture(id: "folder", name: "Zulu", host: "folder.example", folderId: "folder-prod"),
+            Server.fixture(id: "tag", name: "Beta", host: "tag.example"),
+            Server.fixture(
+                id: "forbidden",
+                name: "Gamma",
+                host: "forbidden.example",
+                groupName: "prod",
+                username: "prod"
+            ),
+        ]
+        let organization = ServerOrganizationSnapshot(
+            folders: [ServerFolder.fixture(id: "folder-prod", name: "Prod Folder")],
+            tags: [ServerTag.fixture(id: "tag-prod", name: "prod")],
+            tag_links: [.init(server_id: "tag", tag_id: "tag-prod")]
+        )
+
+        let results = ServerSearchIndex(
+            servers: servers,
+            organization: organization
+        ).search("prod")
+
+        XCTAssertEqual(
+            results.map(\.server.id),
+            ["exact", "name-prefix", "host-prefix", "tag", "folder"]
+        )
+        XCTAssertEqual(results.first(where: { $0.server.id == "folder" })?.folderPath, "Prod Folder")
+        XCTAssertEqual(results.first(where: { $0.server.id == "tag" })?.tags, ["prod"])
+        XCTAssertFalse(results.contains(where: { $0.server.id == "forbidden" }))
+    }
+
+    func testServerSearchMatchesNestedFolderPathAndHostSubstring() {
+        let servers = [
+            Server.fixture(id: "nested", name: "Nested", host: "nested.example", folderId: "child"),
+            Server.fixture(id: "host", name: "Host substring", host: "edge.prod.internal"),
+        ]
+        let organization = ServerOrganizationSnapshot(
+            folders: [
+                ServerFolder.fixture(id: "root", name: "Operations"),
+                ServerFolder.fixture(id: "child", name: "Production", parentId: "root"),
+            ],
+            tags: [],
+            tag_links: []
+        )
+        let index = ServerSearchIndex(servers: servers, organization: organization)
+
+        XCTAssertEqual(index.search("operations/production").map(\.server.id), ["nested"])
+        XCTAssertEqual(index.search("prod.internal").map(\.server.id), ["host"])
+        XCTAssertTrue(index.search("   ").isEmpty)
+    }
+
     func testServerDecodesOrganizationAndConnectionFields() throws {
         let server = try JSONDecoder().decode(Server.self, from: Data(serverJSON.utf8))
 
@@ -174,6 +269,69 @@ final class ServerWorkspaceModelsTests: XCTestCase {
       ]
     }
     """#
+}
+
+private extension Server {
+    static func fixture(
+        id: String,
+        name: String,
+        host: String,
+        folderId: String? = nil,
+        groupName: String = "",
+        username: String = "alice"
+    ) -> Self {
+        .init(
+            id: id,
+            name: name,
+            host: host,
+            port: 22,
+            group_name: groupName,
+            auth_type: "password",
+            username: username,
+            password: "",
+            private_key: "",
+            key_source: "content",
+            key_file_path: "",
+            key_passphrase: "",
+            credential_group_id: "",
+            jump_server_id: "",
+            folder_id: folderId,
+            is_pinned: false,
+            pin_order: nil,
+            last_connected_at: nil,
+            last_attempted_at: nil,
+            last_connection_result: nil,
+            last_connection_error: nil,
+            created_at: "2026-08-07T00:00:00Z",
+            updated_at: "2026-08-07T00:00:00Z"
+        )
+    }
+}
+
+private extension ServerFolder {
+    static func fixture(id: String, name: String, parentId: String? = nil) -> Self {
+        .init(
+            id: id,
+            name: name,
+            normalized_name: name.lowercased(),
+            parent_id: parentId,
+            sort_order: 0,
+            created_at: "2026-08-07T00:00:00Z",
+            updated_at: "2026-08-07T00:00:00Z"
+        )
+    }
+}
+
+private extension ServerTag {
+    static func fixture(id: String, name: String) -> Self {
+        .init(
+            id: id,
+            name: name,
+            normalized_name: name.lowercased(),
+            created_at: "2026-08-07T00:00:00Z",
+            updated_at: "2026-08-07T00:00:00Z"
+        )
+    }
 }
 
 private extension TemporaryConnectionDraft {

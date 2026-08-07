@@ -19,6 +19,7 @@ class AppState: ObservableObject {
 
     @Published var databaseConnectionDialogOpen: Bool = false
     @Published private var databasePanelInvalidationTokens: [String: Int] = [:]
+    @Published private(set) var serverOrganization = ServerOrganizationSnapshot.empty
 
     var tabs: [TabItem] {
         get { tabState.tabs }
@@ -328,6 +329,7 @@ class AppState: ObservableObject {
         self.inventoryState = InventoryState(bridge: workspaceBridge)
         ThemeManager.shared.loadThemes()
         loadServers()
+        loadServerOrganization()
         loadCredentialGroups()
         loadDatabaseConnections()
         loadDatabaseBackupRecords()
@@ -349,6 +351,20 @@ class AppState: ObservableObject {
                 await MainActor.run {
                     alertTitle = "加载失败"
                     alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func loadServerOrganization() {
+        Task {
+            do {
+                let result = try await workspaceBridge.listServerOrganizationAsync()
+                await MainActor.run { self.serverOrganization = result }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载服务器目录与标签: \(error.localizedDescription)"
                 }
             }
         }
@@ -785,7 +801,10 @@ class AppState: ObservableObject {
     }
 
     @discardableResult
-    func addTemporaryTerminalTab(draft: TemporaryConnectionDraft) -> String {
+    func addTemporaryTerminalTab(
+        draft: TemporaryConnectionDraft,
+        sessionId: String? = nil
+    ) -> String {
         let id = "temporary-\(UUID().uuidString)"
         let name = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = name.isEmpty ? draft.host : name
@@ -795,7 +814,9 @@ class AppState: ObservableObject {
             serverId: nil,
             connectionTarget: .temporary(tabId: id),
             serverName: displayName,
-            title: "SSH: \(displayName)"
+            title: "SSH: \(displayName)",
+            sessionId: sessionId,
+            focusedChannelId: sessionId
         )
         tabState.temporaryDrafts[id] = draft
         tabState.temporaryTabTokens[id] = UUID()
@@ -861,6 +882,179 @@ class AppState: ObservableObject {
             servers.append(server)
         }
         loadServers()
+        loadServerOrganization()
+    }
+
+    func focusServerQuickConnect() {
+        guard uiState.temporaryConnectionDraft == nil else { return }
+        uiState.serverQuickConnectInputFocused = true
+        uiState.serverQuickConnectResultsVisible = !uiState.serverQuickConnectQuery.isEmpty
+    }
+
+    func closeServerQuickConnect(clearQuery: Bool = true) {
+        uiState.serverQuickConnectResultsVisible = false
+        uiState.serverQuickConnectInputFocused = false
+        if clearQuery {
+            uiState.serverQuickConnectQuery = ""
+        }
+        restoreActiveTerminalFocus()
+    }
+
+    func presentTemporaryConnectionPanel(address: ParsedServerAddress) {
+        uiState.temporaryConnectionToken = UUID()
+        uiState.temporaryConnectionDraft = TemporaryConnectionDraft(
+            host: address.host,
+            port: address.port,
+            username: address.username ?? "",
+            authType: "password"
+        )
+        uiState.serverQuickConnectResultsVisible = false
+        uiState.serverQuickConnectInputFocused = false
+    }
+
+    func dismissTemporaryConnectionPanel(returnToSearch: Bool = true) {
+        uiState.temporaryConnectionToken = nil
+        if var draft = uiState.temporaryConnectionDraft {
+            draft.clearSecrets()
+            uiState.temporaryConnectionDraft = draft
+        }
+        uiState.temporaryConnectionDraft = nil
+        uiState.serverQuickConnectResultsVisible = returnToSearch
+            && !uiState.serverQuickConnectQuery.isEmpty
+        uiState.serverQuickConnectInputFocused = returnToSearch
+        if !returnToSearch {
+            uiState.serverQuickConnectQuery = ""
+            restoreActiveTerminalFocus()
+        }
+    }
+
+    func submitTemporaryConnection() {
+        guard let token = uiState.temporaryConnectionToken,
+              var draft = uiState.temporaryConnectionDraft,
+              !draft.isConnecting else { return }
+
+        if let validationError = temporaryConnectionValidationError(draft) {
+            draft.validationError = validationError
+            draft.connectionError = nil
+            uiState.temporaryConnectionDraft = draft
+            return
+        }
+
+        draft.validationError = nil
+        draft.connectionError = nil
+        draft.isConnecting = true
+        uiState.temporaryConnectionDraft = draft
+        let submittedDraft = draft
+
+        Task {
+            do {
+                let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
+                    input: submittedDraft.connectionInput
+                )
+                await MainActor.run {
+                    guard uiState.temporaryConnectionToken == token,
+                          uiState.temporaryConnectionDraft != nil else {
+                        Task { try? await workspaceBridge.disconnectSSHAsync(sessionId: sessionId) }
+                        return
+                    }
+
+                    var tabDraft = submittedDraft
+                    tabDraft.isConnecting = false
+                    tabDraft.validationError = nil
+                    tabDraft.connectionError = nil
+                    let tabId = addTemporaryTerminalTab(
+                        draft: tabDraft,
+                        sessionId: sessionId
+                    )
+                    dismissTemporaryConnectionPanel(returnToSearch: false)
+
+                    if tabDraft.saveToAssets {
+                        Task {
+                            do {
+                                _ = try await promoteTemporaryTab(
+                                    tabId: tabId,
+                                    sessionId: sessionId
+                                )
+                            } catch {
+                                await MainActor.run {
+                                    activeTabError = "服务器已连接，但保存失败: \(error.localizedDescription)"
+                                }
+                            }
+                        }
+                    }
+
+                    restoreActiveTerminalFocus()
+                }
+            } catch {
+                await MainActor.run {
+                    guard uiState.temporaryConnectionToken == token,
+                          var currentDraft = uiState.temporaryConnectionDraft else { return }
+                    currentDraft.isConnecting = false
+                    currentDraft.connectionError = error.localizedDescription
+                    uiState.temporaryConnectionDraft = currentDraft
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func handleEscape() -> Bool {
+        if uiState.temporaryConnectionDraft != nil {
+            dismissTemporaryConnectionPanel()
+            return true
+        }
+        if uiState.serverQuickConnectResultsVisible {
+            uiState.serverQuickConnectResultsVisible = false
+            return true
+        }
+        if uiState.serverQuickConnectInputFocused {
+            uiState.serverQuickConnectInputFocused = false
+            restoreActiveTerminalFocus()
+            return true
+        }
+        return false
+    }
+
+    func restoreActiveTerminalFocus() {
+        guard let activeTabId,
+              let tab = tabs.first(where: { $0.id == activeTabId }),
+              tab.type == .terminal,
+              let sessionId = tab.focusedChannelId ?? tab.sessionId,
+              let terminalView = OrbitBridge.shared.terminalView(for: sessionId) as? OrbitTerminalView else {
+            return
+        }
+        terminalView.window?.makeFirstResponder(terminalView)
+    }
+
+    private func temporaryConnectionValidationError(_ draft: TemporaryConnectionDraft) -> String? {
+        if draft.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请输入主机地址"
+        }
+        if draft.port == 0 {
+            return "端口必须在 1 到 65535 之间"
+        }
+        if draft.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请输入用户名"
+        }
+        if draft.credentialGroupId == nil {
+            if draft.authType == "password",
+               draft.password.isEmpty {
+                return "请输入密码"
+            }
+            if draft.authType == "key" {
+                if draft.keySource == "file", draft.keyFilePath.isEmpty {
+                    return "请选择私钥文件"
+                }
+                if draft.keySource != "file", draft.privateKey.isEmpty {
+                    return "请输入私钥内容"
+                }
+            }
+        }
+        if draft.saveToAssets,
+           draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请输入服务器名称"
+        }
+        return nil
     }
 
     func addTab(server: Server, type: TabType) {

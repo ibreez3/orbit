@@ -84,12 +84,12 @@ struct MainView: View {
 
         return base
             .onExitCommand {
-                if toolState.activeTool?.tool != .ai {
+                if !appState.handleEscape(), toolState.activeTool?.tool != .ai {
                     appState.closeOverlayTool()
                 }
             }
-            .onReceive(nc(.newTerminal)) { _ in appState.openSpotlight() }
-            .onReceive(nc(.openSpotlight)) { _ in appState.openSpotlight() }
+            .onReceive(nc(.newTerminal)) { _ in appState.focusServerQuickConnect() }
+            .onReceive(nc(.openSpotlight)) { _ in appState.focusServerQuickConnect() }
             .onReceive(nc(.splitHorizontal)) { _ in appState.splitCurrentPane(direction: .horizontal) }
             .onReceive(nc(.splitVertical)) { _ in appState.splitCurrentPane(direction: .vertical) }
             .onReceive(nc(.closePane)) { _ in appState.closeCurrentPane() }
@@ -115,6 +115,72 @@ struct MainView: View {
     }
 
     private var mainLayout: some View {
+        VStack(spacing: 0) {
+            globalBar
+                .zIndex(20)
+            Divider()
+            workspaceLayout
+                .zIndex(0)
+        }
+    }
+
+    private var globalBar: some View {
+        ViewThatFits(in: .horizontal) {
+            globalBarContent(showTitle: true, minimumInputWidth: 500)
+            globalBarContent(showTitle: false, minimumInputWidth: 500)
+            globalBarContent(showTitle: false, minimumInputWidth: 280)
+        }
+        .frame(height: 40)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private func globalBarContent(
+        showTitle: Bool,
+        minimumInputWidth: CGFloat
+    ) -> some View {
+        HStack(spacing: 10) {
+            if showTitle {
+                Text("SSH 工作台")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+
+            Spacer(minLength: 0)
+
+            ServerQuickConnectView(appState: appState)
+                .frame(minWidth: minimumInputWidth, idealWidth: 500, maxWidth: 500)
+                .layoutPriority(2)
+
+            Spacer(minLength: 0)
+
+            Menu {
+                Button("添加服务器") { appState.openDialog() }
+                Button("新建凭据组") { appState.openCgDialog() }
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 24, height: 24)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("新增")
+            .accessibilityLabel("新增")
+
+            Button {
+                SettingsWindowController.shared.open(with: appState)
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("设置")
+            .accessibilityLabel("设置")
+        }
+        .padding(.horizontal, 10)
+    }
+
+    private var workspaceLayout: some View {
         HStack(spacing: 0) {
             AssetTreeView(appState: appState)
                 .frame(width: uiState.assetTreeWidth)
