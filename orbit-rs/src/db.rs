@@ -633,7 +633,10 @@ impl Database {
             params_from_iter(folder_ids.iter()),
             |row| row.get(0),
         )?;
-        if server_count > 0 && destination_folder_id.is_none() && !delete_servers {
+        if (server_count > 0 || folder_ids.len() > 1)
+            && destination_folder_id.is_none()
+            && !delete_servers
+        {
             bail!("非空文件夹必须选择移动服务器或删除服务器");
         }
 

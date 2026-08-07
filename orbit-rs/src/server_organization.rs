@@ -200,6 +200,20 @@ mod tests {
     }
 
     #[test]
+    fn folder_with_descendants_requires_explicit_content_disposition() {
+        let db = test_db();
+        let source = db.create_server_folder(&folder("source", None)).unwrap();
+        let child = db
+            .create_server_folder(&folder("child", Some(&source.id)))
+            .unwrap();
+
+        assert!(db.delete_server_folder(&source.id, None, false).is_err());
+        let folders = db.server_organization().unwrap().folders;
+        assert!(folders.iter().any(|folder| folder.id == source.id));
+        assert!(folders.iter().any(|folder| folder.id == child.id));
+    }
+
+    #[test]
     fn tags_are_global_and_server_links_are_replaced() {
         let db = seeded_server_db();
         let server_id = only_server_id(&db);
