@@ -22,7 +22,7 @@ use crate::sftp;
 use crate::sftp::SftpManager;
 use crate::ssh;
 use crate::{init_logging, OrbitApp};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub type OrbitDataCallback = extern "C" fn(*const c_char, *const u8, usize, *mut c_void);
 pub type OrbitClosedCallback = extern "C" fn(*const c_char, *mut c_void);
@@ -851,6 +851,40 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
     }
 }
 
+fn record_connection_attempt(app: &OrbitApp, server_id: &str) {
+    if let Err(error) = app.db.mark_connection_attempt(server_id) {
+        warn!(server_id, error = %error, "记录 SSH 连接尝试失败");
+    }
+}
+
+fn record_connection_success(app: &OrbitApp, server_id: &str) {
+    if let Err(error) = app.db.mark_connection_success(server_id) {
+        warn!(server_id, error = %error, "记录 SSH 连接成功失败");
+    }
+}
+
+fn record_connection_failure(
+    app: &OrbitApp,
+    server_id: &str,
+    error: impl std::fmt::Display,
+) -> String {
+    let summary = crate::db::sanitize_connection_error(&error.to_string());
+    if let Err(write_error) = app.db.mark_connection_failure(server_id, &summary) {
+        warn!(server_id, error = %write_error, "记录 SSH 连接失败失败");
+    }
+    summary
+}
+
+fn fail_connection(
+    app: &OrbitApp,
+    server_id: &str,
+    status: i32,
+    error: impl std::fmt::Display,
+) -> i32 {
+    app.set_error(record_connection_failure(app, server_id, error));
+    status
+}
+
 #[no_mangle]
 pub extern "C" fn orbit_connect_ssh(
     app: *mut OrbitApp,
@@ -872,11 +906,16 @@ pub extern "C" fn orbit_connect_ssh(
             return -2;
         }
     };
+    record_connection_attempt(app, sid_str);
     let server = match app.db.get_server(sid_str) {
         Ok(s) => s,
         Err(e) => {
-            app.set_error(format!("服务器配置不存在或读取失败: {}", e));
-            return -3;
+            return fail_connection(
+                app,
+                sid_str,
+                -3,
+                format!("服务器配置不存在或读取失败: {}", e),
+            );
         }
     };
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -887,7 +926,7 @@ pub extern "C" fn orbit_connect_ssh(
     let reused = {
         let mut mgr = match app.ssh.lock() {
             Ok(m) => m,
-            Err(_) => return -4,
+            Err(e) => return fail_connection(app, sid_str, -4, e),
         };
         mgr.take_idle_session(sid_str)
     };
@@ -912,7 +951,7 @@ pub extern "C" fn orbit_connect_ssh(
         let channel_result = {
             let _lock = match session_lock.lock() {
                 Ok(l) => l,
-                Err(_) => return -6,
+                Err(e) => return fail_connection(app, sid_str, -6, e),
             };
             guard.session.set_blocking(true);
             let result: anyhow::Result<ssh2::Channel> = (|| {
@@ -940,7 +979,7 @@ pub extern "C" fn orbit_connect_ssh(
                     Ok(active_channel) => {
                         let mut mgr = match app.ssh.lock() {
                             Ok(m) => m,
-                            Err(_) => return -4,
+                            Err(e) => return fail_connection(app, sid_str, -4, e),
                         };
                         mgr.register_session(
                             &session_id,
@@ -951,12 +990,16 @@ pub extern "C" fn orbit_connect_ssh(
                         );
                         let c_id = CString::new(sid_for_cb).unwrap_or_default();
                         unsafe { *out_session_id = c_id.into_raw() };
+                        record_connection_success(app, sid_str);
                         return 0;
                     }
-                    Err(_) => {}
+                    Err(e) => {
+                        record_connection_failure(app, sid_str, e);
+                    }
                 }
             }
-            Err(_) => {
+            Err(e) => {
+                record_connection_failure(app, sid_str, e);
                 info!(server_id = sid_str, "空闲连接已失效，创建新连接");
             }
         }
@@ -966,28 +1009,22 @@ pub extern "C" fn orbit_connect_ssh(
     // --- No idle session → create new connection ---
     let guard = match crate::transport::create_session(&server, &app.db) {
         Ok(g) => g,
-        Err(e) => {
-            app.set_error(format!("{}", e));
-            return -5;
-        }
+        Err(e) => return fail_connection(app, sid_str, -5, e),
     };
 
     let mut channel: ssh2::Channel = match guard.session.channel_session() {
         Ok(ch) => ch,
         Err(e) => {
-            app.set_error(format!("创建 SSH channel 失败: {}", e));
-            return -6;
+            return fail_connection(app, sid_str, -6, format!("创建 SSH channel 失败: {}", e))
         }
     };
     let _ = channel.setenv("LANG", "en_US.UTF-8");
     let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
     if channel.request_pty("xterm-256color", None, None).is_err() {
-        app.set_error("请求远端 PTY 失败");
-        return -7;
+        return fail_connection(app, sid_str, -7, "请求远端 PTY 失败");
     }
     if channel.shell().is_err() {
-        app.set_error("启动远端 shell 失败");
-        return -8;
+        return fail_connection(app, sid_str, -8, "启动远端 shell 失败");
     }
     guard.session.set_blocking(false);
 
@@ -1017,21 +1054,20 @@ pub extern "C" fn orbit_connect_ssh(
     ) {
         Ok(ac) => ac,
         Err(e) => {
-            app.set_error(format!("启动 SSH 读取线程失败: {}", e));
-            return -9;
+            return fail_connection(app, sid_str, -9, format!("启动 SSH 读取线程失败: {}", e))
         }
     };
 
     let mut mgr = match app.ssh.lock() {
         Ok(m) => m,
         Err(e) => {
-            app.set_error(format!("SSH 会话管理器锁定失败: {}", e));
-            return -4;
+            return fail_connection(app, sid_str, -4, format!("SSH 会话管理器锁定失败: {}", e))
         }
     };
     mgr.register_session(&session_id, sid_str, guard, active_channel, session_lock);
     let c_id = CString::new(sid_for_cb).unwrap_or_default();
     unsafe { *out_session_id = c_id.into_raw() };
+    record_connection_success(app, sid_str);
     0
 }
 

@@ -365,6 +365,52 @@ impl Database {
         Ok(server)
     }
 
+    pub fn mark_connection_attempt(&self, id: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        if conn.execute(
+            "UPDATE servers SET last_attempted_at = ?1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, id],
+        )? == 0
+        {
+            bail!("服务器不存在");
+        }
+        Ok(())
+    }
+
+    pub fn mark_connection_success(&self, id: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        if conn.execute(
+            "UPDATE servers
+             SET last_connected_at = ?1, last_connection_result = 'success',
+                 last_connection_error = NULL, updated_at = ?1
+             WHERE id = ?2",
+            rusqlite::params![now, id],
+        )? == 0
+        {
+            bail!("服务器不存在");
+        }
+        Ok(())
+    }
+
+    pub fn mark_connection_failure(&self, id: &str, error: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let error = sanitize_connection_error(error);
+        let conn = self.conn.lock().unwrap();
+        if conn.execute(
+            "UPDATE servers
+             SET last_connection_result = 'failed', last_connection_error = ?1,
+                 updated_at = ?2
+             WHERE id = ?3",
+            rusqlite::params![error, now, id],
+        )? == 0
+        {
+            bail!("服务器不存在");
+        }
+        Ok(())
+    }
+
     pub fn add_server(&self, input: &ServerInput) -> Result<Server> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
@@ -922,6 +968,27 @@ impl Database {
     }
 }
 
+pub(crate) fn sanitize_connection_error(error: &str) -> String {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("password")
+        || normalized.contains("private key")
+        || normalized.contains("privatekey")
+        || normalized.contains("private_key")
+        || normalized.contains("private-key")
+        || normalized.contains("passphrase")
+        || error.contains('{')
+        || error.contains('}')
+    {
+        return "SSH 连接失败（敏感详情已隐藏）".into();
+    }
+
+    let mut summary = error.chars().take(512).collect::<String>();
+    if summary.is_empty() {
+        summary = "SSH 连接失败".into();
+    }
+    summary
+}
+
 fn folder_by_id(tx: &Transaction<'_>, id: &str) -> Result<ServerFolder> {
     tx.query_row(
         "SELECT id, name, normalized_name, parent_id, sort_order, created_at, updated_at
@@ -1040,6 +1107,61 @@ mod server_organization_tests {
     use crate::crypto;
     use crate::models::ServerInput;
     use rusqlite::{params, Connection};
+
+    fn seeded_server_db() -> (Database, String) {
+        let db = Database::new(":memory:").unwrap();
+        let server = db
+            .add_server(&ServerInput {
+                name: "server".into(),
+                host: "127.0.0.1".into(),
+                port: Some(22),
+                group_name: None,
+                auth_type: Some("password".into()),
+                username: "root".into(),
+                password: Some("hunter2".into()),
+                private_key: Some("PRIVATE_KEY_SECRET".into()),
+                key_source: Some("content".into()),
+                key_file_path: None,
+                key_passphrase: Some("PASSPHRASE_SECRET".into()),
+                credential_group_id: None,
+                jump_server_id: None,
+                folder_id: None,
+            })
+            .unwrap();
+        (db, server.id)
+    }
+
+    #[test]
+    fn connection_failure_is_sanitized_and_success_clears_it() {
+        let (db, server_id) = seeded_server_db();
+
+        db.mark_connection_attempt(&server_id).unwrap();
+        db.mark_connection_failure(
+            &server_id,
+            "password=hunter2 private_key=PRIVATE_KEY_SECRET passphrase=PASSPHRASE_SECRET {\"password\":\"hunter2\"}",
+        )
+        .unwrap();
+
+        let failed = db.get_server(&server_id).unwrap();
+        assert!(failed.last_attempted_at.is_some());
+        assert_eq!(failed.last_connection_result.as_deref(), Some("failed"));
+        let failure = failed.last_connection_error.unwrap();
+        let normalized_failure = failure.to_ascii_lowercase();
+        assert!(!failure.contains("hunter2"));
+        assert!(!failure.contains("PRIVATE_KEY_SECRET"));
+        assert!(!failure.contains("PASSPHRASE_SECRET"));
+        assert!(!failure.contains("{\"password\""));
+        assert!(!normalized_failure.contains("password"));
+        assert!(!normalized_failure.contains("private key"));
+        assert!(!normalized_failure.contains("passphrase"));
+
+        db.mark_connection_success(&server_id).unwrap();
+
+        let success = db.get_server(&server_id).unwrap();
+        assert_eq!(success.last_connection_result.as_deref(), Some("success"));
+        assert!(success.last_connected_at.is_some());
+        assert_eq!(success.last_connection_error, None);
+    }
 
     fn create_legacy_database(
         path: &std::path::Path,
