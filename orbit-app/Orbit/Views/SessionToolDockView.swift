@@ -8,11 +8,11 @@ struct SessionToolDockView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            dockButton(.ai, symbol: "sparkles", title: "AI")
-            dockButton(.sftp, symbol: "folder", title: "SFTP")
-            dockButton(.monitor, symbol: "waveform.path.ecg", title: "Monitor")
-            dockButton(.snippets, symbol: "text.insert", title: "Snippets")
-            dockButton(.logs, symbol: "list.bullet.rectangle", title: "Logs")
+            dockButton(.ai, symbol: "sparkles", title: "AI 助手")
+            dockButton(.sftp, symbol: "folder", title: "文件管理")
+            dockButton(.monitor, symbol: "waveform.path.ecg", title: "监控")
+            dockButton(.snippets, symbol: "text.insert", title: "命令片段")
+            dockButton(.logs, symbol: "list.bullet.rectangle", title: "日志")
 
             Button(action: openDockerTab) {
                 Image(systemName: "shippingbox")
@@ -23,6 +23,7 @@ struct SessionToolDockView: View {
             .disabled(activeServer() == nil)
             .foregroundStyle(activeServer() == nil ? Color.secondary.opacity(0.35) : Color.secondary)
             .help(activeServer() == nil ? "选择远端服务器后可用 Docker" : "Docker")
+            .accessibilityLabel("Docker")
 
             Button(action: openDatabaseTab) {
                 Image(systemName: "cylinder.split.1x2")
@@ -31,7 +32,8 @@ struct SessionToolDockView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Database")
+            .help("数据库")
+            .accessibilityLabel("数据库")
 
             Spacer()
 
@@ -42,7 +44,8 @@ struct SessionToolDockView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Settings")
+            .help("设置")
+            .accessibilityLabel("设置")
         }
         .padding(.vertical, 10)
         .frame(width: 52)
@@ -70,6 +73,7 @@ struct SessionToolDockView: View {
         .disabled(disabledReason != nil)
         .foregroundStyle(disabledReason == nil ? (isActive ? Color.accentColor : Color.secondary) : Color.secondary.opacity(0.35))
         .help(disabledReason ?? title)
+        .accessibilityLabel(title)
     }
 
     private func activeServer() -> Server? {

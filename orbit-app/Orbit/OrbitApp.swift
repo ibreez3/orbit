@@ -7,7 +7,7 @@ struct OrbitApp: App {
     var body: some Scene {
         WindowGroup {
             MainView()
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 1024, minHeight: 640)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 800)
@@ -21,10 +21,15 @@ struct OrbitCommands: Commands {
     var body: some Commands {
         SidebarCommands()
         CommandGroup(after: .toolbar) {
-            Button("Spotlight") {
-                NotificationCenter.default.post(name: .openSpotlight, object: nil)
+            Button("快速连接") {
+                NotificationCenter.default.post(name: .focusQuickConnect, object: nil)
             }
             .keyboardShortcut("k", modifiers: .command)
+
+            Button("命令面板") {
+                NotificationCenter.default.post(name: .openCommandPalette, object: nil)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
 
             Button("Toggle SFTP Drawer") {
                 NotificationCenter.default.post(name: .toggleSftpDrawer, object: nil)
@@ -130,7 +135,8 @@ struct OrbitCommands: Commands {
 
 extension Notification.Name {
     static let newTerminal = Notification.Name("newTerminal")
-    static let openSpotlight = Notification.Name("openSpotlight")
+    static let focusQuickConnect = Notification.Name("focusQuickConnect")
+    static let openCommandPalette = Notification.Name("openCommandPalette")
     static let splitHorizontal = Notification.Name("splitHorizontal")
     static let splitVertical = Notification.Name("splitVertical")
     static let closePane = Notification.Name("closePane")

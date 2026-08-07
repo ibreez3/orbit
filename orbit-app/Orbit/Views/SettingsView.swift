@@ -334,7 +334,8 @@ private struct KeybindingsPane: View {
 
     private func actionLabel(for action: String) -> String {
         switch action {
-        case "spotlight": return "Spotlight 搜索"
+        case "quickConnect": return "快速连接"
+        case "commandPalette": return "命令面板"
         case "settings": return "打开设置"
         case "newTerminal": return "新建终端"
         case "toggleSftp": return "SFTP 侧栏"

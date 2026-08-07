@@ -18,7 +18,10 @@ struct TabBarView: View {
 
             Spacer()
 
-            Button(action: { appState.openSpotlight() }) {
+            Button(action: {
+                appState.closeSpotlight()
+                appState.focusServerQuickConnect()
+            }) {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .medium))
                     .frame(width: 28, height: 28)
@@ -26,8 +29,8 @@ struct TabBarView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("Spotlight (⌘K)")
-            .accessibilityLabel("打开 Spotlight")
+            .help("快速连接 (⌘K)")
+            .accessibilityLabel("打开快速连接")
 
             networkIndicator
 
@@ -58,6 +61,8 @@ struct TabBarView: View {
                     .fill(Color.secondary.opacity(0.3))
                     .frame(width: 8, height: 8)
                     .frame(width: 28, height: 28)
+                    .help("无活动会话")
+                    .accessibilityLabel("无活动会话")
             )
         }
 
@@ -74,6 +79,7 @@ struct TabBarView: View {
                 }
             }
             .help(isConnected ? "\(tab.serverName) 已连接" : "\(tab.serverName) 未连接")
+            .accessibilityLabel(isConnected ? "\(tab.serverName) 已连接" : "\(tab.serverName) 未连接")
             .frame(width: isConnected ? 28 : nil, height: 28)
         )
     }
@@ -106,12 +112,13 @@ struct TabBarView: View {
                     Image(systemName: "folder")
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 28, height: 28)
                         .background(Color.primary.opacity(0.06))
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .help("打开 SFTP")
+                .accessibilityLabel("打开 \(tab.title) 的 SFTP")
             }
 
             if showClose {
@@ -119,11 +126,13 @@ struct TabBarView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 28, height: 28)
                         .background(Color.primary.opacity(0.08))
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .help("关闭 \(tab.title)")
+                .accessibilityLabel("关闭 \(tab.title)")
             }
         }
         .padding(.horizontal, 10)

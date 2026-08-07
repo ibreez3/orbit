@@ -26,7 +26,7 @@ struct MainView: View {
             quitConfirmationOverlay
             terminalCloseConfirmationOverlay
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1024, minHeight: 640)
         .environmentObject(appState.tabState)
         .environmentObject(appState.uiState)
         .environmentObject(appState.themeState)
@@ -85,12 +85,15 @@ struct MainView: View {
 
         return base
             .onExitCommand {
-                if !appState.handleEscape(), toolState.activeTool?.tool != .ai {
+                if uiState.spotlightOpen {
+                    appState.closeSpotlight()
+                } else if !appState.handleEscape(), toolState.activeTool?.tool != .ai {
                     appState.closeOverlayTool()
                 }
             }
-            .onReceive(nc(.newTerminal)) { _ in appState.focusServerQuickConnect() }
-            .onReceive(nc(.openSpotlight)) { _ in appState.focusServerQuickConnect() }
+            .onReceive(nc(.newTerminal)) { _ in focusQuickConnect() }
+            .onReceive(nc(.focusQuickConnect)) { _ in focusQuickConnect() }
+            .onReceive(nc(.openCommandPalette)) { _ in openCommandPalette() }
             .onReceive(nc(.splitHorizontal)) { _ in appState.splitCurrentPane(direction: .horizontal) }
             .onReceive(nc(.splitVertical)) { _ in appState.splitCurrentPane(direction: .vertical) }
             .onReceive(nc(.closePane)) { _ in appState.closeCurrentPane() }
@@ -161,7 +164,7 @@ struct MainView: View {
                 Button("新建凭据组") { appState.openCgDialog() }
             } label: {
                 Image(systemName: "plus")
-                    .frame(width: 24, height: 24)
+                    .frame(width: 28, height: 28)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -172,7 +175,7 @@ struct MainView: View {
                 SettingsWindowController.shared.open(with: appState)
             } label: {
                 Image(systemName: "gearshape")
-                    .frame(width: 24, height: 24)
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
             .help("设置")
@@ -488,6 +491,17 @@ struct MainView: View {
         guard let id = uiState.pendingCloseTabId else { return nil }
         return tabState.tabs.first { $0.id == id }
     }
+
+    private func focusQuickConnect() {
+        appState.closeSpotlight()
+        appState.focusServerQuickConnect()
+    }
+
+    private func openCommandPalette() {
+        guard uiState.temporaryConnectionDraft == nil else { return }
+        appState.closeServerQuickConnect(clearQuery: false)
+        appState.openSpotlight()
+    }
 }
 
 private struct TemporaryPromotionRetryBanner: View {
@@ -507,8 +521,11 @@ private struct TemporaryPromotionRetryBanner: View {
             Button(action: dismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
+            .help("关闭保存提示")
+            .accessibilityLabel("关闭保存提示")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)

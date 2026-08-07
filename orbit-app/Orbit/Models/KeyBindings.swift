@@ -57,14 +57,46 @@ struct KeyBinding: Codable, Hashable {
     }
 }
 
+protocol KeyBindingStore: AnyObject {
+    func load() -> [String: KeyBinding]?
+    func save(_ bindings: [String: KeyBinding])
+    func clear()
+}
+
+final class UserDefaultsKeyBindingStore: KeyBindingStore {
+    private let defaults: UserDefaults
+    private let key: String
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
+
+    init(defaults: UserDefaults = .standard, key: String = "keyBindings_json") {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    func load() -> [String: KeyBinding]? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? decoder.decode([String: KeyBinding].self, from: data)
+    }
+
+    func save(_ bindings: [String: KeyBinding]) {
+        guard let data = try? encoder.encode(bindings) else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    func clear() {
+        defaults.removeObject(forKey: key)
+    }
+}
+
 final class KeyBindings {
     static let shared = KeyBindings()
-    private static let decoder = JSONDecoder()
-    private static let encoder = JSONEncoder()
 
     private var bindings: [String: KeyBinding] = [:]
+    private let store: KeyBindingStore
 
-    private init() {
+    init(store: KeyBindingStore = UserDefaultsKeyBindingStore()) {
+        self.store = store
         loadDefaults()
     }
 
@@ -81,7 +113,7 @@ final class KeyBindings {
 
     func resetToDefaults() {
         bindings = [:]
-        UserDefaults.standard.removeObject(forKey: storeKey)
+        store.clear()
     }
 
     /// Check if an NSEvent matches a registered keybinding. Returns the action name if matched.
@@ -130,7 +162,7 @@ final class KeyBindings {
     // MARK: - Defaults
 
     static let actionNames: [String] = [
-        "spotlight", "settings", "newTerminal", "toggleSftp", "findInTerminal",
+        "quickConnect", "commandPalette", "settings", "newTerminal", "toggleSftp", "findInTerminal",
         "clearScreen", "reconnect",
         "splitHorizontal", "splitVertical", "closePane",
         "navPrevPane", "navNextPane", "navLeftPane", "navRightPane",
@@ -138,7 +170,8 @@ final class KeyBindings {
     ]
 
     static let defaultBindings: [String: KeyBinding] = [
-        "spotlight":      KeyBinding(key: "k", command: true),
+        "quickConnect":   KeyBinding(key: "k", command: true),
+        "commandPalette": KeyBinding(key: "p", command: true, shift: true),
         "settings":       KeyBinding(key: ",", command: true),
         "newTerminal":    KeyBinding(key: "t", command: true),
         "toggleSftp":     KeyBinding(key: "f", command: true, shift: true),
@@ -169,19 +202,16 @@ final class KeyBindings {
 
     // MARK: - Persistence
 
-    private let storeKey = "keyBindings_json"
-
     private func loadDefaults() {
-        guard let data = UserDefaults.standard.data(forKey: storeKey),
-              let decoded = try? Self.decoder.decode([String: KeyBinding].self, from: data) else {
-            bindings = [:]
-            return
+        bindings = store.load() ?? [:]
+        if bindings["commandPalette"] == nil,
+           let legacyBinding = bindings.removeValue(forKey: "spotlight") {
+            bindings["commandPalette"] = legacyBinding
+            persist()
         }
-        bindings = decoded
     }
 
     private func persist() {
-        guard let data = try? Self.encoder.encode(bindings) else { return }
-        UserDefaults.standard.set(data, forKey: storeKey)
+        store.save(bindings)
     }
 }

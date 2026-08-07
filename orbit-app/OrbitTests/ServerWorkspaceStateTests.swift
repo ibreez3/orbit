@@ -3,6 +3,23 @@ import XCTest
 
 @MainActor
 final class ServerWorkspaceStateTests: XCTestCase {
+    func testShortcutDefaultsSeparateServersAndCommands() {
+        XCTAssertEqual(KeyBindings.defaultBindings["quickConnect"]?.displayString, "⌘K")
+        XCTAssertEqual(KeyBindings.defaultBindings["commandPalette"]?.displayString, "⇧⌘P")
+    }
+
+    func testLegacySpotlightOverrideMigratesToCommandPalette() {
+        let store = MemoryKeyBindingStore([
+            "spotlight": KeyBinding(key: "j", command: true)
+        ])
+
+        let bindings = KeyBindings(store: store)
+
+        XCTAssertEqual(bindings.binding(for: "commandPalette").displayString, "⌘J")
+        XCTAssertEqual(store.value?["commandPalette"]?.displayString, "⌘J")
+        XCTAssertNil(store.value?["spotlight"])
+    }
+
     func testTreeBuildsThreeLevelsAndSearchPreservesPath() {
         let tree = ServerTreeProjection(
             snapshot: .threeLevelFixture(),
@@ -585,6 +602,26 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertNotNil(state.canOpenTool(.sftp))
         XCTAssertNotNil(state.canOpenTool(.monitor))
         XCTAssertFalse(state.canUsePersistedServerTools)
+    }
+}
+
+private final class MemoryKeyBindingStore: KeyBindingStore {
+    var value: [String: KeyBinding]?
+
+    init(_ value: [String: KeyBinding]? = nil) {
+        self.value = value
+    }
+
+    func load() -> [String: KeyBinding]? {
+        value
+    }
+
+    func save(_ bindings: [String: KeyBinding]) {
+        value = bindings
+    }
+
+    func clear() {
+        value = nil
     }
 }
 
