@@ -18,18 +18,26 @@ struct OrbitApp: App {
 }
 
 struct OrbitCommands: Commands {
+    @ObservedObject private var keyBindings = KeyBindings.shared
+
     var body: some Commands {
         SidebarCommands()
         CommandGroup(after: .toolbar) {
             Button("快速连接") {
                 NotificationCenter.default.post(name: .focusQuickConnect, object: nil)
             }
-            .keyboardShortcut("k", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "quickConnect"),
+                modifiers: eventModifiers(for: "quickConnect")
+            )
 
             Button("命令面板") {
                 NotificationCenter.default.post(name: .openCommandPalette, object: nil)
             }
-            .keyboardShortcut("p", modifiers: [.command, .shift])
+            .keyboardShortcut(
+                keyEquivalent(for: "commandPalette"),
+                modifiers: eventModifiers(for: "commandPalette")
+            )
 
             Button("Toggle SFTP Drawer") {
                 NotificationCenter.default.post(name: .toggleSftpDrawer, object: nil)
@@ -130,6 +138,20 @@ struct OrbitCommands: Commands {
             }
             .keyboardShortcut(.leftArrow, modifiers: [.command, .shift])
         }
+    }
+
+    private func keyEquivalent(for action: String) -> KeyEquivalent {
+        KeyEquivalent(keyBindings.binding(for: action).key.first ?? " ")
+    }
+
+    private func eventModifiers(for action: String) -> EventModifiers {
+        let modifiers = keyBindings.binding(for: action).modifiers
+        var result = EventModifiers()
+        if modifiers.command { result.insert(.command) }
+        if modifiers.shift { result.insert(.shift) }
+        if modifiers.option { result.insert(.option) }
+        if modifiers.control { result.insert(.control) }
+        return result
     }
 }
 

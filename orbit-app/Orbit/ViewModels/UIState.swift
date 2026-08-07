@@ -1,5 +1,30 @@
 import SwiftUI
 
+enum WorkspacePresentationLayer: Equatable {
+    case commandPalette
+    case temporaryConnection
+    case quickConnectResults
+    case quickConnectFocus
+    case toolOverlay
+}
+
+struct WorkspacePresentationState: Equatable {
+    let commandPaletteOpen: Bool
+    let temporaryConnectionOpen: Bool
+    let quickConnectResultsVisible: Bool
+    let quickConnectFocused: Bool
+    let toolOverlayOpen: Bool
+
+    var highestLayer: WorkspacePresentationLayer? {
+        if commandPaletteOpen { return .commandPalette }
+        if temporaryConnectionOpen { return .temporaryConnection }
+        if quickConnectResultsVisible { return .quickConnectResults }
+        if quickConnectFocused { return .quickConnectFocus }
+        if toolOverlayOpen { return .toolOverlay }
+        return nil
+    }
+}
+
 struct SidebarPresentation: Equatable {
     static let widthKey = "assetTreeWidth"
     static let collapsedKey = "assetTreeCollapsed"

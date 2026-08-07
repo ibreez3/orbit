@@ -22,7 +22,7 @@ struct HomeView: View {
                     HomeActionButton(
                         icon: "magnifyingglass",
                         label: "命令面板",
-                        action: { appState.openSpotlight() }
+                        action: { appState.openWorkspaceEntry(.commandPalette) }
                     )
                 }
                 .frame(minWidth: 360, idealWidth: 390, maxWidth: 420)

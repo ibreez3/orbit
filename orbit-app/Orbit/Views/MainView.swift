@@ -9,6 +9,8 @@ struct MainView: View {
     @ObservedObject private var toolState: ToolState
     @State private var batchExecutionVisible: Bool = false
     @State private var assetTreeDragStartWidth: CGFloat?
+    @State private var workspaceKeyMonitor: Any?
+    @State private var workspaceWindowIdentity = WorkspaceWindowIdentity()
 
     init(appState: AppState = AppState()) {
         _appState = StateObject(wrappedValue: appState)
@@ -64,6 +66,9 @@ struct MainView: View {
                 .environmentObject(appState.inventoryState)
         }
         .modifier(AlertModifier(appState: appState, uiState: uiState))
+        .background(WorkspaceWindowReader { windowNumber in
+            workspaceWindowIdentity.windowNumber = windowNumber
+        })
         .alert("确认切换会话", isPresented: Binding(
             get: { toolState.pendingContextSwitchTabId != nil },
             set: { if !$0 { appState.cancelPendingContextSwitch() } }
@@ -78,22 +83,22 @@ struct MainView: View {
             Text(toolState.pendingContextSwitchMessage ?? "")
         }
         .onAppear {
+            installWorkspaceKeyMonitor()
             if inventoryState.servers.isEmpty { appState.loadServers() }
             if inventoryState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
             if inventoryState.databaseConnections.isEmpty { appState.loadDatabaseConnections() }
         }
+        .onDisappear {
+            removeWorkspaceKeyMonitor()
+        }
 
         return base
             .onExitCommand {
-                if uiState.spotlightOpen {
-                    appState.closeSpotlight()
-                } else if !appState.handleEscape(), toolState.activeTool?.tool != .ai {
-                    appState.closeOverlayTool()
-                }
+                appState.handleEscape()
             }
-            .onReceive(nc(.newTerminal)) { _ in focusQuickConnect() }
-            .onReceive(nc(.focusQuickConnect)) { _ in focusQuickConnect() }
-            .onReceive(nc(.openCommandPalette)) { _ in openCommandPalette() }
+            .onReceive(nc(.newTerminal)) { _ in openWorkspaceEntryIfActive(.quickConnect) }
+            .onReceive(nc(.focusQuickConnect)) { _ in openWorkspaceEntryIfActive(.quickConnect) }
+            .onReceive(nc(.openCommandPalette)) { _ in openWorkspaceEntryIfActive(.commandPalette) }
             .onReceive(nc(.splitHorizontal)) { _ in appState.splitCurrentPane(direction: .horizontal) }
             .onReceive(nc(.splitVertical)) { _ in appState.splitCurrentPane(direction: .vertical) }
             .onReceive(nc(.closePane)) { _ in appState.closeCurrentPane() }
@@ -492,15 +497,63 @@ struct MainView: View {
         return tabState.tabs.first { $0.id == id }
     }
 
-    private func focusQuickConnect() {
-        appState.closeSpotlight()
-        appState.focusServerQuickConnect()
+    private func openWorkspaceEntryIfActive(_ entry: WorkspaceEntryPoint) {
+        guard workspaceWindowIdentity.windowNumber == NSApp.keyWindow?.windowNumber else { return }
+        appState.openWorkspaceEntry(entry)
     }
 
-    private func openCommandPalette() {
-        guard uiState.temporaryConnectionDraft == nil else { return }
-        appState.closeServerQuickConnect(clearQuery: false)
-        appState.openSpotlight()
+    private func installWorkspaceKeyMonitor() {
+        removeWorkspaceKeyMonitor()
+        workspaceKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let input = WorkspaceKeyboardInput(
+                key: event.charactersIgnoringModifiers ?? "",
+                modifiers: KeyBinding.Modifiers(
+                    flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                ),
+                isRepeat: event.isARepeat,
+                isWorkspaceWindow: event.windowNumber == workspaceWindowIdentity.windowNumber
+            )
+
+            switch WorkspaceKeyboardRouter(bindings: .shared).route(for: input) {
+            case .passThrough:
+                return event
+            case .consume:
+                return nil
+            case .dispatch(let entry):
+                appState.openWorkspaceEntry(entry)
+                return nil
+            }
+        }
+    }
+
+    private func removeWorkspaceKeyMonitor() {
+        guard let workspaceKeyMonitor else { return }
+        NSEvent.removeMonitor(workspaceKeyMonitor)
+        self.workspaceKeyMonitor = nil
+    }
+}
+
+private final class WorkspaceWindowIdentity {
+    var windowNumber: Int?
+}
+
+private struct WorkspaceWindowReader: NSViewRepresentable {
+    let resolve: (Int?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        resolveWindow(for: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        resolveWindow(for: nsView)
+    }
+
+    private func resolveWindow(for view: NSView) {
+        DispatchQueue.main.async {
+            resolve(view.window?.windowNumber)
+        }
     }
 }
 

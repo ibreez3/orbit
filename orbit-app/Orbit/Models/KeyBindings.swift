@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Combine
 
 struct KeyBinding: Codable, Hashable {
     let key: String       // e.g. "k", "f", "d", "\u{7f}" for delete
@@ -57,6 +58,61 @@ struct KeyBinding: Codable, Hashable {
     }
 }
 
+enum WorkspaceEntryPoint: Equatable {
+    case quickConnect
+    case commandPalette
+}
+
+struct WorkspaceKeyboardInput: Equatable {
+    let key: String
+    let modifiers: KeyBinding.Modifiers
+    let isRepeat: Bool
+    let isWorkspaceWindow: Bool
+
+    init(
+        key: String,
+        modifiers: KeyBinding.Modifiers,
+        isRepeat: Bool = false,
+        isWorkspaceWindow: Bool = true
+    ) {
+        self.key = key.lowercased()
+        self.modifiers = modifiers
+        self.isRepeat = isRepeat
+        self.isWorkspaceWindow = isWorkspaceWindow
+    }
+}
+
+enum WorkspaceKeyboardRoute: Equatable {
+    case passThrough
+    case consume
+    case dispatch(WorkspaceEntryPoint)
+}
+
+struct WorkspaceKeyboardRouter {
+    let bindings: KeyBindings
+
+    func route(for input: WorkspaceKeyboardInput) -> WorkspaceKeyboardRoute {
+        guard input.isWorkspaceWindow, !input.modifiers.isEmpty else {
+            return .passThrough
+        }
+
+        let quickConnectMatches = matches(input, action: "quickConnect")
+        let commandPaletteMatches = matches(input, action: "commandPalette")
+        guard quickConnectMatches || commandPaletteMatches else {
+            return .passThrough
+        }
+        guard !input.isRepeat, quickConnectMatches != commandPaletteMatches else {
+            return .consume
+        }
+        return .dispatch(quickConnectMatches ? .quickConnect : .commandPalette)
+    }
+
+    private func matches(_ input: WorkspaceKeyboardInput, action: String) -> Bool {
+        let binding = bindings.binding(for: action)
+        return binding.key.lowercased() == input.key && binding.modifiers == input.modifiers
+    }
+}
+
 protocol KeyBindingStore: AnyObject {
     func load() -> [String: KeyBinding]?
     func save(_ bindings: [String: KeyBinding])
@@ -89,9 +145,10 @@ final class UserDefaultsKeyBindingStore: KeyBindingStore {
     }
 }
 
-final class KeyBindings {
+final class KeyBindings: ObservableObject {
     static let shared = KeyBindings()
 
+    @Published private(set) var revision = 0
     private var bindings: [String: KeyBinding] = [:]
     private let store: KeyBindingStore
 
@@ -109,11 +166,13 @@ final class KeyBindings {
     func setBinding(action: String, key: String, modifiers: KeyBinding.Modifiers) {
         bindings[action] = KeyBinding(key: key, command: modifiers.command, shift: modifiers.shift, option: modifiers.option, control: modifiers.control)
         persist()
+        revision &+= 1
     }
 
     func resetToDefaults() {
         bindings = [:]
         store.clear()
+        revision &+= 1
     }
 
     /// Check if an NSEvent matches a registered keybinding. Returns the action name if matched.

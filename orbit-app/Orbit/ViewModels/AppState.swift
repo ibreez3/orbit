@@ -1125,10 +1125,27 @@ class AppState: ObservableObject {
         loadServerOrganization()
     }
 
+    @discardableResult
+    func openWorkspaceEntry(_ entry: WorkspaceEntryPoint) -> Bool {
+        guard uiState.temporaryConnectionDraft == nil else { return false }
+
+        switch entry {
+        case .quickConnect:
+            uiState.spotlightOpen = false
+            uiState.spotlightQuery = ""
+            uiState.serverQuickConnectInputFocused = true
+            uiState.serverQuickConnectResultsVisible = !uiState.serverQuickConnectQuery.isEmpty
+        case .commandPalette:
+            uiState.serverQuickConnectResultsVisible = false
+            uiState.serverQuickConnectInputFocused = false
+            uiState.spotlightQuery = ""
+            uiState.spotlightOpen = true
+        }
+        return true
+    }
+
     func focusServerQuickConnect() {
-        guard uiState.temporaryConnectionDraft == nil else { return }
-        uiState.serverQuickConnectInputFocused = true
-        uiState.serverQuickConnectResultsVisible = !uiState.serverQuickConnectQuery.isEmpty
+        openWorkspaceEntry(.quickConnect)
     }
 
     func closeServerQuickConnect(clearQuery: Bool = true) {
@@ -1141,6 +1158,8 @@ class AppState: ObservableObject {
     }
 
     func presentTemporaryConnectionPanel(address: ParsedServerAddress) {
+        uiState.spotlightOpen = false
+        uiState.spotlightQuery = ""
         uiState.temporaryConnectionToken = UUID()
         uiState.temporaryConnectionDraft = TemporaryConnectionDraft(
             host: address.host,
@@ -1254,22 +1273,39 @@ class AppState: ObservableObject {
         )
     }
 
+    var workspacePresentationState: WorkspacePresentationState {
+        WorkspacePresentationState(
+            commandPaletteOpen: uiState.spotlightOpen,
+            temporaryConnectionOpen: uiState.temporaryConnectionDraft != nil,
+            quickConnectResultsVisible: uiState.serverQuickConnectResultsVisible,
+            quickConnectFocused: uiState.serverQuickConnectInputFocused,
+            toolOverlayOpen: activeTool != nil && activeTool?.tool != .ai
+        )
+    }
+
     @discardableResult
-    func handleEscape() -> Bool {
-        if uiState.temporaryConnectionDraft != nil {
+    func dismissHighestWorkspaceLayer() -> WorkspacePresentationLayer? {
+        guard let layer = workspacePresentationState.highestLayer else { return nil }
+
+        switch layer {
+        case .commandPalette:
+            closeSpotlight()
+        case .temporaryConnection:
             dismissTemporaryConnectionPanel()
-            return true
-        }
-        if uiState.serverQuickConnectResultsVisible {
+        case .quickConnectResults:
             uiState.serverQuickConnectResultsVisible = false
-            return true
-        }
-        if uiState.serverQuickConnectInputFocused {
+        case .quickConnectFocus:
             uiState.serverQuickConnectInputFocused = false
             restoreActiveTerminalFocus()
-            return true
+        case .toolOverlay:
+            closeOverlayTool()
         }
-        return false
+        return layer
+    }
+
+    @discardableResult
+    func handleEscape() -> Bool {
+        dismissHighestWorkspaceLayer() != nil
     }
 
     func restoreActiveTerminalFocus() {
@@ -1948,8 +1984,7 @@ class AppState: ObservableObject {
     }
 
     func openSpotlight() {
-        spotlightQuery = ""
-        spotlightOpen = true
+        openWorkspaceEntry(.commandPalette)
     }
 
     func closeSpotlight() {

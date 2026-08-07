@@ -19,8 +19,7 @@ struct TabBarView: View {
             Spacer()
 
             Button(action: {
-                appState.closeSpotlight()
-                appState.focusServerQuickConnect()
+                appState.openWorkspaceEntry(.quickConnect)
             }) {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .medium))

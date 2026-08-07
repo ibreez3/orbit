@@ -20,6 +20,128 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertNil(store.value?["spotlight"])
     }
 
+    func testWorkspaceKeyboardRouterUsesDynamicBindingsWithoutMisrouting() {
+        let bindings = KeyBindings(store: MemoryKeyBindingStore([
+            "quickConnect": KeyBinding(key: "u", command: true, option: true),
+            "commandPalette": KeyBinding(key: "j", command: true)
+        ]))
+        let router = WorkspaceKeyboardRouter(bindings: bindings)
+
+        XCTAssertEqual(
+            router.route(for: .init(key: "u", modifiers: .init(command: true, option: true))),
+            .dispatch(.quickConnect)
+        )
+        XCTAssertEqual(
+            router.route(for: .init(key: "j", modifiers: .init(command: true))),
+            .dispatch(.commandPalette)
+        )
+        XCTAssertEqual(
+            router.route(for: .init(key: "k", modifiers: .init(command: true))),
+            .passThrough
+        )
+
+        bindings.setBinding(
+            action: "commandPalette",
+            key: "p",
+            modifiers: .init(command: true, shift: true)
+        )
+
+        XCTAssertEqual(
+            router.route(for: .init(key: "j", modifiers: .init(command: true))),
+            .passThrough
+        )
+        XCTAssertEqual(
+            router.route(for: .init(key: "p", modifiers: .init(command: true, shift: true))),
+            .dispatch(.commandPalette)
+        )
+    }
+
+    func testWorkspaceKeyboardRouterPassesThroughTypingRepeatsAndConflicts() {
+        let conflict = KeyBinding(key: "k", command: true)
+        let bindings = KeyBindings(store: MemoryKeyBindingStore([
+            "quickConnect": conflict,
+            "commandPalette": conflict
+        ]))
+        let router = WorkspaceKeyboardRouter(bindings: bindings)
+
+        XCTAssertEqual(
+            router.route(for: .init(key: "k", modifiers: .init(command: true))),
+            .consume
+        )
+        XCTAssertEqual(
+            router.route(for: .init(key: "k", modifiers: .init(command: true), isRepeat: true)),
+            .consume
+        )
+
+        let uniqueRouter = WorkspaceKeyboardRouter(
+            bindings: KeyBindings(store: MemoryKeyBindingStore())
+        )
+        XCTAssertEqual(
+            uniqueRouter.route(for: .init(key: "k", modifiers: .init(command: true), isRepeat: true)),
+            .consume
+        )
+        XCTAssertEqual(
+            uniqueRouter.route(for: .init(key: "x", modifiers: .init(command: true))),
+            .passThrough
+        )
+        XCTAssertEqual(
+            router.route(for: .init(key: "k", modifiers: .init(), isWorkspaceWindow: true)),
+            .passThrough
+        )
+        XCTAssertEqual(
+            router.route(for: .init(key: "k", modifiers: .init(command: true), isWorkspaceWindow: false)),
+            .passThrough
+        )
+    }
+
+    func testWorkspaceEntryPointKeepsQuickConnectAndCommandPaletteExclusive() {
+        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+
+        XCTAssertTrue(state.openWorkspaceEntry(.quickConnect))
+        XCTAssertTrue(state.uiState.serverQuickConnectInputFocused)
+        XCTAssertFalse(state.uiState.spotlightOpen)
+
+        XCTAssertTrue(state.openWorkspaceEntry(.commandPalette))
+        XCTAssertFalse(state.uiState.serverQuickConnectInputFocused)
+        XCTAssertFalse(state.uiState.serverQuickConnectResultsVisible)
+        XCTAssertTrue(state.uiState.spotlightOpen)
+
+        state.presentTemporaryConnectionPanel(address: .init(host: "10.0.0.1", port: 22, username: nil))
+        XCTAssertFalse(state.openWorkspaceEntry(.commandPalette))
+        XCTAssertFalse(state.uiState.spotlightOpen)
+    }
+
+    func testWorkspaceEscapeClosesOnlyHighestPresentationLayer() {
+        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+        state.activeTool = BoundToolState(tool: .logs, presentation: .floating, boundContext: .empty)
+
+        XCTAssertTrue(state.openWorkspaceEntry(.commandPalette))
+        XCTAssertEqual(state.dismissHighestWorkspaceLayer(), .commandPalette)
+        XCTAssertFalse(state.uiState.spotlightOpen)
+        XCTAssertNotNil(state.activeTool)
+
+        state.uiState.serverQuickConnectQuery = "host"
+        state.presentTemporaryConnectionPanel(address: .init(host: "10.0.0.1", port: 22, username: nil))
+        XCTAssertEqual(state.dismissHighestWorkspaceLayer(), .temporaryConnection)
+        XCTAssertNil(state.uiState.temporaryConnectionDraft)
+        XCTAssertTrue(state.uiState.serverQuickConnectResultsVisible)
+        XCTAssertTrue(state.uiState.serverQuickConnectInputFocused)
+        XCTAssertNotNil(state.activeTool)
+
+        XCTAssertEqual(state.dismissHighestWorkspaceLayer(), .quickConnectResults)
+        XCTAssertFalse(state.uiState.serverQuickConnectResultsVisible)
+        XCTAssertTrue(state.uiState.serverQuickConnectInputFocused)
+        XCTAssertNotNil(state.activeTool)
+
+        XCTAssertEqual(state.dismissHighestWorkspaceLayer(), .quickConnectFocus)
+        XCTAssertFalse(state.uiState.serverQuickConnectInputFocused)
+        XCTAssertNotNil(state.activeTool)
+
+        XCTAssertEqual(state.dismissHighestWorkspaceLayer(), .toolOverlay)
+        XCTAssertNil(state.activeTool)
+        XCTAssertNil(state.dismissHighestWorkspaceLayer())
+    }
+
     func testTreeBuildsThreeLevelsAndSearchPreservesPath() {
         let tree = ServerTreeProjection(
             snapshot: .threeLevelFixture(),
