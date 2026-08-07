@@ -68,15 +68,39 @@ class OrbitBridge {
         defer { initLock.unlock() }
         if app != nil { return }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let orbitDir = appSupport.appendingPathComponent("orbit", isDirectory: true)
-        try FileManager.default.createDirectory(at: orbitDir, withIntermediateDirectories: true)
-        let dbPath = orbitDir.appendingPathComponent("orbit.db").path
+        let databaseURL = Self.databaseURL(
+            applicationSupportDirectory: appSupport,
+            temporaryDirectory: FileManager.default.temporaryDirectory,
+            environment: ProcessInfo.processInfo.environment,
+            processIdentifier: ProcessInfo.processInfo.processIdentifier
+        )
+        try FileManager.default.createDirectory(
+            at: databaseURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let dbPath = databaseURL.path
         app = dbPath.withCString { path in
             orbit_app_new(path)
         }
         guard app != nil else {
             throw OrbitError.initializationFailed
         }
+    }
+
+    static func databaseURL(
+        applicationSupportDirectory: URL,
+        temporaryDirectory: URL,
+        environment: [String: String],
+        processIdentifier: Int32
+    ) -> URL {
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return temporaryDirectory
+                .appendingPathComponent("orbit-tests-\(processIdentifier)", isDirectory: true)
+                .appendingPathComponent("orbit.db")
+        }
+        return applicationSupportDirectory
+            .appendingPathComponent("orbit", isDirectory: true)
+            .appendingPathComponent("orbit.db")
     }
 
     deinit {
@@ -196,6 +220,161 @@ class OrbitBridge {
         guard rc == 0 else { throw OrbitError.apiError(rc) }
     }
 
+    func listServerOrganizationAsync() async throws -> ServerOrganizationSnapshot {
+        try await runOffThread { try self.listServerOrganization() }
+    }
+
+    func listServerOrganization() throws -> ServerOrganizationSnapshot {
+        try ensureInitialized()
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = orbit_list_server_organization(app, &outJson)
+        return try decodeWorkspaceResponse(
+            ServerOrganizationSnapshot.self,
+            rc: rc,
+            outJson: outJson
+        )
+    }
+
+    func createServerFolderAsync(input: FolderInput) async throws -> ServerFolder {
+        try await runOffThread { try self.createServerFolder(input: input) }
+    }
+
+    func createServerFolder(input: FolderInput) throws -> ServerFolder {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = jsonString.withCString { inputPtr in
+            orbit_create_server_folder(app, inputPtr, &outJson)
+        }
+        return try decodeWorkspaceResponse(ServerFolder.self, rc: rc, outJson: outJson)
+    }
+
+    func renameServerFolderAsync(id: String, input: FolderInput) async throws -> ServerFolder {
+        try await runOffThread { try self.renameServerFolder(id: id, input: input) }
+    }
+
+    func renameServerFolder(id: String, input: FolderInput) throws -> ServerFolder {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = id.withCString { idPtr in
+            jsonString.withCString { inputPtr in
+                orbit_rename_server_folder(app, idPtr, inputPtr, &outJson)
+            }
+        }
+        return try decodeWorkspaceResponse(ServerFolder.self, rc: rc, outJson: outJson)
+    }
+
+    func moveServerFolderAsync(id: String, input: FolderMoveInput) async throws -> ServerFolder {
+        try await runOffThread { try self.moveServerFolder(id: id, input: input) }
+    }
+
+    func moveServerFolder(id: String, input: FolderMoveInput) throws -> ServerFolder {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = id.withCString { idPtr in
+            jsonString.withCString { inputPtr in
+                orbit_move_server_folder(app, idPtr, inputPtr, &outJson)
+            }
+        }
+        return try decodeWorkspaceResponse(ServerFolder.self, rc: rc, outJson: outJson)
+    }
+
+    func deleteServerFolderAsync(id: String, input: FolderDeleteInput) async throws {
+        try await runOffThread { try self.deleteServerFolder(id: id, input: input) }
+    }
+
+    func deleteServerFolder(id: String, input: FolderDeleteInput) throws {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        let rc = id.withCString { idPtr in
+            jsonString.withCString { inputPtr in
+                orbit_delete_server_folder(app, idPtr, inputPtr)
+            }
+        }
+        try checkWorkspaceResult(rc)
+    }
+
+    func createServerTagAsync(name: String) async throws -> ServerTag {
+        try await runOffThread { try self.createServerTag(name: name) }
+    }
+
+    func createServerTag(name: String) throws -> ServerTag {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(name)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = jsonString.withCString { inputPtr in
+            orbit_create_server_tag(app, inputPtr, &outJson)
+        }
+        return try decodeWorkspaceResponse(ServerTag.self, rc: rc, outJson: outJson)
+    }
+
+    func deleteServerTagAsync(id: String) async throws {
+        try await runOffThread { try self.deleteServerTag(id: id) }
+    }
+
+    func deleteServerTag(id: String) throws {
+        try ensureInitialized()
+        let rc = id.withCString { idPtr in
+            orbit_delete_server_tag(app, idPtr)
+        }
+        try checkWorkspaceResult(rc)
+    }
+
+    func setServerTagsAsync(serverId: String, tagIds: [String]) async throws {
+        try await runOffThread { try self.setServerTags(serverId: serverId, tagIds: tagIds) }
+    }
+
+    func setServerTags(serverId: String, tagIds: [String]) throws {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(ServerTagsInput(tag_ids: tagIds))
+        let rc = serverId.withCString { serverIdPtr in
+            jsonString.withCString { inputPtr in
+                orbit_set_server_tags(app, serverIdPtr, inputPtr)
+            }
+        }
+        try checkWorkspaceResult(rc)
+    }
+
+    func moveServerAsync(serverId: String, folderId: String?) async throws {
+        try await runOffThread { try self.moveServer(serverId: serverId, folderId: folderId) }
+    }
+
+    func moveServer(serverId: String, folderId: String?) throws {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(ServerMoveInput(folder_id: folderId))
+        let rc = serverId.withCString { serverIdPtr in
+            jsonString.withCString { inputPtr in
+                orbit_move_server(app, serverIdPtr, inputPtr)
+            }
+        }
+        try checkWorkspaceResult(rc)
+    }
+
+    func setServerPinAsync(
+        serverId: String,
+        isPinned: Bool,
+        pinOrder: Int64?
+    ) async throws -> Server {
+        try await runOffThread {
+            try self.setServerPin(serverId: serverId, isPinned: isPinned, pinOrder: pinOrder)
+        }
+    }
+
+    func setServerPin(serverId: String, isPinned: Bool, pinOrder: Int64?) throws -> Server {
+        try ensureInitialized()
+        let input = ServerPinInput(is_pinned: isPinned, pin_order: pinOrder)
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = serverId.withCString { serverIdPtr in
+            jsonString.withCString { inputPtr in
+                orbit_set_server_pin(app, serverIdPtr, inputPtr, &outJson)
+            }
+        }
+        return try decodeWorkspaceResponse(Server.self, rc: rc, outJson: outJson)
+    }
+
     func testConnection(input: ServerInput) throws -> Bool {
         try ensureInitialized()
         let jsonData = try Self.encoder.encode(input)
@@ -269,6 +448,27 @@ class OrbitBridge {
                     continuation.resume(throwing: error)
                 }
             }
+        }
+    }
+
+    private func decodeWorkspaceResponse<T: Decodable>(
+        _ type: T.Type,
+        rc: Int32,
+        outJson: UnsafeMutablePointer<CChar>?
+    ) throws -> T {
+        guard rc == 0, let json = outJson else {
+            if let outJson {
+                orbit_free_string(outJson)
+            }
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
+        }
+        defer { orbit_free_string(json) }
+        return try Self.decodeJSON(type, from: json)
+    }
+
+    private func checkWorkspaceResult(_ rc: Int32) throws {
+        guard rc == 0 else {
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
         }
     }
 
@@ -470,6 +670,10 @@ class OrbitBridge {
         try await runOffThread { try self.connectSSH(serverId: serverId) }
     }
 
+    func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String {
+        try await runOffThread { try self.connectTemporarySSH(input: input) }
+    }
+
     func spawnChannelAsync(existingSessionId: String) async throws -> String {
         try await runOffThread { try self.spawnChannel(existingSessionId: existingSessionId) }
     }
@@ -486,6 +690,55 @@ class OrbitBridge {
         }
         defer { orbit_free_string(sessionId) }
         return String(cString: sessionId)
+    }
+
+    func connectTemporarySSH(input: TemporaryConnectionInput) throws -> String {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        var outSessionId: UnsafeMutablePointer<CChar>?
+        let rc = jsonString.withCString { inputPtr in
+            orbit_connect_ssh_temporary(
+                app,
+                inputPtr,
+                orbitDataCallback,
+                orbitClosedCallback,
+                selfPtr,
+                &outSessionId
+            )
+        }
+        guard rc == 0, let sessionId = outSessionId else {
+            if let outSessionId {
+                orbit_free_string(outSessionId)
+            }
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
+        }
+        defer { orbit_free_string(sessionId) }
+        return String(cString: sessionId)
+    }
+
+    func promoteTemporaryServerAsync(
+        sessionId: String,
+        input: PromoteTemporaryServerInput
+    ) async throws -> Server {
+        try await runOffThread {
+            try self.promoteTemporaryServer(sessionId: sessionId, input: input)
+        }
+    }
+
+    func promoteTemporaryServer(
+        sessionId: String,
+        input: PromoteTemporaryServerInput
+    ) throws -> Server {
+        try ensureInitialized()
+        let jsonString = try Self.encodeJSONString(input)
+        var outJson: UnsafeMutablePointer<CChar>?
+        let rc = sessionId.withCString { sessionIdPtr in
+            jsonString.withCString { inputPtr in
+                orbit_promote_temporary_server(app, sessionIdPtr, inputPtr, &outJson)
+            }
+        }
+        return try decodeWorkspaceResponse(Server.self, rc: rc, outJson: outJson)
     }
 
     func lastErrorMessage() -> String? {
@@ -905,6 +1158,8 @@ class OrbitBridge {
         try await runOffThread { try self.stopPortForward(forwardingId: forwardingId) }
     }
 }
+
+extension OrbitBridge: ServerWorkspaceBridge {}
 
 enum OrbitError: LocalizedError {
     case notInitialized

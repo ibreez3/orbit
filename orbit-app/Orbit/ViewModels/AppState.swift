@@ -261,7 +261,7 @@ class AppState: ObservableObject {
             )
         }
 
-        if tab.serverId == "local" {
+        if case .local = tab.connectionTarget {
             return ActiveSessionContext(
                 kind: .localShell,
                 tabId: tab.id,
@@ -751,7 +751,14 @@ class AppState: ObservableObject {
 
     func addLocalTerminalTab() {
         let id = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
-        let tab = TabItem(id: id, type: .terminal, serverId: "local", serverName: "本地", title: "本地终端")
+        let tab = TabItem(
+            id: id,
+            type: .terminal,
+            serverId: nil,
+            connectionTarget: .local,
+            serverName: "本地",
+            title: "本地终端"
+        )
         tabs.append(tab)
         requestActivateTab(id)
     }
@@ -1343,7 +1350,9 @@ class AppState: ObservableObject {
         tabs[tabIdx].paneTree = nil
 
         // Reconnect
-        connectSSH(tabId: tabId, serverId: tab.serverId)
+        if case .saved(let serverId) = tab.connectionTarget {
+            connectSSH(tabId: tabId, serverId: serverId)
+        }
     }
 
     // MARK: - Command Snippets
@@ -1576,7 +1585,7 @@ class AppState: ObservableObject {
     var currentServerId: String {
         if let activeId = activeTabId,
            let tab = tabs.first(where: { $0.id == activeId }) {
-            return tab.serverId
+            return tab.serverId ?? Self.standaloneServerId
         }
         return Self.standaloneServerId
     }

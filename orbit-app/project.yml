@@ -25,6 +25,11 @@ schemes:
     build:
       targets:
         Orbit: all
+        OrbitTests: [test]
+    test:
+      config: Debug
+      targets:
+        - OrbitTests
     run:
       config: Release
     profile:
@@ -85,3 +90,16 @@ targets:
             - arm64
           ONLY_ACTIVE_ARCH: true
     MACOSX_DEPLOYMENT_TARGET: "13.0"
+  OrbitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: OrbitTests
+    dependencies:
+      - target: Orbit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.tests
+        GENERATE_INFOPLIST_FILE: true
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/../orbit-rs/include"

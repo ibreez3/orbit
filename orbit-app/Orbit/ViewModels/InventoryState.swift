@@ -13,5 +13,9 @@ final class InventoryState: ObservableObject {
     @Published var editingDatabaseConnection: DatabaseConnection?
     @Published var databaseOperationLoading: Bool = false
 
-    let bridge = OrbitBridge.shared
+    let bridge: any ServerWorkspaceBridge
+
+    init(bridge: any ServerWorkspaceBridge = OrbitBridge.shared) {
+        self.bridge = bridge
+    }
 }

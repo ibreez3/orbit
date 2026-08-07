@@ -16,6 +16,13 @@ struct Server: Codable, Identifiable {
     let key_passphrase: String
     let credential_group_id: String
     let jump_server_id: String
+    let folder_id: String?
+    let is_pinned: Bool
+    let pin_order: Int64?
+    let last_connected_at: String?
+    let last_attempted_at: String?
+    let last_connection_result: String?
+    let last_connection_error: String?
     let created_at: String
     let updated_at: String
 
@@ -37,6 +44,7 @@ struct ServerInput: Codable {
     var key_passphrase: String?
     var credential_group_id: String?
     var jump_server_id: String?
+    var folder_id: String? = nil
 }
 
 struct CredentialGroup: Codable, Identifiable {
@@ -316,13 +324,55 @@ enum SpotlightSection: String, CaseIterable {
 struct TabItem: Identifiable {
     let id: String
     let type: TabType
-    let serverId: String
+    var serverId: String?
+    var connectionTarget: ServerConnectionTarget
     var serverName: String
     var title: String
     var sessionId: String?
     var paneTree: PaneNode?
     var focusedChannelId: String?
     var initialCommand: String?
+
+    init(
+        id: String,
+        type: TabType,
+        serverId: String?,
+        connectionTarget: ServerConnectionTarget? = nil,
+        serverName: String,
+        title: String,
+        sessionId: String? = nil,
+        paneTree: PaneNode? = nil,
+        focusedChannelId: String? = nil,
+        initialCommand: String? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.serverName = serverName
+        self.title = title
+        self.sessionId = sessionId
+        self.paneTree = paneTree
+        self.focusedChannelId = focusedChannelId
+        self.initialCommand = initialCommand
+
+        if let connectionTarget {
+            self.connectionTarget = connectionTarget
+            switch connectionTarget {
+            case .saved(let serverId):
+                self.serverId = serverId
+            case .temporary, .local:
+                self.serverId = nil
+            }
+        } else if serverId == "local" {
+            self.serverId = nil
+            self.connectionTarget = .local
+        } else if let serverId {
+            self.serverId = serverId
+            self.connectionTarget = .saved(serverId: serverId)
+        } else {
+            self.serverId = nil
+            self.connectionTarget = .temporary(tabId: id)
+        }
+    }
 }
 
 enum SplitDirection: String, Codable {
@@ -580,6 +630,9 @@ extension Server {
         auth_type: "", username: "", password: "", private_key: "",
         key_source: "", key_file_path: "", key_passphrase: "",
         credential_group_id: "", jump_server_id: "",
+        folder_id: nil, is_pinned: false, pin_order: nil,
+        last_connected_at: nil, last_attempted_at: nil,
+        last_connection_result: nil, last_connection_error: nil,
         created_at: "", updated_at: ""
     )
 }

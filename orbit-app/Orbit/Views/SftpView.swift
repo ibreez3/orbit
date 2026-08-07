@@ -297,9 +297,10 @@ struct SftpView: View {
             Divider()
             if isTextFile(entry) {
                 Button("编辑") {
+                    guard let serverId = tab.serverId else { return }
                     print("[SftpView] contextMenu 编辑: \(entry.path) isTextFile=true")
                     selectedEntry = entry
-                    appState.textEditorWC.open(serverId: tab.serverId, filePath: entry.path, fileName: entry.name)
+                    appState.textEditorWC.open(serverId: serverId, filePath: entry.path, fileName: entry.name)
                 }
             }
             Divider()
@@ -432,6 +433,7 @@ struct SftpView: View {
     }
 
     private func processNextUpload() {
+        guard let serverId = tab.serverId else { return }
         guard let idx = transferTasks.firstIndex(where: { $0.status == .queued }) else {
             if transferTasks.allSatisfy({ $0.status != .transferring }) {
                 appState.setSftpTransferActive(false, for: tab.id)
@@ -441,7 +443,6 @@ struct SftpView: View {
         transferTasks[idx].status = .transferring
         let task = transferTasks[idx]
         let taskId = task.id
-        let serverId = tab.serverId
         let localPath = task.localPath ?? ""
         let remotePath = task.remotePath
         let currentPath = path
@@ -498,9 +499,10 @@ struct SftpView: View {
     }
 
     private func loadHome() {
+        guard let serverId = tab.serverId else { return }
         blockingAsync {
             do {
-                let home = try self.appState.bridge.getServerHome(serverId: self.tab.serverId)
+                let home = try self.appState.bridge.getServerHome(serverId: serverId)
                 DispatchQueue.main.async {
                     self.pathHistory = [home]
                     self.loadDir(home)
@@ -515,11 +517,11 @@ struct SftpView: View {
     }
 
     private func loadDir(_ dirPath: String) {
+        guard let serverId = tab.serverId else { return }
         print("[SftpView] loadDir: \(dirPath)")
         path = dirPath
         loading = true
         selectedEntry = nil
-        let serverId = tab.serverId
         let bridge = appState.bridge
         blockingAsync {
             do {
@@ -560,8 +562,8 @@ struct SftpView: View {
         panel.nameFieldStringValue = entry.name
         panel.beginSheetModal(for: NSApp.keyWindow!) { resp in
             guard resp == .OK, let url = panel.url else { return }
+            guard let serverId = tab.serverId else { return }
             transfer = TransferInfo(direction: "download", fileName: entry.name, transferred: 0, total: entry.size)
-            let serverId = tab.serverId
             let remotePath = entry.path
             let localPath = url.path
             let bridge = appState.bridge
@@ -608,11 +610,11 @@ struct SftpView: View {
         panel.canChooseDirectories = false
         panel.beginSheetModal(for: NSApp.keyWindow!) { resp in
             guard resp == .OK, let url = panel.url else { return }
+            guard let serverId = tab.serverId else { return }
             let fileName = url.lastPathComponent
             let remotePath = path == "/" ? "/\(fileName)" : "\(path)/\(fileName)"
             let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
             transfer = TransferInfo(direction: "upload", fileName: fileName, transferred: 0, total: fileSize)
-            let serverId = tab.serverId
             let localPath = url.path
             let bridge = appState.bridge
             let currentPath = path
@@ -666,7 +668,7 @@ struct SftpView: View {
         guard let window = NSApp.keyWindow else { return }
         alert.beginSheetModal(for: window) { resp in
             guard resp == .alertFirstButtonReturn else { return }
-            let serverId = self.tab.serverId
+            guard let serverId = self.tab.serverId else { return }
             let entryPath = entry.path
             let isDir = entry.is_dir
             let bridge = self.appState.bridge
@@ -689,7 +691,7 @@ struct SftpView: View {
 
     private func handleRename() {
         guard let entry = selectedEntry, !renameName.isEmpty, renameName != entry.name else { return }
-        let serverId = tab.serverId
+        guard let serverId = tab.serverId else { return }
         let oldPath = entry.path
         let newPath = path == "/" ? "/\(renameName)" : "\(path)/\(renameName)"
         let bridge = appState.bridge
@@ -711,7 +713,7 @@ struct SftpView: View {
 
     private func handleMkdir() {
         guard !mkdirName.isEmpty else { return }
-        let serverId = tab.serverId
+        guard let serverId = tab.serverId else { return }
         let dirPath = path == "/" ? "/\(mkdirName)" : "\(path)/\(mkdirName)"
         let bridge = appState.bridge
         let currentPath = path
