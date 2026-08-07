@@ -112,6 +112,8 @@ struct PromoteTemporaryServerInput: Codable, Equatable {
 protocol ServerWorkspaceBridge {
     func listServerOrganizationAsync() async throws -> ServerOrganizationSnapshot
     func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String
+    func spawnChannelAsync(existingSessionId: String) async throws -> String
+    func disconnectSSHAsync(sessionId: String) async throws
     func promoteTemporaryServerAsync(
         sessionId: String,
         input: PromoteTemporaryServerInput

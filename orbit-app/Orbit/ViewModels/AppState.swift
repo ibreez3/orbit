@@ -798,6 +798,7 @@ class AppState: ObservableObject {
             title: "SSH: \(displayName)"
         )
         tabState.temporaryDrafts[id] = draft
+        tabState.temporaryTabTokens[id] = UUID()
         tabs.append(tab)
         requestActivateTab(id)
         return id
@@ -807,31 +808,59 @@ class AppState: ObservableObject {
         tabState.temporaryDrafts[tabId]
     }
 
-    func promoteTemporaryTab(tabId: String, sessionId: String) async throws {
+    @MainActor
+    @discardableResult
+    func promoteTemporaryTab(
+        tabId: String,
+        sessionId: String
+    ) async throws -> TemporaryPromotionOutcome {
+        guard !tabState.temporaryPromotionTabIds.contains(tabId) else {
+            throw WorkspaceError.promotionInProgress
+        }
         guard let draft = temporaryDraft(for: tabId),
-              tabState.tab(id: tabId)?.connectionTarget == .temporary(tabId: tabId) else {
+              let tabToken = tabState.temporaryTabTokens[tabId],
+              let tab = tabState.tab(id: tabId),
+              tab.connectionTarget == .temporary(tabId: tabId) else {
             throw WorkspaceError.missingTemporaryDraft
         }
+        guard tab.sessionId == sessionId else {
+            throw WorkspaceError.staleTemporarySession
+        }
+
+        tabState.temporaryPromotionTabIds.insert(tabId)
+        defer { tabState.temporaryPromotionTabIds.remove(tabId) }
 
         let server = try await workspaceBridge.promoteTemporaryServerAsync(
             sessionId: sessionId,
             input: draft.promotionInput
         )
 
-        guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else {
-            throw WorkspaceError.missingTemporaryDraft
+        refreshServerInventory(with: server)
+
+        guard tabState.temporaryTabTokens[tabId] == tabToken else {
+            return .persistedAfterTabClosed(serverId: server.id)
+        }
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }),
+              tabs[tabIndex].connectionTarget == .temporary(tabId: tabId),
+              tabs[tabIndex].sessionId == sessionId,
+              temporaryDraft(for: tabId) == draft else {
+            return .persistedWithoutRebinding(serverId: server.id)
         }
         tabs[tabIndex].serverId = server.id
         tabs[tabIndex].connectionTarget = .saved(serverId: server.id)
         tabs[tabIndex].serverName = server.name
         tabs[tabIndex].title = "SSH: \(server.name)"
+        clearTemporaryDraft(tabId: tabId)
+        return .promoted(serverId: server.id)
+    }
+
+    private func refreshServerInventory(with server: Server) {
         if let serverIndex = servers.firstIndex(where: { $0.id == server.id }) {
             servers[serverIndex] = server
         } else {
             servers.append(server)
         }
         loadServers()
-        clearTemporaryDraft(tabId: tabId)
     }
 
     func addTab(server: Server, type: TabType) {
@@ -1115,7 +1144,9 @@ class AppState: ObservableObject {
         Task {
             let newChannelId: String
             do {
-                newChannelId = try await bridge.spawnChannelAsync(existingSessionId: existingChannelId)
+                newChannelId = try await workspaceBridge.spawnChannelAsync(
+                    existingSessionId: existingChannelId
+                )
             } catch {
                 await MainActor.run {
                     alertTitle = "分屏失败"
@@ -1124,8 +1155,11 @@ class AppState: ObservableObject {
                 return
             }
 
-            await MainActor.run {
-                guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+            let attached = await MainActor.run {
+                guard let idx = tabs.firstIndex(where: { $0.id == tabId }),
+                      tabOwnsChannel(tabs[idx], channelId: existingChannelId) else {
+                    return false
+                }
                 let newSplitId = UUID().uuidString
                 let newLeaf = PaneNode.leaf(channelId: newChannelId)
 
@@ -1138,6 +1172,12 @@ class AppState: ObservableObject {
                                                  first: .leaf(channelId: existingChannelId), second: newLeaf)
                 }
                 requestFocusPane(tabId: tabId, paneId: newChannelId)
+                return true
+            }
+
+            guard attached else {
+                await discardSSHSession(newChannelId)
+                return
             }
 
             // Focus the new terminal after SwiftUI creates it
@@ -1148,6 +1188,13 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    private func tabOwnsChannel(_ tab: TabItem, channelId: String) -> Bool {
+        if let tree = tab.paneTree {
+            return tree.contains(channelId)
+        }
+        return tab.sessionId == channelId
     }
 
     func closeCurrentPane() {
@@ -1305,18 +1352,41 @@ class AppState: ObservableObject {
         }
     }
 
+    @MainActor
+    @discardableResult
     func installSSHSession(
         tabId: String,
+        expectedTarget: ServerConnectionTarget,
         sessionId: String,
         dataHandler: @escaping (Data) -> Void,
         closedHandler: @escaping () -> Void
-    ) {
+    ) async -> Bool {
+        guard let tab = tabState.tab(id: tabId),
+              tab.type == .terminal,
+              tab.connectionTarget == expectedTarget,
+              tab.sessionId == nil else {
+            await discardSSHSession(sessionId)
+            return false
+        }
         updateTabSessionId(tabId, sessionId: sessionId)
         bridge.setSSHHandlers(
             sessionId: sessionId,
             dataHandler: dataHandler,
             closedHandler: closedHandler
         )
+        let installed = tabState.tab(id: tabId)?.connectionTarget == expectedTarget
+            && tabState.tab(id: tabId)?.sessionId == sessionId
+        if !installed {
+            await discardSSHSession(sessionId)
+        }
+        return installed
+    }
+
+    @MainActor
+    private func discardSSHSession(_ sessionId: String) async {
+        bridge.removeSSHHandlers(sessionId: sessionId)
+        bridge.removeTerminalView(sessionId: sessionId)
+        try? await workspaceBridge.disconnectSSHAsync(sessionId: sessionId)
     }
 
     func connectSSH(for connectionTarget: ServerConnectionTarget) async throws -> String {
@@ -1348,6 +1418,7 @@ class AppState: ObservableObject {
     }
 
     private func clearTemporaryDraft(tabId: String) {
+        tabState.temporaryTabTokens.removeValue(forKey: tabId)
         guard var draft = tabState.temporaryDrafts[tabId] else { return }
         draft.clearSecrets()
         tabState.temporaryDrafts[tabId] = draft
@@ -2065,9 +2136,11 @@ class AppState: ObservableObject {
     }
 }
 
-enum WorkspaceError: LocalizedError {
+enum WorkspaceError: LocalizedError, Equatable {
     case missingTemporaryDraft
     case localConnectionHandledSeparately
+    case promotionInProgress
+    case staleTemporarySession
 
     var errorDescription: String? {
         switch self {
@@ -2075,8 +2148,18 @@ enum WorkspaceError: LocalizedError {
             return "临时连接草稿不存在"
         case .localConnectionHandledSeparately:
             return "本地终端由本地 Shell 建立连接"
+        case .promotionInProgress:
+            return "该临时连接正在保存"
+        case .staleTemporarySession:
+            return "临时连接会话已变更"
         }
     }
+}
+
+enum TemporaryPromotionOutcome: Equatable {
+    case promoted(serverId: String)
+    case persistedAfterTabClosed(serverId: String)
+    case persistedWithoutRebinding(serverId: String)
 }
 
 extension TemporaryConnectionDraft {

@@ -5,6 +5,8 @@ final class TabState: ObservableObject {
     @Published var activeTabId: String?
     @Published var activeTabError: String?
     @Published var temporaryDrafts: [String: TemporaryConnectionDraft] = [:]
+    var temporaryTabTokens: [String: UUID] = [:]
+    var temporaryPromotionTabIds: Set<String> = []
 
     var activeTab: TabItem? {
         guard let activeTabId else { return nil }

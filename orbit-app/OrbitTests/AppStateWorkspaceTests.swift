@@ -44,7 +44,8 @@ final class AppStateWorkspaceTests: XCTestCase {
         XCTAssertNil(state.tabs[2].serverId)
     }
 
-    func testInstallingSessionPublishesOwnershipBeforeDrainingEarlyClose() {
+    @MainActor
+    func testInstallingSessionPublishesOwnershipBeforeDrainingEarlyClose() async {
         let bridge = OrbitBridge.shared
         let state = AppState()
         let sessionId = "test-early-close-owner-\(UUID().uuidString)"
@@ -63,8 +64,9 @@ final class AppStateWorkspaceTests: XCTestCase {
         state.activeTabId = tab.id
         bridge.handleSSHClosed(sessionId: sessionId)
 
-        state.installSSHSession(
+        await state.installSSHSession(
             tabId: tab.id,
+            expectedTarget: tab.connectionTarget,
             sessionId: sessionId,
             dataHandler: { _ in },
             closedHandler: { state.handleChannelClosed(channelId: sessionId) }

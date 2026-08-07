@@ -47,6 +47,41 @@ final class ServerWorkspaceStateTests: XCTestCase {
         )
     }
 
+    func testClosingTabWhileTemporaryConnectIsPendingDiscardsCreatedSession() async throws {
+        let connectStarted = expectation(description: "temporary connect started")
+        let disconnected = expectation(description: "orphan session disconnected")
+        let bridge = FakeServerWorkspaceBridge(
+            connectStarted: connectStarted,
+            disconnected: disconnected
+        )
+        let state = AppState(workspaceBridge: bridge)
+        let tabId = state.addTemporaryTerminalTab(draft: .fixture(password: "secret"))
+        let target = ServerConnectionTarget.temporary(tabId: tabId)
+
+        let connectTask = Task { try await state.connectSSH(for: target) }
+        await fulfillment(of: [connectStarted], timeout: 1)
+        state.removeTab(tabId)
+        bridge.resumeConnect(sessionId: "orphan-session")
+        let sessionId = try await connectTask.value
+
+        OrbitBridge.shared.handleSSHData(
+            sessionId: sessionId,
+            data: Data("buffered".utf8)
+        )
+        let installed = await state.installSSHSession(
+            tabId: tabId,
+            expectedTarget: target,
+            sessionId: sessionId,
+            dataHandler: { _ in XCTFail("Orphan data must not drain") },
+            closedHandler: { XCTFail("Orphan close must not drain") }
+        )
+
+        XCTAssertFalse(installed)
+        await fulfillment(of: [disconnected], timeout: 1)
+        XCTAssertEqual(bridge.disconnectedSessionIds, ["orphan-session"])
+        XCTAssertNil(state.tabState.tab(id: tabId))
+    }
+
     func testFailedPromotionPreservesSessionTargetAndDraft() async {
         let bridge = FakeServerWorkspaceBridge(promotionError: FakeError.promotionFailed)
         let state = AppState(workspaceBridge: bridge)
@@ -74,9 +109,10 @@ final class ServerWorkspaceStateTests: XCTestCase {
         let tabId = state.addTemporaryTerminalTab(draft: .fixture(password: "secret"))
         state.updateTabSessionId(tabId, sessionId: "session-1")
 
-        try await state.promoteTemporaryTab(tabId: tabId, sessionId: "session-1")
+        let outcome = try await state.promoteTemporaryTab(tabId: tabId, sessionId: "session-1")
 
         let tab = state.tabState.tab(id: tabId)
+        XCTAssertEqual(outcome, .promoted(serverId: "saved-1"))
         XCTAssertEqual(tab?.connectionTarget, .saved(serverId: "saved-1"))
         XCTAssertEqual(tab?.serverId, "saved-1")
         XCTAssertEqual(tab?.serverName, "Saved host")
@@ -85,6 +121,118 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertNil(state.temporaryDraft(for: tabId))
         XCTAssertEqual(bridge.promotedSessionId, "session-1")
         XCTAssertEqual(bridge.promotedInput?.name, "Temporary host")
+    }
+
+    func testOverlappingPromotionOnlyPersistsOnce() async throws {
+        let promotionStarted = expectation(description: "first promotion started")
+        let bridge = FakeServerWorkspaceBridge(promotionStarted: promotionStarted)
+        let state = AppState(workspaceBridge: bridge)
+        let tabId = state.addTemporaryTerminalTab(draft: .fixture(password: "secret"))
+        state.updateTabSessionId(tabId, sessionId: "session-1")
+
+        let firstPromotion = Task {
+            try await state.promoteTemporaryTab(tabId: tabId, sessionId: "session-1")
+        }
+        await fulfillment(of: [promotionStarted], timeout: 1)
+
+        do {
+            _ = try await state.promoteTemporaryTab(tabId: tabId, sessionId: "session-1")
+            XCTFail("Expected overlapping promotion to be rejected")
+        } catch {
+            XCTAssertEqual(error as? WorkspaceError, .promotionInProgress)
+        }
+
+        XCTAssertEqual(bridge.promotionCallCount, 1)
+        bridge.resumePromotion()
+        let firstOutcome = try await firstPromotion.value
+        XCTAssertEqual(firstOutcome, .promoted(serverId: "saved-1"))
+    }
+
+    func testCloseAndRecreateDuringPromotionDoesNotRebindReplacementTab() async throws {
+        let promotionStarted = expectation(description: "promotion started")
+        let bridge = FakeServerWorkspaceBridge(promotionStarted: promotionStarted)
+        let state = AppState(workspaceBridge: bridge)
+        let tabId = state.addTemporaryTerminalTab(draft: .fixture(password: "secret"))
+        state.updateTabSessionId(tabId, sessionId: "session-1")
+
+        let promotion = Task {
+            try await state.promoteTemporaryTab(tabId: tabId, sessionId: "session-1")
+        }
+        await fulfillment(of: [promotionStarted], timeout: 1)
+        state.removeTab(tabId)
+        let replacement = TabItem(
+            id: tabId,
+            type: .terminal,
+            serverId: nil,
+            connectionTarget: .temporary(tabId: tabId),
+            serverName: "Replacement",
+            title: "SSH: Replacement",
+            sessionId: "replacement-session"
+        )
+        state.tabs.append(replacement)
+        state.tabState.temporaryDrafts[tabId] = .fixture(password: "replacement-secret")
+
+        bridge.resumePromotion()
+        let outcome = try await promotion.value
+
+        XCTAssertEqual(outcome, .persistedAfterTabClosed(serverId: "saved-1"))
+        XCTAssertEqual(
+            state.tabState.tab(id: tabId)?.connectionTarget,
+            .temporary(tabId: tabId)
+        )
+        XCTAssertEqual(state.tabState.tab(id: tabId)?.sessionId, "replacement-session")
+        XCTAssertEqual(state.temporaryDraft(for: tabId)?.password, "replacement-secret")
+    }
+
+    func testClosingTabWhileSplitIsPendingDiscardsSpawnedChannel() async {
+        let spawnStarted = expectation(description: "spawn started")
+        let disconnected = expectation(description: "orphan channel disconnected")
+        let bridge = FakeServerWorkspaceBridge(
+            spawnStarted: spawnStarted,
+            disconnected: disconnected
+        )
+        let state = AppState(workspaceBridge: bridge)
+        let tabId = state.addTemporaryTerminalTab(draft: .fixture())
+        state.updateTabSessionId(tabId, sessionId: "source-channel")
+
+        state.splitCurrentPane(direction: .horizontal)
+        await fulfillment(of: [spawnStarted], timeout: 1)
+        state.removeTab(tabId)
+        bridge.resumeSpawn(channelId: "orphan-channel")
+
+        await fulfillment(of: [disconnected], timeout: 1)
+        XCTAssertEqual(bridge.disconnectedSessionIds, ["orphan-channel"])
+    }
+
+    func testClosingSplitSourceWhileSpawnIsPendingDiscardsSpawnedChannel() async {
+        let spawnStarted = expectation(description: "spawn started")
+        let disconnected = expectation(description: "orphan channel disconnected")
+        let bridge = FakeServerWorkspaceBridge(
+            spawnStarted: spawnStarted,
+            disconnected: disconnected
+        )
+        let state = AppState(workspaceBridge: bridge)
+        let tabId = state.addTemporaryTerminalTab(draft: .fixture())
+        state.updateTabSessionId(tabId, sessionId: "source-channel")
+        let otherChannel = "other-channel"
+        state.tabs[0].paneTree = .split(
+            id: "existing-split",
+            direction: .horizontal,
+            ratio: 0.5,
+            first: .leaf(channelId: "source-channel"),
+            second: .leaf(channelId: otherChannel)
+        )
+        state.tabs[0].focusedChannelId = "source-channel"
+
+        state.splitCurrentPane(direction: .vertical)
+        await fulfillment(of: [spawnStarted], timeout: 1)
+        state.handleChannelClosed(channelId: "source-channel")
+        bridge.resumeSpawn(channelId: "orphan-channel")
+
+        await fulfillment(of: [disconnected], timeout: 1)
+        XCTAssertEqual(state.tabState.tab(id: tabId)?.sessionId, otherChannel)
+        XCTAssertNil(state.tabState.tab(id: tabId)?.paneTree)
+        XCTAssertEqual(bridge.disconnectedSessionIds, ["orphan-channel"])
     }
 
     func testConnectedTemporaryTabAllowsSessionToolsButNotPersistedServerTools() {
@@ -108,19 +256,37 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private let temporarySessionId: String
     private let promotedServer: Server
     private let promotionError: Error?
+    private let connectStarted: XCTestExpectation?
+    private let promotionStarted: XCTestExpectation?
+    private let spawnStarted: XCTestExpectation?
+    private let disconnected: XCTestExpectation?
+
+    private var connectContinuation: CheckedContinuation<String, Never>?
+    private var promotionContinuation: CheckedContinuation<Server, Never>?
+    private var spawnContinuation: CheckedContinuation<String, Never>?
 
     private(set) var connectedInput: TemporaryConnectionInput?
     private(set) var promotedSessionId: String?
     private(set) var promotedInput: PromoteTemporaryServerInput?
+    private(set) var promotionCallCount = 0
+    private(set) var disconnectedSessionIds: [String] = []
 
     init(
         temporarySessionId: String = "temporary-session",
         promotedServer: Server = .fixture(),
-        promotionError: Error? = nil
+        promotionError: Error? = nil,
+        connectStarted: XCTestExpectation? = nil,
+        promotionStarted: XCTestExpectation? = nil,
+        spawnStarted: XCTestExpectation? = nil,
+        disconnected: XCTestExpectation? = nil
     ) {
         self.temporarySessionId = temporarySessionId
         self.promotedServer = promotedServer
         self.promotionError = promotionError
+        self.connectStarted = connectStarted
+        self.promotionStarted = promotionStarted
+        self.spawnStarted = spawnStarted
+        self.disconnected = disconnected
     }
 
     func listServerOrganizationAsync() async throws -> ServerOrganizationSnapshot {
@@ -129,6 +295,12 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
 
     func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String {
         connectedInput = input
+        if let connectStarted {
+            connectStarted.fulfill()
+            return await withCheckedContinuation { continuation in
+                connectContinuation = continuation
+            }
+        }
         return temporarySessionId
     }
 
@@ -136,12 +308,49 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         sessionId: String,
         input: PromoteTemporaryServerInput
     ) async throws -> Server {
+        promotionCallCount += 1
         promotedSessionId = sessionId
         promotedInput = input
         if let promotionError {
             throw promotionError
         }
+        if let promotionStarted, promotionCallCount == 1 {
+            promotionStarted.fulfill()
+            return await withCheckedContinuation { continuation in
+                promotionContinuation = continuation
+            }
+        }
         return promotedServer
+    }
+
+    func spawnChannelAsync(existingSessionId: String) async throws -> String {
+        if let spawnStarted {
+            spawnStarted.fulfill()
+            return await withCheckedContinuation { continuation in
+                spawnContinuation = continuation
+            }
+        }
+        return "spawned-channel"
+    }
+
+    func disconnectSSHAsync(sessionId: String) async throws {
+        disconnectedSessionIds.append(sessionId)
+        disconnected?.fulfill()
+    }
+
+    func resumeConnect(sessionId: String) {
+        connectContinuation?.resume(returning: sessionId)
+        connectContinuation = nil
+    }
+
+    func resumePromotion() {
+        promotionContinuation?.resume(returning: promotedServer)
+        promotionContinuation = nil
+    }
+
+    func resumeSpawn(channelId: String) {
+        spawnContinuation?.resume(returning: channelId)
+        spawnContinuation = nil
     }
 }
 
