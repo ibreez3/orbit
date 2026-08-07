@@ -47,6 +47,92 @@ final class ServerWorkspaceStateTests: XCTestCase {
         )
     }
 
+    func testCanceledQuickConnectDiscardsBufferedCallbacksAndRejectsDuplicateSubmit() async {
+        let connectStarted = expectation(description: "temporary connect started")
+        let disconnected = expectation(description: "canceled session disconnected")
+        let bridge = FakeServerWorkspaceBridge(
+            connectStarted: connectStarted,
+            disconnected: disconnected
+        )
+        let state = AppState(workspaceBridge: bridge)
+        state.presentTemporaryConnectionPanel(
+            address: .init(host: "10.0.0.1", port: 2222, username: "alice")
+        )
+        state.uiState.temporaryConnectionDraft?.password = "secret"
+
+        let submission = state.submitTemporaryConnection()
+        let duplicate = state.submitTemporaryConnection()
+        await fulfillment(of: [connectStarted], timeout: 1)
+
+        let sessionId = "canceled-session"
+        OrbitBridge.shared.handleSSHData(
+            sessionId: sessionId,
+            data: Data("buffered".utf8)
+        )
+        state.dismissTemporaryConnectionPanel()
+        bridge.resumeConnect(sessionId: sessionId)
+        await submission?.value
+        await fulfillment(of: [disconnected], timeout: 1)
+
+        var received: [Data] = []
+        OrbitBridge.shared.setSSHHandlers(
+            sessionId: sessionId,
+            dataHandler: { received.append($0) },
+            closedHandler: {}
+        )
+        defer { OrbitBridge.shared.removeSSHHandlers(sessionId: sessionId) }
+
+        XCTAssertNil(duplicate)
+        XCTAssertEqual(bridge.connectCallCount, 1)
+        XCTAssertEqual(bridge.disconnectedSessionIds, [sessionId])
+        XCTAssertTrue(received.isEmpty)
+        XCTAssertTrue(state.tabs.isEmpty)
+    }
+
+    func testSavePromotionFailureIsTabScopedAndRetryReusesConnectedSession() async {
+        let bridge = FakeServerWorkspaceBridge(
+            promotionErrors: [FakeError.promotionFailed]
+        )
+        let state = AppState(workspaceBridge: bridge)
+        state.presentTemporaryConnectionPanel(
+            address: .init(host: "10.0.0.1", port: 2222, username: "alice")
+        )
+        state.uiState.temporaryConnectionDraft?.password = "secret"
+        state.uiState.temporaryConnectionDraft?.saveToAssets = true
+        state.uiState.temporaryConnectionDraft?.displayName = "Temporary host"
+
+        let submission = state.submitTemporaryConnection()
+        await submission?.value
+
+        guard let temporaryTabId = state.tabs.first?.id else {
+            return XCTFail("Expected a connected temporary tab")
+        }
+        let connectedSessionId = state.tabs.first?.sessionId
+        state.addLocalTerminalTab()
+
+        let failure = state.temporaryPromotionFailure(for: temporaryTabId)
+        XCTAssertEqual(failure?.sessionId, connectedSessionId)
+        XCTAssertEqual(failure?.isRetrying, false)
+        XCTAssertNil(state.temporaryPromotionFailure(for: state.activeTabId!))
+        XCTAssertEqual(
+            state.tabState.tab(id: temporaryTabId)?.connectionTarget,
+            .temporary(tabId: temporaryTabId)
+        )
+        XCTAssertEqual(bridge.connectCallCount, 1)
+        XCTAssertEqual(bridge.promotionCallCount, 1)
+
+        await state.retryTemporaryPromotion(tabId: temporaryTabId)
+
+        XCTAssertNil(state.temporaryPromotionFailure(for: temporaryTabId))
+        XCTAssertEqual(
+            state.tabState.tab(id: temporaryTabId)?.connectionTarget,
+            .saved(serverId: "saved-1")
+        )
+        XCTAssertEqual(state.tabState.tab(id: temporaryTabId)?.sessionId, connectedSessionId)
+        XCTAssertEqual(bridge.connectCallCount, 1)
+        XCTAssertEqual(bridge.promotionCallCount, 2)
+    }
+
     func testClosingTabWhileTemporaryConnectIsPendingDiscardsCreatedSession() async throws {
         let connectStarted = expectation(description: "temporary connect started")
         let disconnected = expectation(description: "orphan session disconnected")
@@ -255,7 +341,7 @@ private enum FakeError: Error, Equatable {
 private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private let temporarySessionId: String
     private let promotedServer: Server
-    private let promotionError: Error?
+    private var promotionErrors: [Error]
     private let connectStarted: XCTestExpectation?
     private let promotionStarted: XCTestExpectation?
     private let spawnStarted: XCTestExpectation?
@@ -266,6 +352,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private var spawnContinuation: CheckedContinuation<String, Never>?
 
     private(set) var connectedInput: TemporaryConnectionInput?
+    private(set) var connectCallCount = 0
     private(set) var promotedSessionId: String?
     private(set) var promotedInput: PromoteTemporaryServerInput?
     private(set) var promotionCallCount = 0
@@ -275,6 +362,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         temporarySessionId: String = "temporary-session",
         promotedServer: Server = .fixture(),
         promotionError: Error? = nil,
+        promotionErrors: [Error] = [],
         connectStarted: XCTestExpectation? = nil,
         promotionStarted: XCTestExpectation? = nil,
         spawnStarted: XCTestExpectation? = nil,
@@ -282,7 +370,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     ) {
         self.temporarySessionId = temporarySessionId
         self.promotedServer = promotedServer
-        self.promotionError = promotionError
+        self.promotionErrors = promotionError.map { [$0] } ?? promotionErrors
         self.connectStarted = connectStarted
         self.promotionStarted = promotionStarted
         self.spawnStarted = spawnStarted
@@ -294,6 +382,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     }
 
     func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String {
+        connectCallCount += 1
         connectedInput = input
         if let connectStarted {
             connectStarted.fulfill()
@@ -311,8 +400,8 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         promotionCallCount += 1
         promotedSessionId = sessionId
         promotedInput = input
-        if let promotionError {
-            throw promotionError
+        if !promotionErrors.isEmpty {
+            throw promotionErrors.removeFirst()
         }
         if let promotionStarted, promotionCallCount == 1 {
             promotionStarted.fulfill()

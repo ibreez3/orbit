@@ -15,6 +15,14 @@ final class ServerWorkspaceModelsTests: XCTestCase {
             try ServerAddressParser.parse("alice@[2001:db8::10]:22").get(),
             .init(host: "2001:db8::10", port: 22, username: "alice")
         )
+        XCTAssertEqual(
+            try ServerAddressParser.parse("[2001:db8::10]").get(),
+            .init(host: "2001:db8::10", port: 22, username: nil)
+        )
+        XCTAssertEqual(
+            try ServerAddressParser.parse("alice@[2001:db8::10]").get(),
+            .init(host: "2001:db8::10", port: 22, username: "alice")
+        )
     }
 
     func testAddressParserRejectsEmptyAmbiguousAndInvalidAddresses() {
@@ -29,7 +37,10 @@ final class ServerWorkspaceModelsTests: XCTestCase {
             "host:0",
             "host:65536",
             "host:not-a-port",
-            "[2001:db8::10]",
+            "[2001:db8::10]suffix",
+            "[2001:db8::10]:",
+            "[2001:db8::10]:22:23",
+            "[2001:db8::10",
             "[not::ipv6]:22",
             "2001:db8::10:22",
         ]

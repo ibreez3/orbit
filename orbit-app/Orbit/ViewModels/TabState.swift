@@ -5,6 +5,7 @@ final class TabState: ObservableObject {
     @Published var activeTabId: String?
     @Published var activeTabError: String?
     @Published var temporaryDrafts: [String: TemporaryConnectionDraft] = [:]
+    @Published var temporaryPromotionFailures: [String: TemporaryPromotionFailure] = [:]
     var temporaryTabTokens: [String: UUID] = [:]
     var temporaryPromotionTabIds: Set<String> = []
 

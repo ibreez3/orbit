@@ -48,6 +48,9 @@ enum ServerAddressParser {
             guard isValidIPv6(host) else {
                 return .failure(.invalidHost)
             }
+            if suffix.isEmpty {
+                return .success(.init(host: host, port: 22, username: username))
+            }
             guard suffix.hasPrefix(":"), suffix.count > 1 else {
                 return .failure(.invalidPort)
             }
@@ -241,6 +244,12 @@ struct TemporaryConnectionDraft: Equatable {
         privateKey = ""
         keyPassphrase = ""
     }
+}
+
+struct TemporaryPromotionFailure: Equatable {
+    let sessionId: String
+    var message: String
+    var isRetrying = false
 }
 
 struct ServerFolder: Codable, Equatable, Identifiable {

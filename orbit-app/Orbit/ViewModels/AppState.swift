@@ -829,6 +829,10 @@ class AppState: ObservableObject {
         tabState.temporaryDrafts[tabId]
     }
 
+    func temporaryPromotionFailure(for tabId: String) -> TemporaryPromotionFailure? {
+        tabState.temporaryPromotionFailures[tabId]
+    }
+
     @MainActor
     @discardableResult
     func promoteTemporaryTab(
@@ -873,6 +877,37 @@ class AppState: ObservableObject {
         tabs[tabIndex].title = "SSH: \(server.name)"
         clearTemporaryDraft(tabId: tabId)
         return .promoted(serverId: server.id)
+    }
+
+    @MainActor
+    func retryTemporaryPromotion(tabId: String) async {
+        guard var failure = temporaryPromotionFailure(for: tabId),
+              !failure.isRetrying,
+              let tab = tabState.tab(id: tabId),
+              tab.connectionTarget == .temporary(tabId: tabId),
+              tab.sessionId == failure.sessionId,
+              temporaryDraft(for: tabId) != nil else {
+            return
+        }
+
+        failure.isRetrying = true
+        tabState.temporaryPromotionFailures[tabId] = failure
+        do {
+            _ = try await promoteTemporaryTab(
+                tabId: tabId,
+                sessionId: failure.sessionId
+            )
+        } catch {
+            recordTemporaryPromotionFailure(
+                error,
+                tabId: tabId,
+                sessionId: failure.sessionId
+            )
+        }
+    }
+
+    func dismissTemporaryPromotionFailure(tabId: String) {
+        tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
     }
 
     private func refreshServerInventory(with server: Server) {
@@ -928,16 +963,18 @@ class AppState: ObservableObject {
         }
     }
 
-    func submitTemporaryConnection() {
+    @MainActor
+    @discardableResult
+    func submitTemporaryConnection() -> Task<Void, Never>? {
         guard let token = uiState.temporaryConnectionToken,
               var draft = uiState.temporaryConnectionDraft,
-              !draft.isConnecting else { return }
+              !draft.isConnecting else { return nil }
 
         if let validationError = temporaryConnectionValidationError(draft) {
             draft.validationError = validationError
             draft.connectionError = nil
             uiState.temporaryConnectionDraft = draft
-            return
+            return nil
         }
 
         draft.validationError = nil
@@ -946,55 +983,70 @@ class AppState: ObservableObject {
         uiState.temporaryConnectionDraft = draft
         let submittedDraft = draft
 
-        Task {
+        return Task {
             do {
                 let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
                     input: submittedDraft.connectionInput
                 )
-                await MainActor.run {
-                    guard uiState.temporaryConnectionToken == token,
-                          uiState.temporaryConnectionDraft != nil else {
-                        Task { try? await workspaceBridge.disconnectSSHAsync(sessionId: sessionId) }
-                        return
-                    }
-
-                    var tabDraft = submittedDraft
-                    tabDraft.isConnecting = false
-                    tabDraft.validationError = nil
-                    tabDraft.connectionError = nil
-                    let tabId = addTemporaryTerminalTab(
-                        draft: tabDraft,
-                        sessionId: sessionId
-                    )
-                    dismissTemporaryConnectionPanel(returnToSearch: false)
-
-                    if tabDraft.saveToAssets {
-                        Task {
-                            do {
-                                _ = try await promoteTemporaryTab(
-                                    tabId: tabId,
-                                    sessionId: sessionId
-                                )
-                            } catch {
-                                await MainActor.run {
-                                    activeTabError = "服务器已连接，但保存失败: \(error.localizedDescription)"
-                                }
-                            }
-                        }
-                    }
-
-                    restoreActiveTerminalFocus()
+                guard uiState.temporaryConnectionToken == token,
+                      uiState.temporaryConnectionDraft != nil else {
+                    await discardSSHSession(sessionId)
+                    return
                 }
+
+                var tabDraft = submittedDraft
+                tabDraft.isConnecting = false
+                tabDraft.validationError = nil
+                tabDraft.connectionError = nil
+                let tabId = addTemporaryTerminalTab(
+                    draft: tabDraft,
+                    sessionId: sessionId
+                )
+                dismissTemporaryConnectionPanel(returnToSearch: false)
+                restoreActiveTerminalFocus()
+
+                if tabDraft.saveToAssets {
+                    do {
+                        _ = try await promoteTemporaryTab(
+                            tabId: tabId,
+                            sessionId: sessionId
+                        )
+                    } catch {
+                        recordTemporaryPromotionFailure(
+                            error,
+                            tabId: tabId,
+                            sessionId: sessionId
+                        )
+                    }
+                }
+
             } catch {
-                await MainActor.run {
-                    guard uiState.temporaryConnectionToken == token,
-                          var currentDraft = uiState.temporaryConnectionDraft else { return }
-                    currentDraft.isConnecting = false
-                    currentDraft.connectionError = error.localizedDescription
-                    uiState.temporaryConnectionDraft = currentDraft
-                }
+                guard uiState.temporaryConnectionToken == token,
+                      var currentDraft = uiState.temporaryConnectionDraft else { return }
+                currentDraft.isConnecting = false
+                currentDraft.connectionError = error.localizedDescription
+                uiState.temporaryConnectionDraft = currentDraft
             }
         }
+    }
+
+    @MainActor
+    private func recordTemporaryPromotionFailure(
+        _ error: Error,
+        tabId: String,
+        sessionId: String
+    ) {
+        guard let tab = tabState.tab(id: tabId),
+              tab.connectionTarget == .temporary(tabId: tabId),
+              tab.sessionId == sessionId,
+              temporaryDraft(for: tabId) != nil else {
+            tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            return
+        }
+        tabState.temporaryPromotionFailures[tabId] = TemporaryPromotionFailure(
+            sessionId: sessionId,
+            message: "服务器已连接，但保存失败: \(error.localizedDescription)"
+        )
     }
 
     @discardableResult
@@ -1613,6 +1665,7 @@ class AppState: ObservableObject {
 
     private func clearTemporaryDraft(tabId: String) {
         tabState.temporaryTabTokens.removeValue(forKey: tabId)
+        tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
         guard var draft = tabState.temporaryDrafts[tabId] else { return }
         draft.clearSecrets()
         tabState.temporaryDrafts[tabId] = draft

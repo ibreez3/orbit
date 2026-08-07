@@ -283,9 +283,26 @@ struct MainView: View {
                     appState: appState
                 )
                 .id(tab.id)
-                if tabState.activeTabError != nil, tab.id == tabState.activeTabId {
-                    AIErrorBanner(errorText: tabState.activeTabError!, appState: appState)
-                        .padding(12)
+                if tab.id == tabState.activeTabId {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let failure = tabState.temporaryPromotionFailures[tab.id] {
+                            TemporaryPromotionRetryBanner(
+                                failure: failure,
+                                retry: {
+                                    Task {
+                                        await appState.retryTemporaryPromotion(tabId: tab.id)
+                                    }
+                                },
+                                dismiss: {
+                                    appState.dismissTemporaryPromotionFailure(tabId: tab.id)
+                                }
+                            )
+                        }
+                        if let activeTabError = tabState.activeTabError {
+                            AIErrorBanner(errorText: activeTabError, appState: appState)
+                        }
+                    }
+                    .padding(12)
                 }
             }
         case .sftp:
@@ -458,6 +475,37 @@ struct MainView: View {
     private var pendingCloseTab: TabItem? {
         guard let id = uiState.pendingCloseTabId else { return nil }
         return tabState.tabs.first { $0.id == id }
+    }
+}
+
+private struct TemporaryPromotionRetryBanner: View {
+    let failure: TemporaryPromotionFailure
+    let retry: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            Text(failure.message)
+                .font(.system(size: 11))
+                .lineLimit(2)
+            Button(failure.isRetrying ? "保存中" : "重试保存", action: retry)
+                .disabled(failure.isRetrying)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.35))
+        )
     }
 }
 
