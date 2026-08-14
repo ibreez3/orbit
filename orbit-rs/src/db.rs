@@ -590,10 +590,10 @@ impl Database {
         let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.as_deref().unwrap_or(""));
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE servers SET name=?1,host=?2,port=?3,group_name=?4,auth_type=?5,username=?6,password=?7,private_key=?8,key_source=?9,key_file_path=?10,key_passphrase=?11,credential_group_id=?12,jump_server_id=?13,folder_id=COALESCE(?14, folder_id),updated_at=?15 WHERE id=?16",
+            "UPDATE servers SET name=?1,host=?2,port=?3,group_name=COALESCE(?4, group_name),auth_type=?5,username=?6,password=?7,private_key=?8,key_source=?9,key_file_path=?10,key_passphrase=?11,credential_group_id=?12,jump_server_id=?13,folder_id=COALESCE(?14, folder_id),updated_at=?15 WHERE id=?16",
             rusqlite::params![
                 input.name, input.host, input.port.unwrap_or(22),
-                input.group_name.as_deref().unwrap_or(""),
+                input.group_name.as_deref(),
                 input.auth_type.as_deref().unwrap_or("password"),
                 input.username,
                 enc_password, enc_private_key,
@@ -1440,6 +1440,41 @@ mod server_organization_tests {
         .unwrap();
 
         assert_eq!(db.get_server("s1").unwrap().folder_id, folder_id);
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn server_update_preserves_legacy_group_when_input_omits_it() {
+        let path = std::env::temp_dir().join(format!(
+            "orbit-migration-group-update-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        create_legacy_database(&path, "s1", "Prod", "10.0.0.1", "jump-1");
+        let db = Database::new(path.to_str().unwrap()).unwrap();
+
+        db.update_server(
+            "s1",
+            &ServerInput {
+                name: "renamed".into(),
+                host: "10.0.0.2".into(),
+                port: Some(2222),
+                group_name: None,
+                auth_type: Some("password".into()),
+                username: "root".into(),
+                password: Some("".into()),
+                private_key: Some("".into()),
+                key_source: Some("content".into()),
+                key_file_path: Some("".into()),
+                key_passphrase: Some("".into()),
+                credential_group_id: Some("".into()),
+                jump_server_id: Some("jump-1".into()),
+                folder_id: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(db.get_server("s1").unwrap().group_name, "Prod");
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
