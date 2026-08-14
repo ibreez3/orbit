@@ -474,6 +474,7 @@ protocol ServerWorkspaceBridge {
     func setServerTagsAsync(serverId: String, tagIds: [String]) async throws
     func moveServerAsync(serverId: String, folderId: String?) async throws
     func setServerPinAsync(serverId: String, isPinned: Bool, pinOrder: Int64?) async throws -> Server
+    func connectSSHAsync(serverId: String) async throws -> String
     func connectTemporarySSHAsync(input: TemporaryConnectionInput) async throws -> String
     func spawnChannelAsync(existingSessionId: String) async throws -> String
     func disconnectSSHAsync(sessionId: String) async throws

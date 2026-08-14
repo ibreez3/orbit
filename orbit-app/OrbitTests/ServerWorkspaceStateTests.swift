@@ -561,6 +561,44 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertNil(state.tabState.tab(id: tabId))
     }
 
+    func testClosingSavedTabWhileReconnectIsPendingDiscardsCreatedSessionAndBufferedCallbacks() async {
+        let connectStarted = expectation(description: "saved reconnect started")
+        let disconnected = expectation(description: "orphan saved session disconnected")
+        let bridge = FakeServerWorkspaceBridge(
+            savedConnectStarted: connectStarted,
+            disconnected: disconnected
+        )
+        let state = AppState(workspaceBridge: bridge)
+        state.addTerminalTab(server: .fixture(id: "saved-reconnect"))
+        guard let tabId = state.activeTabId else {
+            return XCTFail("Expected saved terminal tab")
+        }
+
+        state.reconnectTab(tabId)
+        await fulfillment(of: [connectStarted], timeout: 1)
+
+        let sessionId = "orphan-saved-session"
+        OrbitBridge.shared.handleSSHData(
+            sessionId: sessionId,
+            data: Data("buffered".utf8)
+        )
+        state.removeTab(tabId)
+        bridge.resumeSavedConnect(sessionId: sessionId)
+        await fulfillment(of: [disconnected], timeout: 1)
+
+        var received: [Data] = []
+        OrbitBridge.shared.setSSHHandlers(
+            sessionId: sessionId,
+            dataHandler: { received.append($0) },
+            closedHandler: {}
+        )
+        defer { OrbitBridge.shared.removeSSHHandlers(sessionId: sessionId) }
+
+        XCTAssertEqual(bridge.disconnectedSessionIds, [sessionId])
+        XCTAssertTrue(received.isEmpty)
+        XCTAssertNil(state.tabState.tab(id: tabId))
+    }
+
     func testFailedPromotionPreservesSessionTargetAndDraft() async {
         let bridge = FakeServerWorkspaceBridge(promotionError: FakeError.promotionFailed)
         let state = AppState(workspaceBridge: bridge)
@@ -758,12 +796,14 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private let promotedServer: Server
     private var promotionErrors: [Error]
     private let connectStarted: XCTestExpectation?
+    private let savedConnectStarted: XCTestExpectation?
     private let promotionStarted: XCTestExpectation?
     private let promotionSuspendCall: Int
     private let spawnStarted: XCTestExpectation?
     private let disconnected: XCTestExpectation?
 
     private var connectContinuation: CheckedContinuation<String, Never>?
+    private var savedConnectContinuation: CheckedContinuation<String, Never>?
     private var promotionContinuation: CheckedContinuation<Server, Never>?
     private var spawnContinuation: CheckedContinuation<String, Never>?
 
@@ -790,6 +830,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         promotionError: Error? = nil,
         promotionErrors: [Error] = [],
         connectStarted: XCTestExpectation? = nil,
+        savedConnectStarted: XCTestExpectation? = nil,
         promotionStarted: XCTestExpectation? = nil,
         promotionSuspendCall: Int = 1,
         spawnStarted: XCTestExpectation? = nil,
@@ -803,6 +844,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         self.promotedServer = promotedServer
         self.promotionErrors = promotionError.map { [$0] } ?? promotionErrors
         self.connectStarted = connectStarted
+        self.savedConnectStarted = savedConnectStarted
         self.promotionStarted = promotionStarted
         self.promotionSuspendCall = promotionSuspendCall
         self.spawnStarted = spawnStarted
@@ -890,6 +932,16 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
         return temporarySessionId
     }
 
+    func connectSSHAsync(serverId: String) async throws -> String {
+        if let savedConnectStarted {
+            savedConnectStarted.fulfill()
+            return await withCheckedContinuation { continuation in
+                savedConnectContinuation = continuation
+            }
+        }
+        return temporarySessionId
+    }
+
     func promoteTemporaryServerAsync(
         sessionId: String,
         input: PromoteTemporaryServerInput
@@ -927,6 +979,11 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     func resumeConnect(sessionId: String) {
         connectContinuation?.resume(returning: sessionId)
         connectContinuation = nil
+    }
+
+    func resumeSavedConnect(sessionId: String) {
+        savedConnectContinuation?.resume(returning: sessionId)
+        savedConnectContinuation = nil
     }
 
     func resumePromotion() {

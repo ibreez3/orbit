@@ -1891,8 +1891,19 @@ class AppState: ObservableObject {
     func connectSSH(tabId: String, serverId: String) {
         Task {
             do {
-                let sessionId = try await bridge.connectSSHAsync(serverId: serverId)
-                await MainActor.run { updateTabSessionId(tabId, sessionId: sessionId) }
+                let sessionId = try await workspaceBridge.connectSSHAsync(serverId: serverId)
+                let expectedTarget = ServerConnectionTarget.saved(serverId: serverId)
+                let installed = await MainActor.run {
+                    guard let tab = tabState.tab(id: tabId),
+                          tab.type == .terminal,
+                          tab.connectionTarget == expectedTarget,
+                          tab.sessionId == nil else { return false }
+                    updateTabSessionId(tabId, sessionId: sessionId)
+                    return true
+                }
+                if !installed {
+                    await discardSSHSession(sessionId)
+                }
             } catch {
                 await MainActor.run {
                     alertTitle = "连接失败"
