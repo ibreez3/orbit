@@ -599,6 +599,92 @@ final class ServerWorkspaceStateTests: XCTestCase {
         XCTAssertNil(state.tabState.tab(id: tabId))
     }
 
+    func testDatabaseWorkspaceOpensConnectionMatchingActiveServer() {
+        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+        state.inventoryState.databaseConnections = [
+            .fixture(id: "db-other", sshServerId: "server-2", name: "Other"),
+            .fixture(id: "db-match", sshServerId: "server-1", name: "Match")
+        ]
+        state.addTerminalTab(server: .fixture(id: "server-1"))
+
+        state.openDatabaseWorkspace()
+
+        let databaseTab = state.tabs.first { $0.type == .database }
+        XCTAssertEqual(databaseTab?.serverId, "db-match")
+        XCTAssertFalse(state.databaseConnectionDialogOpen)
+    }
+
+    func testDatabaseWorkspaceOpensDialogWhenNoConnectionExists() {
+        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+        state.addTerminalTab(server: .fixture(id: "server-1"))
+
+        state.openDatabaseWorkspace()
+
+        XCTAssertTrue(state.databaseConnectionDialogOpen)
+        XCTAssertFalse(state.tabs.contains { $0.type == .database })
+    }
+
+    func testReconnectDisconnectsPreviousSessionAndStartsSavedConnection() async {
+        let disconnected = expectation(description: "previous session disconnected")
+        let bridge = FakeServerWorkspaceBridge(disconnected: disconnected)
+        let state = AppState(workspaceBridge: bridge)
+        state.addTerminalTab(server: .fixture(id: "saved-reconnect"))
+        guard let tabId = state.activeTabId else {
+            return XCTFail("Expected saved terminal tab")
+        }
+        state.updateTabSessionId(tabId, sessionId: "old-session")
+
+        state.reconnectTab(tabId)
+
+        XCTAssertNil(state.tabState.tab(id: tabId)?.sessionId)
+        await fulfillment(of: [disconnected], timeout: 1)
+        XCTAssertEqual(bridge.disconnectedSessionIds, ["old-session"])
+        for _ in 0..<50 {
+            if state.tabState.tab(id: tabId)?.sessionId == "temporary-session" { break }
+            await Task.yield()
+        }
+        XCTAssertEqual(state.tabState.tab(id: tabId)?.sessionId, "temporary-session")
+    }
+
+    func testReconnectTemporaryTabUsesInMemoryDraft() async {
+        let connectStarted = expectation(description: "temporary reconnect started")
+        let bridge = FakeServerWorkspaceBridge(connectStarted: connectStarted)
+        let state = AppState(workspaceBridge: bridge)
+        let draft = TemporaryConnectionDraft.fixture(password: "secret")
+        let tabId = state.addTemporaryTerminalTab(draft: draft)
+        state.updateTabSessionId(tabId, sessionId: "old-temporary-session")
+
+        state.reconnectTab(tabId)
+
+        XCTAssertNil(state.tabState.tab(id: tabId)?.sessionId)
+        await fulfillment(of: [connectStarted], timeout: 1)
+        XCTAssertEqual(bridge.connectedInput?.host, "10.0.0.1")
+        XCTAssertEqual(bridge.connectedInput?.password, "secret")
+        XCTAssertEqual(state.temporaryDraft(for: tabId), draft)
+
+        bridge.resumeConnect(sessionId: "new-temporary-session")
+        for _ in 0..<50 {
+            if state.tabState.tab(id: tabId)?.sessionId == "new-temporary-session" { break }
+            await Task.yield()
+        }
+        XCTAssertEqual(state.tabState.tab(id: tabId)?.sessionId, "new-temporary-session")
+    }
+
+    func testReconnectLocalTerminalClearsSessionWithoutBridgeDisconnect() {
+        let bridge = FakeServerWorkspaceBridge()
+        let state = AppState(workspaceBridge: bridge)
+        state.addLocalTerminalTab()
+        guard let tabId = state.activeTabId else {
+            return XCTFail("Expected local terminal tab")
+        }
+        state.updateTabSessionId(tabId, sessionId: "local-123")
+
+        state.reconnectTab(tabId)
+
+        XCTAssertNil(state.tabState.tab(id: tabId)?.sessionId)
+        XCTAssertTrue(bridge.disconnectedSessionIds.isEmpty)
+    }
+
     func testFailedPromotionPreservesSessionTargetAndDraft() async {
         let bridge = FakeServerWorkspaceBridge(promotionError: FakeError.promotionFailed)
         let state = AppState(workspaceBridge: bridge)
@@ -994,6 +1080,32 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     func resumeSpawn(channelId: String) {
         spawnContinuation?.resume(returning: channelId)
         spawnContinuation = nil
+    }
+}
+
+private extension DatabaseConnection {
+    static func fixture(
+        id: String,
+        sshServerId: String,
+        name: String
+    ) -> Self {
+        .init(
+            id: id,
+            name: name,
+            group_name: "",
+            engine: "remote_sqlite",
+            ssh_server_id: sshServerId,
+            use_ssh_tunnel: false,
+            host: "",
+            port: 0,
+            database_name: "",
+            username: "",
+            password: "",
+            sqlite_path: "/tmp/test.db",
+            ssl_mode: "",
+            created_at: "",
+            updated_at: ""
+        )
     }
 }
 

@@ -38,6 +38,14 @@ schemes:
       config: Release
     archive:
       config: Release
+  OrbitUITests:
+    build:
+      targets:
+        OrbitUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - OrbitUITests
 
 targets:
   Orbit:
@@ -101,5 +109,19 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.tests
         GENERATE_INFOPLIST_FILE: true
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/../orbit-rs/include"
+  OrbitUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: OrbitUITests
+    dependencies:
+      - target: Orbit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.uitests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: Orbit
         HEADER_SEARCH_PATHS:
           - "$(PROJECT_DIR)/../orbit-rs/include"

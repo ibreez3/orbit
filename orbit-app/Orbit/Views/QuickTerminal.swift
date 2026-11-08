@@ -1,7 +1,50 @@
 import SwiftUI
 import AppKit
+import Carbon.HIToolbox
+import SwiftTerm
 
 // MARK: - Quick Terminal (dropdown terminal)
+
+final class QuickTerminalDelegate: NSObject, TerminalViewDelegate {
+    weak var controller: QuickTerminalController?
+
+    init(controller: QuickTerminalController) {
+        self.controller = controller
+    }
+
+    func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
+        controller?.write(Data(data))
+    }
+
+    func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
+        controller?.resize(cols: newCols, rows: newRows)
+    }
+
+    func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}
+
+    func hostCurrentDirectoryUpdate(source: SwiftTerm.TerminalView, directory: String?) {}
+
+    func scrolled(source: SwiftTerm.TerminalView, position: Double) {}
+
+    func requestOpenLink(source: SwiftTerm.TerminalView, link: String, params: [String: String]) {
+        if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+    }
+
+    func bell(source: SwiftTerm.TerminalView) {
+        NSSound.beep()
+    }
+
+    func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
+        NSPasteboard.general.clearContents()
+        if let text = String(data: content, encoding: .utf8) {
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    func iTermContent(source: SwiftTerm.TerminalView, content: ArraySlice<UInt8>) {}
+
+    func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {}
+}
 
 class QuickTerminalController: NSObject {
     static let shared = QuickTerminalController()
@@ -16,15 +59,63 @@ class QuickTerminalController: NSObject {
     }
 
     private let hotkeyIdentifier = "quickTerminal"
+    private lazy var inputDelegate = QuickTerminalDelegate(controller: self)
+    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyHandlerRef: EventHandlerRef?
 
     override init() {
         super.init()
         setupHotkey()
     }
 
+    deinit {
+        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+        if let hotKeyHandlerRef { RemoveEventHandler(hotKeyHandlerRef) }
+    }
+
+    func configureTerminalView(_ view: OrbitTerminalView) {
+        view.terminalDelegate = inputDelegate
+    }
+
+    func write(_ data: Data) {
+        localShell?.write(data)
+    }
+
+    func resize(cols: Int, rows: Int) {
+        guard cols > 0, rows > 0 else { return }
+        localShell?.resize(cols: UInt16(cols), rows: UInt16(rows))
+    }
+
     private func setupHotkey() {
-        // Register global hotkey: Ctrl+`
-        // We use Carbon API for global hotkey
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, _, userData in
+                guard let userData else { return noErr }
+                let controller = Unmanaged<QuickTerminalController>
+                    .fromOpaque(userData)
+                    .takeUnretainedValue()
+                DispatchQueue.main.async { controller.toggle() }
+                return noErr
+            },
+            1,
+            &eventType,
+            Unmanaged.passUnretained(self).toOpaque(),
+            &hotKeyHandlerRef
+        )
+
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4F524254), id: 1)
+        RegisterEventHotKey(
+            UInt32(kVK_ANSI_Grave),
+            UInt32(controlKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
     }
 
     func toggle() {
@@ -39,12 +130,10 @@ class QuickTerminalController: NSObject {
         if window == nil {
             createWindow()
         }
-        window?.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
         isVisible = true
         terminalView?.window?.makeFirstResponder(terminalView)
-
-        // Focus the window
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func hide() {
@@ -76,22 +165,13 @@ class QuickTerminalController: NSObject {
 
         // Create terminal view
         let tv = OrbitTerminalView()
+        configureTerminalView(tv)
         tv.frame = NSRect(x: 0, y: 0, width: width, height: height)
         tv.autoresizingMask = [.width, .height]
 
         let themeStr = UserDefaults.standard.string(forKey: "theme") ?? "catppuccinMocha"
         let theme = AppTheme(rawValue: themeStr) ?? .catppuccinMocha
         tv.configureRenderSettings(theme: theme, backgroundAlpha: 0.95)
-
-        // Background blur behind panel
-        let blur = NSVisualEffectView()
-        blur.blendingMode = .behindWindow
-        blur.state = .active
-        blur.material = .hudWindow
-        blur.wantsLayer = true
-        blur.frame = tv.bounds
-        blur.autoresizingMask = [.width, .height]
-        tv.addSubview(blur, positioned: .below, relativeTo: nil)
 
         panel.contentView = tv
         terminalView = tv

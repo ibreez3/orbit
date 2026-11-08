@@ -28,7 +28,7 @@ struct TemporaryConnectionPanel: View {
                     }
                     .padding(14)
                 }
-                .frame(maxHeight: 500)
+                .frame(minHeight: 300, maxHeight: 500)
                 footer
             }
             .background(.regularMaterial)
@@ -38,9 +38,13 @@ struct TemporaryConnectionPanel: View {
                     .stroke(Color.primary.opacity(0.1))
             )
             .shadow(color: .black.opacity(0.24), radius: 18, y: 9)
-            .onAppear(perform: restoreEditingFocus)
+            .onAppear {
+                DispatchQueue.main.async { restoreEditingFocus() }
+            }
             .onChange(of: draft.wrappedValue.connectionError) { error in
-                if error != nil { restoreEditingFocus() }
+                if error != nil {
+                    DispatchQueue.main.async { restoreEditingFocus() }
+                }
             }
         }
     }
@@ -76,16 +80,19 @@ struct TemporaryConnectionPanel: View {
             labeled("主机") {
                 TextField("host", text: draft.host)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("temporaryHostField")
             }
             labeled("端口") {
-                TextField("22", value: draft.port, format: .number)
+                TextField("22", value: draft.port, format: .number.grouping(.never))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 76)
+                    .accessibilityIdentifier("temporaryPortField")
             }
             labeled("用户名") {
                 TextField("用户名", text: draft.username)
                     .textFieldStyle(.roundedBorder)
                     .focused($focusedField, equals: .username)
+                    .accessibilityIdentifier("temporaryUsernameField")
             }
         }
     }
@@ -121,6 +128,7 @@ struct TemporaryConnectionPanel: View {
                         SecureField("密码", text: draft.password)
                             .textFieldStyle(.roundedBorder)
                             .focused($focusedField, equals: .password)
+                            .accessibilityIdentifier("temporaryPasswordField")
                     }
                 } else {
                     keyFields
@@ -184,12 +192,14 @@ struct TemporaryConnectionPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("保存到资产", isOn: draft.saveToAssets)
                 .toggleStyle(.switch)
+                .accessibilityIdentifier("saveToAssetsToggle")
 
             if draft.wrappedValue.saveToAssets {
                 HStack(spacing: 10) {
                     labeled("服务器名称") {
                         TextField("服务器名称", text: draft.displayName)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("temporaryDisplayNameField")
                     }
                     labeled("目录") {
                         Picker("", selection: optionalSelection(draft.folderId)) {
@@ -222,6 +232,7 @@ struct TemporaryConnectionPanel: View {
             Text(message)
                 .font(.system(size: 11))
                 .foregroundStyle(.red)
+                .accessibilityIdentifier("temporaryConnectionError")
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.red.opacity(0.08))
@@ -238,6 +249,7 @@ struct TemporaryConnectionPanel: View {
             Button("取消") {
                 appState.dismissTemporaryConnectionPanel()
             }
+            .accessibilityIdentifier("temporaryCancelButton")
             Button {
                 appState.submitTemporaryConnection()
             } label: {
@@ -252,6 +264,7 @@ struct TemporaryConnectionPanel: View {
             .buttonStyle(.borderedProminent)
             .disabled(draft.wrappedValue.isConnecting)
             .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("temporaryConnectButton")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -260,8 +273,18 @@ struct TemporaryConnectionPanel: View {
 
     private var draft: Binding<TemporaryConnectionDraft> {
         Binding(
-            get: { uiState.temporaryConnectionDraft! },
-            set: { uiState.temporaryConnectionDraft = $0 }
+            get: {
+                uiState.temporaryConnectionDraft ?? TemporaryConnectionDraft(
+                    host: "",
+                    port: 22,
+                    username: "",
+                    authType: "password"
+                )
+            },
+            set: { newValue in
+                guard uiState.temporaryConnectionDraft != nil else { return }
+                uiState.temporaryConnectionDraft = newValue
+            }
         )
     }
 

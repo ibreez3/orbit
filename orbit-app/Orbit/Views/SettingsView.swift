@@ -107,8 +107,8 @@ private struct AppearancePane: View {
                     GridItem(.adaptive(minimum: 130, maximum: 160), spacing: 10)
                 ], spacing: 10) {
                     ForEach(displayThemes) { theme in
-                        ThemeCard(theme: theme, isSelected: themeState.theme.rawValue == theme.id) {
-                            if let t = AppTheme(rawValue: theme.id) {
+                        ThemeCard(theme: theme, isSelected: AppTheme(themeFileID: theme.id) == themeState.theme) {
+                            if let t = AppTheme(themeFileID: theme.id) {
                                 appState.setTheme(t)
                             }
                         }

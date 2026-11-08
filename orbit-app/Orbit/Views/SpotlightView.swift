@@ -94,6 +94,7 @@ struct SpotlightView: View {
             .font(.system(size: 14))
             .focused($isSearchFocused)
             .accessibilityLabel("搜索命令面板")
+            .accessibilityIdentifier("commandPaletteSearchField")
             Button(action: { appState.closeSpotlight() }) {
                 Text("Esc")
                     .font(.system(size: 11))

@@ -291,6 +291,19 @@ enum AppTheme: String, CaseIterable {
     case nord
     case solarizedDark
     case gruvboxDark
+
+    init?(themeFileID id: String) {
+        let normalized = id
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+        guard let theme = Self.allCases.first(where: {
+            $0.rawValue.lowercased() == normalized
+        }) else {
+            return nil
+        }
+        self = theme
+    }
 }
 
 struct ThemeColors {
@@ -332,6 +345,7 @@ struct TabItem: Identifiable {
     var paneTree: PaneNode?
     var focusedChannelId: String?
     var initialCommand: String?
+    var sessionGeneration: Int
 
     init(
         id: String,
@@ -343,7 +357,8 @@ struct TabItem: Identifiable {
         sessionId: String? = nil,
         paneTree: PaneNode? = nil,
         focusedChannelId: String? = nil,
-        initialCommand: String? = nil
+        initialCommand: String? = nil,
+        sessionGeneration: Int = 0
     ) {
         self.id = id
         self.type = type
@@ -353,6 +368,7 @@ struct TabItem: Identifiable {
         self.paneTree = paneTree
         self.focusedChannelId = focusedChannelId
         self.initialCommand = initialCommand
+        self.sessionGeneration = sessionGeneration
 
         if let connectionTarget {
             self.connectionTarget = connectionTarget

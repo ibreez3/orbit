@@ -72,7 +72,7 @@ pub struct ServerInput {
     pub folder_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemporaryConnectionInput {
     pub host: String,
     pub port: u16,
@@ -177,7 +177,7 @@ impl TemporaryConnectionInput {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromoteTemporaryServerInput {
     pub connection: TemporaryConnectionInput,
     pub name: String,

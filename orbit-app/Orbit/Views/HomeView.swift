@@ -14,16 +14,19 @@ struct HomeView: View {
                         label: "本地终端",
                         action: { appState.addLocalTerminalTab() }
                     )
+                    .accessibilityIdentifier("homeLocalTerminalButton")
                     HomeActionButton(
                         icon: "plus",
                         label: "添加服务器",
                         action: { appState.openDialog() }
                     )
+                    .accessibilityIdentifier("homeAddServerButton")
                     HomeActionButton(
                         icon: "magnifyingglass",
                         label: "命令面板",
                         action: { appState.openWorkspaceEntry(.commandPalette) }
                     )
+                    .accessibilityIdentifier("homeCommandPaletteButton")
                 }
                 .frame(minWidth: 360, idealWidth: 390, maxWidth: 420)
             }

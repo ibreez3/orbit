@@ -103,6 +103,7 @@ private struct SftpQuickOverlay: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("文件传输")
                         .font(.system(size: 12, weight: .semibold))
+                        .accessibilityIdentifier("sftpOverlayTitle")
                     Text(path.isEmpty ? (context.serverName ?? "No active session") : path)
                         .font(.system(size: 10, design: path.isEmpty ? .default : .monospaced))
                         .foregroundStyle(.tertiary)
@@ -554,6 +555,7 @@ private struct MonitorQuickOverlay: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("实时快照")
                         .font(.system(size: 12, weight: .semibold))
+                        .accessibilityIdentifier("monitorOverlayTitle")
                     Text(context.serverName ?? "No active session")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)

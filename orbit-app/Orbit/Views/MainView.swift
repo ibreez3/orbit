@@ -112,6 +112,7 @@ struct MainView: View {
             .modifier(ReconnectModifier(appState: appState))
             .onReceive(nc(.openSettings)) { _ in SettingsWindowController.shared.open(with: appState) }
             .onReceive(nc(.toggleAIPanel)) { _ in appState.toggleAIPanel() }
+            .onReceive(nc(.openSnippetPicker)) { _ in appState.openTool(.snippets) }
             .onReceive(nc(.openBatchExecution)) { _ in
                 if appState.canUsePersistedServerTools {
                     batchExecutionVisible = true
@@ -300,6 +301,7 @@ struct MainView: View {
                     channelId: tab.sessionId,
                     connectionTarget: tab.connectionTarget,
                     tabId: tab.id,
+                    sessionGeneration: tab.sessionGeneration,
                     appState: appState
                 )
                 .id(tab.id)
@@ -505,13 +507,22 @@ struct MainView: View {
     private func installWorkspaceKeyMonitor() {
         removeWorkspaceKeyMonitor()
         workspaceKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let isWorkspaceWindow = event.windowNumber == workspaceWindowIdentity.windowNumber
+            if isWorkspaceWindow,
+               event.keyCode == 53,
+               uiState.pendingCloseTabId == nil,
+               !uiState.showQuitConfirmation,
+               appState.dismissHighestWorkspaceLayer() != nil {
+                return nil
+            }
+
             let input = WorkspaceKeyboardInput(
                 key: event.charactersIgnoringModifiers ?? "",
                 modifiers: KeyBinding.Modifiers(
                     flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 ),
                 isRepeat: event.isARepeat,
-                isWorkspaceWindow: event.windowNumber == workspaceWindowIdentity.windowNumber
+                isWorkspaceWindow: isWorkspaceWindow
             )
 
             switch WorkspaceKeyboardRouter(bindings: .shared).route(for: input) {

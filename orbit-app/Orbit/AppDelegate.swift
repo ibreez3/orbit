@@ -3,7 +3,6 @@ import Carbon
 import Sparkle
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var globalMonitor: Any?
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
@@ -15,14 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Register global hotkey for Quick Terminal: Ctrl+`
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            if event.modifierFlags.contains(.control) && event.keyCode == 50 {
-                DispatchQueue.main.async {
-                    QuickTerminalController.shared.toggle()
-                }
-            }
-        }
+        _ = QuickTerminalController.shared
 
         NotificationCenter.default.addObserver(
             self,
@@ -41,7 +33,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     deinit {
-        if let m = globalMonitor { NSEvent.removeMonitor(m) }
         NotificationCenter.default.removeObserver(self)
     }
 }

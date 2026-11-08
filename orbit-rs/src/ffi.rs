@@ -2489,3 +2489,211 @@ fn json_to_out<T: serde::Serialize>(value: &T, out: *mut *mut c_char) -> i32 {
         Err(_) => -99,
     }
 }
+
+#[cfg(test)]
+mod real_server_ffi_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    extern "C" fn collect_data(
+        _session_id: *const c_char,
+        data: *const u8,
+        data_len: usize,
+        userdata: *mut c_void,
+    ) {
+        if data.is_null() || userdata.is_null() {
+            return;
+        }
+        let buffer = unsafe { &*(userdata as *const Mutex<Vec<u8>>) };
+        let bytes = unsafe { std::slice::from_raw_parts(data, data_len) };
+        buffer.lock().unwrap().extend_from_slice(bytes);
+    }
+
+    extern "C" fn ignore_closed(_session_id: *const c_char, _userdata: *mut c_void) {}
+
+    fn last_error(app: *mut OrbitApp) -> String {
+        let mut out: *mut c_char = ptr::null_mut();
+        if orbit_get_last_error(app, &mut out) != 0 || out.is_null() {
+            return String::new();
+        }
+        let message = unsafe { CStr::from_ptr(out).to_string_lossy().into_owned() };
+        orbit_free_string(out);
+        message
+    }
+
+    fn wait_until(buffer: &Mutex<Vec<u8>>, timeout: Duration, condition: impl Fn(&str) -> bool) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < timeout {
+            let text = String::from_utf8_lossy(&buffer.lock().unwrap()).into_owned();
+            if condition(&text) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    fn server_input(host: &str, user: &str, password: &str) -> ServerInput {
+        ServerInput {
+            name: "real-server".into(),
+            host: host.into(),
+            port: Some(22),
+            group_name: None,
+            auth_type: Some("password".into()),
+            username: user.into(),
+            password: Some(password.into()),
+            private_key: None,
+            key_source: None,
+            key_file_path: None,
+            key_passphrase: None,
+            credential_group_id: None,
+            jump_server_id: None,
+            folder_id: None,
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn real_server_terminal_and_promotion_ffi() {
+        let host = std::env::var("ORBIT_TEST_HOST").expect("ORBIT_TEST_HOST");
+        let user = std::env::var("ORBIT_TEST_USER").expect("ORBIT_TEST_USER");
+        let password = std::env::var("ORBIT_TEST_PASSWORD").expect("ORBIT_TEST_PASSWORD");
+
+        let app = Box::into_raw(Box::new(OrbitApp::new(":memory:").unwrap()));
+        let buffer = Box::into_raw(Box::new(Mutex::new(Vec::new())));
+        let userdata = buffer as *mut c_void;
+
+        let saved = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, &password))
+            .unwrap();
+        let saved_id = CString::new(saved.id.clone()).unwrap();
+        let mut session_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_connect_ssh(
+            app,
+            saved_id.as_ptr(),
+            collect_data,
+            ignore_closed,
+            userdata,
+            &mut session_out,
+        );
+        assert_eq!(rc, 0, "connect failed: {}", last_error(app));
+        assert!(!session_out.is_null());
+        let session_id = unsafe { CStr::from_ptr(session_out).to_string_lossy().into_owned() };
+        assert!(
+            wait_until(unsafe { &*buffer }, Duration::from_secs(10), |text| !text.is_empty()),
+            "terminal produced no output"
+        );
+
+        let connected = unsafe { &*app }.db.get_server(&saved.id).unwrap();
+        assert_eq!(connected.last_connection_result.as_deref(), Some("success"));
+        assert!(connected.last_connected_at.is_some());
+
+        let command = CString::new("echo $((40+2))\r").unwrap();
+        let session_id_c = CString::new(session_id.clone()).unwrap();
+        let write_rc = orbit_write_ssh(
+            app,
+            session_id_c.as_ptr(),
+            command.as_ptr() as *const u8,
+            command.as_bytes().len(),
+        );
+        assert_eq!(write_rc, 0, "write failed: {}", last_error(app));
+        assert!(
+            wait_until(unsafe { &*buffer }, Duration::from_secs(10), |text| {
+                text.contains("42")
+            }),
+            "terminal did not execute command"
+        );
+
+        orbit_disconnect_ssh(app, session_id_c.as_ptr());
+        orbit_free_string(session_out);
+
+        let temporary_input = TemporaryConnectionInput {
+            host: host.clone(),
+            port: 22,
+            username: user.clone(),
+            auth_type: "password".into(),
+            password: Some(password.clone()),
+            private_key: None,
+            key_source: None,
+            key_file_path: None,
+            key_passphrase: None,
+            credential_group_id: None,
+            jump_server_id: None,
+        };
+        let temporary_json = serde_json::to_string(&temporary_input).unwrap();
+        let temporary_json_c = CString::new(temporary_json).unwrap();
+        let mut temporary_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_connect_ssh_temporary(
+            app,
+            temporary_json_c.as_ptr(),
+            collect_data,
+            ignore_closed,
+            userdata,
+            &mut temporary_out,
+        );
+        assert_eq!(rc, 0, "temporary connect failed: {}", last_error(app));
+        let temporary_session =
+            unsafe { CStr::from_ptr(temporary_out).to_string_lossy().into_owned() };
+        assert!(wait_until(unsafe { &*buffer }, Duration::from_secs(10), |text| {
+            !text.is_empty()
+        }));
+
+        let promotion = PromoteTemporaryServerInput {
+            connection: temporary_input,
+            name: "Real Promoted".into(),
+            folder_id: None,
+            tag_ids: Vec::new(),
+        };
+        let promotion_json = CString::new(serde_json::to_string(&promotion).unwrap()).unwrap();
+        let temporary_session_c = CString::new(temporary_session.clone()).unwrap();
+        let mut promoted_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_promote_temporary_server(
+            app,
+            temporary_session_c.as_ptr(),
+            promotion_json.as_ptr(),
+            &mut promoted_out,
+        );
+        assert_eq!(rc, 0, "promotion failed: {}", last_error(app));
+        let promoted_json = unsafe { CStr::from_ptr(promoted_out).to_string_lossy().into_owned() };
+        orbit_free_string(promoted_out);
+        let promoted: crate::models::Server = serde_json::from_str(&promoted_json).unwrap();
+        assert_eq!(promoted.name, "Real Promoted");
+        let stored = unsafe { &*app }.db.get_server(&promoted.id).unwrap();
+        assert_eq!(stored.password, password);
+        assert_eq!(stored.last_connection_result.as_deref(), Some("success"));
+
+        orbit_disconnect_ssh(app, temporary_session_c.as_ptr());
+        orbit_free_string(temporary_out);
+
+        let bad = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, "ORBIT_WRONG_PASSWORD"))
+            .unwrap();
+        let bad_id = CString::new(bad.id.clone()).unwrap();
+        let mut bad_session: *mut c_char = ptr::null_mut();
+        let rc = orbit_connect_ssh(
+            app,
+            bad_id.as_ptr(),
+            collect_data,
+            ignore_closed,
+            userdata,
+            &mut bad_session,
+        );
+        assert_ne!(rc, 0, "wrong password unexpectedly connected");
+        let error = last_error(app);
+        assert!(!error.contains("ORBIT_WRONG_PASSWORD"), "secret leaked: {error}");
+        let failed = unsafe { &*app }.db.get_server(&bad.id).unwrap();
+        assert_eq!(failed.last_connection_result.as_deref(), Some("failed"));
+        assert!(failed.last_attempted_at.is_some());
+        assert!(failed
+            .last_connection_error
+            .as_deref()
+            .is_some_and(|message| !message.contains("ORBIT_WRONG_PASSWORD")));
+
+        orbit_app_free(app);
+        unsafe { drop(Box::from_raw(buffer)) };
+        println!("real server FFI smoke test passed");
+    }
+}

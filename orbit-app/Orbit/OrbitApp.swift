@@ -23,6 +23,11 @@ struct OrbitCommands: Commands {
     var body: some Commands {
         SidebarCommands()
         CommandGroup(after: .toolbar) {
+            Button("快速终端") {
+                QuickTerminalController.shared.toggle()
+            }
+            .keyboardShortcut("`", modifiers: .control)
+
             Button("快速连接") {
                 NotificationCenter.default.post(name: .focusQuickConnect, object: nil)
             }

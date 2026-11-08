@@ -326,6 +326,28 @@ final class ServerWorkspaceModelsTests: XCTestCase {
         )
     }
 
+    func testExplicitDatabasePathOverrideWins() {
+        let url = OrbitBridge.databaseURL(
+            applicationSupportDirectory: URL(fileURLWithPath: "/Users/example/Library/Application Support"),
+            temporaryDirectory: URL(fileURLWithPath: "/private/tmp"),
+            environment: ["ORBIT_DB_PATH": "/private/tmp/orbit-ui-test.db"],
+            processIdentifier: 4321
+        )
+
+        XCTAssertEqual(url.path, "/private/tmp/orbit-ui-test.db")
+    }
+
+    func testAPIErrorWithMessageUsesDisplayableMessageOnly() {
+        XCTAssertEqual(
+            OrbitError.apiErrorWithMessage(-4, "连接失败 127.0.0.1:1").errorDescription,
+            "连接失败 127.0.0.1:1"
+        )
+        XCTAssertEqual(
+            OrbitError.apiErrorWithMessage(-4, nil).errorDescription,
+            "API error: code -4"
+        )
+    }
+
     private let serverJSON = #"""
     {
       "id": "s1",

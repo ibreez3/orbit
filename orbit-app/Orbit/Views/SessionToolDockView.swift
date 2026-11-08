@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SessionToolDockView: View {
     @EnvironmentObject var toolState: ToolState
-    @EnvironmentObject var tabState: TabState
     @EnvironmentObject var inventoryState: InventoryState
     let appState: AppState
 
@@ -74,6 +73,7 @@ struct SessionToolDockView: View {
         .foregroundStyle(disabledReason == nil ? (isActive ? Color.accentColor : Color.secondary) : Color.secondary.opacity(0.35))
         .help(disabledReason ?? title)
         .accessibilityLabel(title)
+        .accessibilityIdentifier("dock-\(tool.rawValue)")
     }
 
     private func activeServer() -> Server? {
@@ -87,12 +87,6 @@ struct SessionToolDockView: View {
     }
 
     private func openDatabaseTab() {
-        let id = "database-\(Int(Date().timeIntervalSince1970 * 1000))"
-        let context = appState.activeSessionContext
-        let serverId = context.serverId ?? "database"
-        let serverName = context.serverName ?? "Database"
-        let tab = TabItem(id: id, type: .database, serverId: serverId, serverName: serverName, title: "Database")
-        tabState.tabs.append(tab)
-        appState.requestActivateTab(id)
+        appState.openDatabaseWorkspace()
     }
 }

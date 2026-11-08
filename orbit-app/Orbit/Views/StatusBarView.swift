@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StatusBarView: View {
     let appState: AppState
+    @EnvironmentObject private var tabState: TabState
 
     var body: some View {
         let context = appState.activeSessionContext
@@ -13,6 +14,7 @@ struct StatusBarView: View {
 
             Text(activeSessionCount == 0 ? "无活动会话" : "已连接 \(activeSessionCount) 个会话")
                 .lineLimit(1)
+                .accessibilityIdentifier("statusBarSummary")
 
             Spacer()
 
@@ -26,7 +28,7 @@ struct StatusBarView: View {
     }
 
     private var activeSessionCount: Int {
-        appState.tabs.reduce(into: 0) { count, tab in
+        tabState.tabs.reduce(into: 0) { count, tab in
             if let paneTree = tab.paneTree {
                 count += paneTree.channelIds.count
             } else if tab.sessionId != nil {

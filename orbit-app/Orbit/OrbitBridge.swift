@@ -121,6 +121,10 @@ class OrbitBridge {
         environment: [String: String],
         processIdentifier: Int32
     ) -> URL {
+        if let override = environment["ORBIT_DB_PATH"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return URL(fileURLWithPath: override)
+        }
         if environment["XCTestConfigurationFilePath"] != nil {
             return temporaryDirectory
                 .appendingPathComponent("orbit-tests-\(processIdentifier)", isDirectory: true)
@@ -1355,7 +1359,7 @@ enum OrbitError: LocalizedError {
         case .apiError(let rc): return "API error: code \(rc)"
         case .apiErrorWithMessage(let rc, let message):
             if let message, !message.isEmpty {
-                return "API error: code \(rc) - \(message)"
+                return message
             }
             return "API error: code \(rc)"
         }

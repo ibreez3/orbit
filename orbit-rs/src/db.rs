@@ -585,12 +585,12 @@ impl Database {
 
     pub fn update_server(&self, id: &str, input: &ServerInput) -> Result<Server> {
         let now = chrono::Utc::now().to_rfc3339();
-        let enc_password = crypto::encrypt(&input.password.as_deref().unwrap_or(""));
-        let enc_private_key = crypto::encrypt(&input.private_key.as_deref().unwrap_or(""));
-        let enc_key_passphrase = crypto::encrypt(&input.key_passphrase.as_deref().unwrap_or(""));
+        let enc_password = input.password.as_deref().map(crypto::encrypt);
+        let enc_private_key = input.private_key.as_deref().map(crypto::encrypt);
+        let enc_key_passphrase = input.key_passphrase.as_deref().map(crypto::encrypt);
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE servers SET name=?1,host=?2,port=?3,group_name=COALESCE(?4, group_name),auth_type=?5,username=?6,password=?7,private_key=?8,key_source=?9,key_file_path=?10,key_passphrase=?11,credential_group_id=?12,jump_server_id=?13,folder_id=COALESCE(?14, folder_id),updated_at=?15 WHERE id=?16",
+            "UPDATE servers SET name=?1,host=?2,port=?3,group_name=COALESCE(?4, group_name),auth_type=?5,username=?6,password=COALESCE(?7, password),private_key=COALESCE(?8, private_key),key_source=?9,key_file_path=?10,key_passphrase=COALESCE(?11, key_passphrase),credential_group_id=?12,jump_server_id=?13,folder_id=COALESCE(?14, folder_id),updated_at=?15 WHERE id=?16",
             rusqlite::params![
                 input.name, input.host, input.port.unwrap_or(22),
                 input.group_name.as_deref(),
@@ -1267,6 +1267,39 @@ mod server_organization_tests {
             })
             .unwrap();
         (db, server.id)
+    }
+
+    #[test]
+    fn partial_update_preserves_omitted_credentials() {
+        let (db, server_id) = seeded_server_db();
+        let current = db.get_server(&server_id).unwrap();
+
+        db.update_server(
+            &server_id,
+            &ServerInput {
+                name: "renamed".into(),
+                host: current.host.clone(),
+                port: Some(current.port),
+                group_name: None,
+                auth_type: Some(current.auth_type.clone()),
+                username: current.username.clone(),
+                password: None,
+                private_key: None,
+                key_source: Some(current.key_source.clone()),
+                key_file_path: None,
+                key_passphrase: None,
+                credential_group_id: None,
+                jump_server_id: None,
+                folder_id: None,
+            },
+        )
+        .unwrap();
+
+        let updated = db.get_server(&server_id).unwrap();
+        assert_eq!(updated.name, "renamed");
+        assert_eq!(updated.password, "hunter2");
+        assert_eq!(updated.private_key, "PRIVATE_KEY_SECRET");
+        assert_eq!(updated.key_passphrase, "PASSPHRASE_SECRET");
     }
 
     #[test]

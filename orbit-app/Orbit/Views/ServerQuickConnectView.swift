@@ -20,6 +20,7 @@ struct ServerQuickConnectView: View {
             .textFieldStyle(.plain)
             .font(.system(size: 12))
             .focused($inputFocused)
+            .accessibilityIdentifier("serverQuickConnectInput")
             .onSubmit(activateSelectedResult)
             .onMoveCommand(perform: moveSelection)
 

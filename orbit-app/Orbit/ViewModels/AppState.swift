@@ -786,6 +786,29 @@ class AppState: ObservableObject {
         }
     }
 
+    func openDatabaseWorkspace() {
+        if tabState.activeTab?.type == .database { return }
+
+        let activeServerId: String?
+        if let tab = tabState.activeTab, case .saved(let serverId) = tab.connectionTarget {
+            activeServerId = serverId
+        } else {
+            activeServerId = nil
+        }
+
+        let connections = inventoryState.databaseConnections
+        if let activeServerId,
+           let matching = connections.first(where: { $0.ssh_server_id == activeServerId }) {
+            openDatabaseConnection(matching)
+            return
+        }
+        if connections.count == 1, let only = connections.first {
+            openDatabaseConnection(only)
+            return
+        }
+        openDatabaseConnectionDialog()
+    }
+
     func openDatabaseConnectionDialog(_ connection: DatabaseConnection? = nil) {
         editingDatabaseConnection = connection
         databaseConnectionDialogOpen = true
@@ -1913,6 +1936,34 @@ class AppState: ObservableObject {
         }
     }
 
+    func connectTemporarySSH(tabId: String) {
+        guard let draft = temporaryDraft(for: tabId) else { return }
+        let expectedTarget = ServerConnectionTarget.temporary(tabId: tabId)
+        Task {
+            do {
+                let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
+                    input: draft.connectionInput
+                )
+                let installed = await MainActor.run {
+                    guard let tab = tabState.tab(id: tabId),
+                          tab.type == .terminal,
+                          tab.connectionTarget == expectedTarget,
+                          tab.sessionId == nil else { return false }
+                    updateTabSessionId(tabId, sessionId: sessionId)
+                    return true
+                }
+                if !installed {
+                    await discardSSHSession(sessionId)
+                }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "连接失败"
+                    alertMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private func clearTemporaryDraft(tabId: String) {
         tabState.temporaryTabTokens.removeValue(forKey: tabId)
         tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
@@ -2019,21 +2070,40 @@ class AppState: ObservableObject {
         let tab = tabs[tabIdx]
         guard tab.type == .terminal else { return }
 
-        // Clear old session state
-        if let oldSid = tab.sessionId {
-            bridge.removeSSHHandlers(sessionId: oldSid)
-            bridge.removeTerminalView(sessionId: oldSid)
+        var sessionIds = Set<String>()
+        if let oldSid = tab.sessionId { sessionIds.insert(oldSid) }
+        if let focused = tab.focusedChannelId { sessionIds.insert(focused) }
+        if let paneTree = tab.paneTree { sessionIds.formUnion(paneTree.channelIds) }
+
+        for sessionId in sessionIds {
+            bridge.removeSSHHandlers(sessionId: sessionId)
+            bridge.removeTerminalView(sessionId: sessionId)
         }
-        tabs[tabIdx].sessionId = nil
         if tabId == activeTabId, tabs[tabIdx].focusedChannelId != nil {
             closeSessionScopedTools()
         }
+        tabs[tabIdx].sessionId = nil
         tabs[tabIdx].focusedChannelId = nil
         tabs[tabIdx].paneTree = nil
+        tabs[tabIdx].sessionGeneration &+= 1
 
-        // Reconnect
-        if case .saved(let serverId) = tab.connectionTarget {
+        var isLocal = false
+        if case .local = tab.connectionTarget { isLocal = true }
+        if !isLocal, !sessionIds.isEmpty {
+            Task {
+                for sessionId in sessionIds {
+                    try? await workspaceBridge.disconnectSSHAsync(sessionId: sessionId)
+                }
+            }
+        }
+
+        switch tab.connectionTarget {
+        case .saved(let serverId):
             connectSSH(tabId: tabId, serverId: serverId)
+        case .temporary:
+            connectTemporarySSH(tabId: tabId)
+        case .local:
+            break
         }
     }
 
