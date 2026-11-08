@@ -295,8 +295,9 @@ enum KeywordInjector {
 
 struct TerminalView: NSViewRepresentable {
     let channelId: String?
-    let serverId: String
+    let connectionTarget: ServerConnectionTarget
     let tabId: String
+    var sessionGeneration: Int = 0
     @EnvironmentObject var tabState: TabState
     @EnvironmentObject var themeState: ThemeState
     let appState: AppState
@@ -343,7 +344,15 @@ struct TerminalView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: OrbitTerminalView, context: Context) {
-        if context.coordinator.sessionId == nil, let cid = channelId {
+        if context.coordinator.sessionGeneration != sessionGeneration {
+            context.coordinator.sessionGeneration = sessionGeneration
+            if context.coordinator.isLocal {
+                context.coordinator.restartLocal()
+            } else {
+                context.coordinator.sessionId = nil
+            }
+        }
+        if let cid = channelId, context.coordinator.sessionId != cid {
             context.coordinator.sessionId = cid
             context.coordinator.registerHandlers()
         }
@@ -353,16 +362,23 @@ struct TerminalView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(channelId: channelId, serverId: serverId, tabId: tabId, appState: appState)
+        Coordinator(
+            channelId: channelId,
+            connectionTarget: connectionTarget,
+            tabId: tabId,
+            sessionGeneration: sessionGeneration,
+            appState: appState
+        )
     }
 
     class Coordinator: NSObject, TerminalViewDelegate {
         let channelId: String?
-        let serverId: String
+        let connectionTarget: ServerConnectionTarget
         let tabId: String
         let appState: AppState
         weak var terminalView: SwiftTerm.TerminalView?
         var sessionId: String?
+        var sessionGeneration: Int
         private var alive = true
         private var localShell: LocalShell?
         private var outputPump: TerminalOutputPump?
@@ -375,12 +391,24 @@ struct TerminalView: NSViewRepresentable {
         private var _lastErrorScanTime: Date = .distantPast
         private var _lastErrorSetTime: Date = .distantPast
 
-        var isLocal: Bool { serverId == "local" }
+        var isLocal: Bool {
+            if case .local = connectionTarget {
+                return true
+            }
+            return false
+        }
 
-        init(channelId: String?, serverId: String, tabId: String, appState: AppState) {
+        init(
+            channelId: String?,
+            connectionTarget: ServerConnectionTarget,
+            tabId: String,
+            sessionGeneration: Int,
+            appState: AppState
+        ) {
             self.channelId = channelId
-            self.serverId = serverId
+            self.connectionTarget = connectionTarget
             self.tabId = tabId
+            self.sessionGeneration = sessionGeneration
             self.appState = appState
         }
 
@@ -522,20 +550,37 @@ struct TerminalView: NSViewRepresentable {
             }
         }
 
+        func restartLocal() {
+            guard isLocal else { return }
+            localShell = nil
+            sessionId = nil
+            connectLocal()
+        }
+
         private func connectSSH() {
             let dataHandler = makeDataHandler()
             let closedHandler = makeClosedHandler()
             Task {
                 do {
-                    let sid = try await OrbitBridge.shared.connectSSHAsync(serverId: serverId)
-                    guard alive else { return }
-                    sessionId = sid
-                    OrbitBridge.shared.setSSHHandlers(sessionId: sid, dataHandler: dataHandler, closedHandler: closedHandler)
+                    let sid = try await appState.connectSSH(for: connectionTarget)
+                    await MainActor.run {
+                        sessionId = sid
+                    }
+                    let installed = await appState.installSSHSession(
+                        tabId: tabId,
+                        expectedTarget: connectionTarget,
+                        sessionId: sid,
+                        dataHandler: dataHandler,
+                        closedHandler: closedHandler
+                    )
+                    guard installed else {
+                        await MainActor.run { sessionId = nil }
+                        return
+                    }
                     await MainActor.run {
                         if let terminalView = self.terminalView {
                             OrbitBridge.shared.cacheTerminalView(terminalView, sessionId: sid)
                         }
-                        appState.updateTabSessionId(tabId, sessionId: sid)
                         if let tv = terminalView {
                             let term = tv.getTerminal()
                             do { try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(connect) failed: \(error)") }

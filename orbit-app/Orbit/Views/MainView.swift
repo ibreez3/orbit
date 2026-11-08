@@ -8,6 +8,9 @@ struct MainView: View {
     @ObservedObject private var inventoryState: InventoryState
     @ObservedObject private var toolState: ToolState
     @State private var batchExecutionVisible: Bool = false
+    @State private var assetTreeDragStartWidth: CGFloat?
+    @State private var workspaceKeyMonitor: Any?
+    @State private var workspaceWindowIdentity = WorkspaceWindowIdentity()
 
     init(appState: AppState = AppState()) {
         _appState = StateObject(wrappedValue: appState)
@@ -25,7 +28,7 @@ struct MainView: View {
             quitConfirmationOverlay
             terminalCloseConfirmationOverlay
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1024, minHeight: 640)
         .environmentObject(appState.tabState)
         .environmentObject(appState.uiState)
         .environmentObject(appState.themeState)
@@ -63,6 +66,9 @@ struct MainView: View {
                 .environmentObject(appState.inventoryState)
         }
         .modifier(AlertModifier(appState: appState, uiState: uiState))
+        .background(WorkspaceWindowReader { windowNumber in
+            workspaceWindowIdentity.windowNumber = windowNumber
+        })
         .alert("确认切换会话", isPresented: Binding(
             get: { toolState.pendingContextSwitchTabId != nil },
             set: { if !$0 { appState.cancelPendingContextSwitch() } }
@@ -77,19 +83,22 @@ struct MainView: View {
             Text(toolState.pendingContextSwitchMessage ?? "")
         }
         .onAppear {
+            installWorkspaceKeyMonitor()
             if inventoryState.servers.isEmpty { appState.loadServers() }
             if inventoryState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
             if inventoryState.databaseConnections.isEmpty { appState.loadDatabaseConnections() }
         }
+        .onDisappear {
+            removeWorkspaceKeyMonitor()
+        }
 
         return base
             .onExitCommand {
-                if toolState.activeTool?.tool != .ai {
-                    appState.closeOverlayTool()
-                }
+                appState.handleEscape()
             }
-            .onReceive(nc(.newTerminal)) { _ in appState.openSpotlight() }
-            .onReceive(nc(.openSpotlight)) { _ in appState.openSpotlight() }
+            .onReceive(nc(.newTerminal)) { _ in openWorkspaceEntryIfActive(.quickConnect) }
+            .onReceive(nc(.focusQuickConnect)) { _ in openWorkspaceEntryIfActive(.quickConnect) }
+            .onReceive(nc(.openCommandPalette)) { _ in openWorkspaceEntryIfActive(.commandPalette) }
             .onReceive(nc(.splitHorizontal)) { _ in appState.splitCurrentPane(direction: .horizontal) }
             .onReceive(nc(.splitVertical)) { _ in appState.splitCurrentPane(direction: .vertical) }
             .onReceive(nc(.closePane)) { _ in appState.closeCurrentPane() }
@@ -103,7 +112,12 @@ struct MainView: View {
             .modifier(ReconnectModifier(appState: appState))
             .onReceive(nc(.openSettings)) { _ in SettingsWindowController.shared.open(with: appState) }
             .onReceive(nc(.toggleAIPanel)) { _ in appState.toggleAIPanel() }
-            .onReceive(nc(.openBatchExecution)) { _ in batchExecutionVisible = true }
+            .onReceive(nc(.openSnippetPicker)) { _ in appState.openTool(.snippets) }
+            .onReceive(nc(.openBatchExecution)) { _ in
+                if appState.canUsePersistedServerTools {
+                    batchExecutionVisible = true
+                }
+            }
     }
 
     private func nc(_ name: Notification.Name) -> NotificationCenter.Publisher {
@@ -111,11 +125,82 @@ struct MainView: View {
     }
 
     private var mainLayout: some View {
+        VStack(spacing: 0) {
+            globalBar
+                .zIndex(20)
+            Divider()
+            workspaceLayout
+                .zIndex(0)
+        }
+    }
+
+    private var globalBar: some View {
+        ViewThatFits(in: .horizontal) {
+            globalBarContent(showTitle: true, minimumInputWidth: 500)
+            globalBarContent(showTitle: false, minimumInputWidth: 500)
+            globalBarContent(showTitle: false, minimumInputWidth: 280)
+        }
+        .frame(height: 40)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private func globalBarContent(
+        showTitle: Bool,
+        minimumInputWidth: CGFloat
+    ) -> some View {
+        HStack(spacing: 10) {
+            if showTitle {
+                Text("SSH 工作台")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+
+            Spacer(minLength: 0)
+
+            ServerQuickConnectView(appState: appState)
+                .frame(minWidth: minimumInputWidth, idealWidth: 500, maxWidth: 500)
+                .layoutPriority(2)
+
+            Spacer(minLength: 0)
+
+            Menu {
+                Button("添加服务器") { appState.openDialog() }
+                Button("新建凭据组") { appState.openCgDialog() }
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("新增")
+            .accessibilityLabel("新增")
+
+            Button {
+                SettingsWindowController.shared.open(with: appState)
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help("设置")
+            .accessibilityLabel("设置")
+        }
+        .padding(.horizontal, 10)
+    }
+
+    private var workspaceLayout: some View {
         HStack(spacing: 0) {
             AssetTreeView(appState: appState)
-                .frame(width: uiState.assetTreeWidth)
+                .frame(width: SidebarPresentation(
+                    collapsed: uiState.assetTreeCollapsed,
+                    width: uiState.assetTreeWidth
+                ).displayWidth)
 
-            resizeHandle
+            if !uiState.assetTreeCollapsed {
+                resizeHandle
+            }
 
             Divider()
 
@@ -161,11 +246,17 @@ struct MainView: View {
             .gesture(
                 DragGesture()
                     .onChanged { value in
-                        let newWidth = uiState.assetTreeWidth + value.translation.width
-                        uiState.assetTreeWidth = min(350, max(160, newWidth))
+                        if assetTreeDragStartWidth == nil {
+                            assetTreeDragStartWidth = uiState.assetTreeWidth
+                        }
+                        let startWidth = assetTreeDragStartWidth ?? uiState.assetTreeWidth
+                        uiState.assetTreeWidth = SidebarPresentation.clampedWidth(
+                            startWidth + value.translation.width
+                        )
                     }
                     .onEnded { _ in
-                        appState.saveAssetTreeWidth(uiState.assetTreeWidth)
+                        assetTreeDragStartWidth = nil
+                        appState.saveAssetTreePresentation()
                     }
             )
     }
@@ -185,8 +276,13 @@ struct MainView: View {
     private var contentArea: some View {
         if let activeTab = tabState.tabs.first(where: { $0.id == tabState.activeTabId }) {
             if let tree = activeTab.paneTree {
-                SplitPaneView(node: tree, serverId: activeTab.serverId, tabId: activeTab.id, appState: appState)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                SplitPaneView(
+                    node: tree,
+                    connectionTarget: activeTab.connectionTarget,
+                    tabId: activeTab.id,
+                    appState: appState
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 tabContent(activeTab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -201,11 +297,34 @@ struct MainView: View {
         switch tab.type {
         case .terminal:
             ZStack(alignment: .bottomTrailing) {
-                TerminalView(channelId: tab.sessionId, serverId: tab.serverId, tabId: tab.id, appState: appState)
-                    .id(tab.id)
-                if tabState.activeTabError != nil, tab.id == tabState.activeTabId {
-                    AIErrorBanner(errorText: tabState.activeTabError!, appState: appState)
-                        .padding(12)
+                TerminalView(
+                    channelId: tab.sessionId,
+                    connectionTarget: tab.connectionTarget,
+                    tabId: tab.id,
+                    sessionGeneration: tab.sessionGeneration,
+                    appState: appState
+                )
+                .id(tab.id)
+                if tab.id == tabState.activeTabId {
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let failure = tabState.temporaryPromotionFailures[tab.id] {
+                            TemporaryPromotionRetryBanner(
+                                failure: failure,
+                                retry: {
+                                    Task {
+                                        await appState.retryTemporaryPromotion(tabId: tab.id)
+                                    }
+                                },
+                                dismiss: {
+                                    appState.dismissTemporaryPromotionFailure(tabId: tab.id)
+                                }
+                            )
+                        }
+                        if let activeTabError = tabState.activeTabError {
+                            AIErrorBanner(errorText: activeTabError, appState: appState)
+                        }
+                    }
+                    .padding(12)
                 }
             }
         case .sftp:
@@ -378,6 +497,108 @@ struct MainView: View {
     private var pendingCloseTab: TabItem? {
         guard let id = uiState.pendingCloseTabId else { return nil }
         return tabState.tabs.first { $0.id == id }
+    }
+
+    private func openWorkspaceEntryIfActive(_ entry: WorkspaceEntryPoint) {
+        guard workspaceWindowIdentity.windowNumber == NSApp.keyWindow?.windowNumber else { return }
+        appState.openWorkspaceEntry(entry)
+    }
+
+    private func installWorkspaceKeyMonitor() {
+        removeWorkspaceKeyMonitor()
+        workspaceKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let isWorkspaceWindow = event.windowNumber == workspaceWindowIdentity.windowNumber
+            if isWorkspaceWindow,
+               event.keyCode == 53,
+               uiState.pendingCloseTabId == nil,
+               !uiState.showQuitConfirmation,
+               appState.dismissHighestWorkspaceLayer() != nil {
+                return nil
+            }
+
+            let input = WorkspaceKeyboardInput(
+                key: event.charactersIgnoringModifiers ?? "",
+                modifiers: KeyBinding.Modifiers(
+                    flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                ),
+                isRepeat: event.isARepeat,
+                isWorkspaceWindow: isWorkspaceWindow
+            )
+
+            switch WorkspaceKeyboardRouter(bindings: .shared).route(for: input) {
+            case .passThrough:
+                return event
+            case .consume:
+                return nil
+            case .dispatch(let entry):
+                appState.openWorkspaceEntry(entry)
+                return nil
+            }
+        }
+    }
+
+    private func removeWorkspaceKeyMonitor() {
+        guard let workspaceKeyMonitor else { return }
+        NSEvent.removeMonitor(workspaceKeyMonitor)
+        self.workspaceKeyMonitor = nil
+    }
+}
+
+private final class WorkspaceWindowIdentity {
+    var windowNumber: Int?
+}
+
+private struct WorkspaceWindowReader: NSViewRepresentable {
+    let resolve: (Int?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        resolveWindow(for: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        resolveWindow(for: nsView)
+    }
+
+    private func resolveWindow(for view: NSView) {
+        DispatchQueue.main.async {
+            resolve(view.window?.windowNumber)
+        }
+    }
+}
+
+private struct TemporaryPromotionRetryBanner: View {
+    let failure: TemporaryPromotionFailure
+    let retry: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            Text(failure.message)
+                .font(.system(size: 11))
+                .lineLimit(2)
+            Button(failure.isRetrying ? "保存中" : "重试保存", action: retry)
+                .disabled(failure.isRetrying)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help("关闭保存提示")
+            .accessibilityLabel("关闭保存提示")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.35))
+        )
     }
 }
 

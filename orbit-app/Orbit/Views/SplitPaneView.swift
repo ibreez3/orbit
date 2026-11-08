@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SplitPaneView: View {
     let node: PaneNode
-    let serverId: String
+    let connectionTarget: ServerConnectionTarget
     let tabId: String
     let appState: AppState
     @EnvironmentObject var tabState: TabState
@@ -10,7 +10,12 @@ struct SplitPaneView: View {
     var body: some View {
         switch node {
         case .leaf(let channelId):
-            TerminalView(channelId: channelId, serverId: serverId, tabId: tabId, appState: appState)
+            TerminalView(
+                channelId: channelId,
+                connectionTarget: connectionTarget,
+                tabId: tabId,
+                appState: appState
+            )
                 .overlay(
                     (tabState.tabs.first(where: { $0.id == tabId })?.focusedChannelId == channelId)
                         ? Color.accentColor.opacity(0.03)
@@ -26,9 +31,19 @@ struct SplitPaneView: View {
             SplitContainer(direction: direction, ratio: ratio, splitId: splitId) { newRatio in
                 appState.updatePaneRatio(tabId: tabId, splitId: splitId, newRatio: newRatio)
             } first: {
-                SplitPaneView(node: first, serverId: serverId, tabId: tabId, appState: appState)
+                SplitPaneView(
+                    node: first,
+                    connectionTarget: connectionTarget,
+                    tabId: tabId,
+                    appState: appState
+                )
             } second: {
-                SplitPaneView(node: second, serverId: serverId, tabId: tabId, appState: appState)
+                SplitPaneView(
+                    node: second,
+                    connectionTarget: connectionTarget,
+                    tabId: tabId,
+                    appState: appState
+                )
             }
             .id(splitId)
         }

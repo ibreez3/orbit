@@ -41,7 +41,9 @@ struct MonitorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             applyMonitorSettings()
-            monitorState.start(serverId: tab.serverId, bridge: appState.bridge)
+            if let serverId = tab.serverId {
+                monitorState.start(serverId: serverId, bridge: appState.bridge)
+            }
         }
         .onDisappear {
             monitorState.stop()
@@ -80,10 +82,16 @@ struct MonitorView: View {
             .pickerStyle(.segmented)
             .frame(width: 100)
             .onChange(of: monitorState.autoRefresh) { _ in
-                monitorState.toggleAutoRefresh(serverId: tab.serverId, bridge: appState.bridge)
+                if let serverId = tab.serverId {
+                    monitorState.toggleAutoRefresh(serverId: serverId, bridge: appState.bridge)
+                }
             }
 
-            Button(action: { monitorState.refresh(serverId: tab.serverId, bridge: appState.bridge) }) {
+            Button(action: {
+                if let serverId = tab.serverId {
+                    monitorState.refresh(serverId: serverId, bridge: appState.bridge)
+                }
+            }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -316,7 +324,9 @@ struct MonitorView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("重试") {
-                monitorState.refresh(serverId: tab.serverId, bridge: appState.bridge)
+                if let serverId = tab.serverId {
+                    monitorState.refresh(serverId: serverId, bridge: appState.bridge)
+                }
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
@@ -349,8 +359,8 @@ struct MonitorView: View {
             interval: Int(monitorRefreshInterval),
             maxPoints: Int(monitorHistoryPoints)
         )
-        if restartAutoRefresh, monitorState.autoRefresh {
-            monitorState.toggleAutoRefresh(serverId: tab.serverId, bridge: appState.bridge)
+        if restartAutoRefresh, monitorState.autoRefresh, let serverId = tab.serverId {
+            monitorState.toggleAutoRefresh(serverId: serverId, bridge: appState.bridge)
         }
     }
 

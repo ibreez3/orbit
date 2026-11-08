@@ -8,12 +8,17 @@
 
 /* Begin PBXBuildFile section */
 		060FE66BA0E797B7B1ECFA6E /* LocalShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */; };
+		065EDAC135F08F98B3B4EC9D /* ServerTreeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34C28DD7D1E3FF0866DEC706 /* ServerTreeSection.swift */; };
 		0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */; };
 		0B108A04325E375330215A8F /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495DCA72659439056D676B45 /* HomeView.swift */; };
+		0C209672869B2C2A3FDC1E9A /* ThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D66D5B54DF7FF0E7FF9F8505 /* ThemeTests.swift */; };
 		0EC2179A038ECDE8E22EBF35 /* WorkbenchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E803F410398610C4BEAD1D /* WorkbenchModels.swift */; };
+		0F2FBDDDD8B03FE0BF5560D8 /* ServerWorkspaceModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E627913BD2D922C460730268 /* ServerWorkspaceModelsTests.swift */; };
 		0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7C11206A070E05D66487CD /* SessionToolDockView.swift */; };
 		0FB0DFBB67F6C3A9AA63CEF0 /* AIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AC453107209B6B7049D5CA /* AIState.swift */; };
 		1062C1837AEDF5F4036823C8 /* QuickTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DD037D568D1130F776EA29 /* QuickTerminal.swift */; };
+		189F64B9A12BCB0C087A72BD /* TemporaryConnectionPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F10DE289871AF61C037B71D /* TemporaryConnectionPanel.swift */; };
+		1E63C225E7A9F5E72D019DCF /* ServerQuickConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */; };
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		277D07614AF08EA716071858 /* SnippetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E598CB14BB36E079220CE3C /* SnippetEditorView.swift */; };
 		2F169B27AC1ECA61187A4C2C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */; };
@@ -22,6 +27,7 @@
 		3BB68C6149D994286E514D35 /* UIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585377F6779F972D49C67F62 /* UIState.swift */; };
 		3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86934760741D5FA928C8E48 /* TabBarView.swift */; };
 		3F4D5B977572BFF569200D8B /* SftpDrawerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */; };
+		40F5DBD740966DF62EF019BA /* AppStateWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */; };
 		44470406B6D8FC3478819B3B /* AIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592ABFA32AB4754E55D7B74E /* AIChatView.swift */; };
 		4A6B43D3BD124D0ADF70268A /* nord.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = FEF0CBEB3829B9B225431C77 /* nord.orbit-theme */; };
 		4E279BC7C85E1D4825D637F6 /* SplitPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */; };
@@ -31,9 +37,13 @@
 		5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49216EECC7DFB1EC893159AF /* SftpView.swift */; };
 		61576B4162B628D517DD81B5 /* dracula.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 3FADD919EE5ECC5150989E91 /* dracula.orbit-theme */; };
 		65E634D64926AEFC05F1E0EC /* ThemeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1215EB4D1327CCE06E1D9C04 /* ThemeState.swift */; };
+		660C9D142C35B06F1C55B5AB /* ServerWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8882F1AB7F98E4C76E825567 /* ServerWorkspaceModels.swift */; };
+		6AC99BFFF47FD82A9088E182 /* ServerWorkspaceStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E211E0FB4CACF3E509DF3AD /* ServerWorkspaceStateTests.swift */; };
+		6AF16C19A7FFDB43DCC4421C /* RecentConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D3062BC2E157D41B97644B /* RecentConnectionsView.swift */; };
 		7178E4ECF3E775E9C777DE1A /* light.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 45A2E5B671212BFF1F59E2FA /* light.orbit-theme */; };
 		72C361D522CF5402A1B44AFD /* OpenAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46605F10D644D3CD69AD1B42 /* OpenAIService.swift */; };
 		75B1A24DEC1F04242DE77385 /* gruvbox-dark.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 1E6CC1F2F6074726A3E3D401 /* gruvbox-dark.orbit-theme */; };
+		815E03036894CE1E0E87FE00 /* QuickTerminalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD8E0D92A3A5B80450FF763 /* QuickTerminalTests.swift */; };
 		82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 3E1BDD661D1C0F68B456CE86 /* SwiftTerm */; };
 		89A6C1418D76248F48E469F3 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */; };
@@ -50,6 +60,7 @@
 		C7105A3C1958F5D3A894FEA7 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E9630F023416DA2028BB98 /* MainView.swift */; };
 		C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */; };
 		C785EF55D48C3015D138C8FA /* BatchExecutionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */; };
+		CA3171DBCF791FAA320468DC /* OrbitUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E491701C4B908D3C94CD059 /* OrbitUITests.swift */; };
 		CBCE70CFCE9E50623D0D1F52 /* TabState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA24CFFC112167739509011 /* TabState.swift */; };
 		CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3983C4735026A30426864D /* DatabaseView.swift */; };
 		CC6551206571FF3F046080C5 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24FD058B7D00E7C9D29DA78 /* Models.swift */; };
@@ -57,6 +68,7 @@
 		CDFDA4DAD128B61524172E2A /* solarized-dark.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = C9A251128C8C2F5D900FF058 /* solarized-dark.orbit-theme */; };
 		D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */; };
 		D48895C458D1C1630C41D403 /* tokyo-night.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 5A58E42EA49E82B92FA0F9F1 /* tokyo-night.orbit-theme */; };
+		D60047F035E345596792754D /* OrbitBridgeCallbackBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6CD7E0F9A8ACF5E76C578F7 /* OrbitBridgeCallbackBufferTests.swift */; };
 		D7D532615E67DB652461D152 /* ToolState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95478DCB1F885FA5798B86BF /* ToolState.swift */; };
 		D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452C79E5111500BF24C41C53 /* SpotlightView.swift */; };
 		DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */; };
@@ -68,6 +80,23 @@
 		FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EB023126B42D85C78E726C /* OrbitApp.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		506E17A96F853FA73105BB02 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A57824173AF238C16E5DFDB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B87EF018B641D85E34ED2D32;
+			remoteInfo = Orbit;
+		};
+		7F41001E01457D01BD6AFFA3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A57824173AF238C16E5DFDB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B87EF018B641D85E34ED2D32;
+			remoteInfo = Orbit;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		07692D9E82A9DF921C55B64F /* OrbitConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitConfig.swift; sourceTree = "<group>"; };
 		0773DA574B3B4BD620488CE0 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
@@ -77,15 +106,19 @@
 		1530B85453C445BFC0E5E860 /* DockerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockerView.swift; sourceTree = "<group>"; };
 		1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditorView.swift; sourceTree = "<group>"; };
 		1E3983C4735026A30426864D /* DatabaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseView.swift; sourceTree = "<group>"; };
+		1E491701C4B908D3C94CD059 /* OrbitUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitUITests.swift; sourceTree = "<group>"; };
 		1E6CC1F2F6074726A3E3D401 /* gruvbox-dark.orbit-theme */ = {isa = PBXFileReference; path = "gruvbox-dark.orbit-theme"; sourceTree = "<group>"; };
 		1F98C58264A158A314F01DAC /* SftpDrawerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerState.swift; sourceTree = "<group>"; };
 		20936134E6681D18358932B7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20E9630F023416DA2028BB98 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		20EC5568E5E54388434A7EC7 /* BatchExecutionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchExecutionView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
+		34C28DD7D1E3FF0866DEC706 /* ServerTreeSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTreeSection.swift; sourceTree = "<group>"; };
 		38B9C34EB37FB9C3CAD77FC2 /* SplitPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneView.swift; sourceTree = "<group>"; };
 		3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingToolCard.swift; sourceTree = "<group>"; };
 		3A329973670FE763965019E7 /* OrbitTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitTerminalView.swift; sourceTree = "<group>"; };
+		3E211E0FB4CACF3E509DF3AD /* ServerWorkspaceStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerWorkspaceStateTests.swift; sourceTree = "<group>"; };
+		3F10DE289871AF61C037B71D /* TemporaryConnectionPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryConnectionPanel.swift; sourceTree = "<group>"; };
 		3FADD919EE5ECC5150989E91 /* dracula.orbit-theme */ = {isa = PBXFileReference; path = "dracula.orbit-theme"; sourceTree = "<group>"; };
 		452C79E5111500BF24C41C53 /* SpotlightView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightView.swift; sourceTree = "<group>"; };
 		45A2E5B671212BFF1F59E2FA /* light.orbit-theme */ = {isa = PBXFileReference; path = "light.orbit-theme"; sourceTree = "<group>"; };
@@ -104,6 +137,8 @@
 		64825B472441C790427EFF55 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		750B458B02EF6C413A15C484 /* Orbit-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Orbit-Bridging-Header.h"; sourceTree = "<group>"; };
 		829C6E0E378F6105FD7D4738 /* DatabaseImportMappingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseImportMappingView.swift; sourceTree = "<group>"; };
+		876A4155C011E08FEBBD1DE7 /* OrbitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OrbitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8882F1AB7F98E4C76E825567 /* ServerWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerWorkspaceModels.swift; sourceTree = "<group>"; };
 		8D7C11206A070E05D66487CD /* SessionToolDockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolDockView.swift; sourceTree = "<group>"; };
 		8E74FB2AAFF9870FD9348423 /* KeyBindings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindings.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -115,19 +150,27 @@
 		B24FD058B7D00E7C9D29DA78 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		B501D9CF2A7FD9520D50F015 /* SnippetState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetState.swift; sourceTree = "<group>"; };
 		B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */ = {isa = PBXFileReference; path = "catppuccin-mocha.orbit-theme"; sourceTree = "<group>"; };
+		B74C6BC763E00FD91024D63A /* OrbitUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OrbitUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerQuickConnectView.swift; sourceTree = "<group>"; };
+		C8D3062BC2E157D41B97644B /* RecentConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentConnectionsView.swift; sourceTree = "<group>"; };
 		C9A251128C8C2F5D900FF058 /* solarized-dark.orbit-theme */ = {isa = PBXFileReference; path = "solarized-dark.orbit-theme"; sourceTree = "<group>"; };
 		CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		CDD8E0D92A3A5B80450FF763 /* QuickTerminalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTerminalTests.swift; sourceTree = "<group>"; };
 		D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseConnectionDialog.swift; sourceTree = "<group>"; };
 		D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionToolOverlayView.swift; sourceTree = "<group>"; };
+		D66D5B54DF7FF0E7FF9F8505 /* ThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeTests.swift; sourceTree = "<group>"; };
+		D6CD7E0F9A8ACF5E76C578F7 /* OrbitBridgeCallbackBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitBridgeCallbackBufferTests.swift; sourceTree = "<group>"; };
 		D8EBC3EB6FD1B4896990A940 /* LocalShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalShell.swift; sourceTree = "<group>"; };
 		D9D6C1C7CC7D66BF18087D85 /* SftpDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SftpDrawerView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E34698C5B10A4A289B039E1B /* DatabaseBackupSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseBackupSheet.swift; sourceTree = "<group>"; };
 		E360B425AAB16860239DB977 /* dark.orbit-theme */ = {isa = PBXFileReference; path = "dark.orbit-theme"; sourceTree = "<group>"; };
+		E627913BD2D922C460730268 /* ServerWorkspaceModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerWorkspaceModelsTests.swift; sourceTree = "<group>"; };
 		E691E1A576C579A627A7BDDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E6AC453107209B6B7049D5CA /* AIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIState.swift; sourceTree = "<group>"; };
 		E812A16C099009B7BB010371 /* ServerDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDialog.swift; sourceTree = "<group>"; };
 		EEA24CFFC112167739509011 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
+		F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateWorkspaceTests.swift; sourceTree = "<group>"; };
 		F86934760741D5FA928C8E48 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 		FEF0CBEB3829B9B225431C77 /* nord.orbit-theme */ = {isa = PBXFileReference; path = "nord.orbit-theme"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -187,6 +230,7 @@
 				B24FD058B7D00E7C9D29DA78 /* Models.swift */,
 				46605F10D644D3CD69AD1B42 /* OpenAIService.swift */,
 				07692D9E82A9DF921C55B64F /* OrbitConfig.swift */,
+				8882F1AB7F98E4C76E825567 /* ServerWorkspaceModels.swift */,
 				55E803F410398610C4BEAD1D /* WorkbenchModels.swift */,
 			);
 			path = Models;
@@ -208,6 +252,19 @@
 			path = ViewModels;
 			sourceTree = "<group>";
 		};
+		AF6357FC3CFD2962A4B84D7C /* OrbitTests */ = {
+			isa = PBXGroup;
+			children = (
+				F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */,
+				D6CD7E0F9A8ACF5E76C578F7 /* OrbitBridgeCallbackBufferTests.swift */,
+				CDD8E0D92A3A5B80450FF763 /* QuickTerminalTests.swift */,
+				E627913BD2D922C460730268 /* ServerWorkspaceModelsTests.swift */,
+				3E211E0FB4CACF3E509DF3AD /* ServerWorkspaceStateTests.swift */,
+				D66D5B54DF7FF0E7FF9F8505 /* ThemeTests.swift */,
+			);
+			path = OrbitTests;
+			sourceTree = "<group>";
+		};
 		B084A05731D0221608844C7F /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -226,7 +283,10 @@
 				08F1ADE58D311170A9C63C4E /* MonitorView.swift */,
 				3A329973670FE763965019E7 /* OrbitTerminalView.swift */,
 				57DD037D568D1130F776EA29 /* QuickTerminal.swift */,
+				C8D3062BC2E157D41B97644B /* RecentConnectionsView.swift */,
 				E812A16C099009B7BB010371 /* ServerDialog.swift */,
+				BF0F0CFBC856F8CC7FC3AF36 /* ServerQuickConnectView.swift */,
+				34C28DD7D1E3FF0866DEC706 /* ServerTreeSection.swift */,
 				8D7C11206A070E05D66487CD /* SessionToolDockView.swift */,
 				D5CB003D316B6FFFAA4385DC /* SessionToolOverlayView.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
@@ -238,6 +298,7 @@
 				452C79E5111500BF24C41C53 /* SpotlightView.swift */,
 				0773DA574B3B4BD620488CE0 /* StatusBarView.swift */,
 				F86934760741D5FA928C8E48 /* TabBarView.swift */,
+				3F10DE289871AF61C037B71D /* TemporaryConnectionPanel.swift */,
 				CCDB2DF85BD7C7D482320C84 /* TerminalView.swift */,
 				1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */,
 			);
@@ -248,6 +309,8 @@
 			isa = PBXGroup;
 			children = (
 				93E43D9E19F5EF7D480B0771 /* Orbit.app */,
+				876A4155C011E08FEBBD1DE7 /* OrbitTests.xctest */,
+				B74C6BC763E00FD91024D63A /* OrbitUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -256,13 +319,59 @@
 			isa = PBXGroup;
 			children = (
 				00ECA7FF55D55998AD25B1CA /* Orbit */,
+				AF6357FC3CFD2962A4B84D7C /* OrbitTests */,
+				F6EA44E3906E7E57A07F6BC5 /* OrbitUITests */,
 				B307547D1ABD752BE02491B9 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		F6EA44E3906E7E57A07F6BC5 /* OrbitUITests */ = {
+			isa = PBXGroup;
+			children = (
+				1E491701C4B908D3C94CD059 /* OrbitUITests.swift */,
+			);
+			path = OrbitUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		60C563C8337C0BB1E97DDB59 /* OrbitUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 70326219EB34E5A4602DD84C /* Build configuration list for PBXNativeTarget "OrbitUITests" */;
+			buildPhases = (
+				8DD5A38E4BFE346562A7C4BC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9C481ADFABFF06D7A3D74BAC /* PBXTargetDependency */,
+			);
+			name = OrbitUITests;
+			packageProductDependencies = (
+			);
+			productName = OrbitUITests;
+			productReference = B74C6BC763E00FD91024D63A /* OrbitUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		70B3C73F363EEF5E0AD67831 /* OrbitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1F8B0B2C00262A4637BCFCA /* Build configuration list for PBXNativeTarget "OrbitTests" */;
+			buildPhases = (
+				2F83A56CBA225E887545FF40 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				48EBA926E7417E31CE9637EB /* PBXTargetDependency */,
+			);
+			name = OrbitTests;
+			packageProductDependencies = (
+			);
+			productName = OrbitTests;
+			productReference = 876A4155C011E08FEBBD1DE7 /* OrbitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		B87EF018B641D85E34ED2D32 /* Orbit */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1ED43C45F010E6E18A4680AC /* Build configuration list for PBXNativeTarget "Orbit" */;
@@ -293,6 +402,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					60C563C8337C0BB1E97DDB59 = {
+						TestTargetID = B87EF018B641D85E34ED2D32;
+					};
 					B87EF018B641D85E34ED2D32 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -317,6 +429,8 @@
 			projectRoot = "";
 			targets = (
 				B87EF018B641D85E34ED2D32 /* Orbit */,
+				70B3C73F363EEF5E0AD67831 /* OrbitTests */,
+				60C563C8337C0BB1E97DDB59 /* OrbitUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -372,7 +486,11 @@
 				958A8F09DD43B7722C3A83E5 /* OrbitConfig.swift in Sources */,
 				F71C69B4875E03688CF85C57 /* OrbitTerminalView.swift in Sources */,
 				1062C1837AEDF5F4036823C8 /* QuickTerminal.swift in Sources */,
+				6AF16C19A7FFDB43DCC4421C /* RecentConnectionsView.swift in Sources */,
 				E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */,
+				1E63C225E7A9F5E72D019DCF /* ServerQuickConnectView.swift in Sources */,
+				065EDAC135F08F98B3B4EC9D /* ServerTreeSection.swift in Sources */,
+				660C9D142C35B06F1C55B5AB /* ServerWorkspaceModels.swift in Sources */,
 				0F53BA61A23AFFF70B83773B /* SessionToolDockView.swift in Sources */,
 				0AF847BCDF47F814224E0FA8 /* SessionToolOverlayView.swift in Sources */,
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
@@ -387,6 +505,7 @@
 				CD6B6211AA058507413B987F /* StatusBarView.swift in Sources */,
 				3C75AD9AACE50E80C50CFD5B /* TabBarView.swift in Sources */,
 				CBCE70CFCE9E50623D0D1F52 /* TabState.swift in Sources */,
+				189F64B9A12BCB0C087A72BD /* TemporaryConnectionPanel.swift in Sources */,
 				82C9249819DBFFB3F70E7F57 /* TerminalView.swift in Sources */,
 				9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */,
 				65E634D64926AEFC05F1E0EC /* ThemeState.swift in Sources */,
@@ -396,7 +515,41 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		2F83A56CBA225E887545FF40 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				40F5DBD740966DF62EF019BA /* AppStateWorkspaceTests.swift in Sources */,
+				D60047F035E345596792754D /* OrbitBridgeCallbackBufferTests.swift in Sources */,
+				815E03036894CE1E0E87FE00 /* QuickTerminalTests.swift in Sources */,
+				0F2FBDDDD8B03FE0BF5560D8 /* ServerWorkspaceModelsTests.swift in Sources */,
+				6AC99BFFF47FD82A9088E182 /* ServerWorkspaceStateTests.swift in Sources */,
+				0C209672869B2C2A3FDC1E9A /* ThemeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8DD5A38E4BFE346562A7C4BC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CA3171DBCF791FAA320468DC /* OrbitUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		48EBA926E7417E31CE9637EB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B87EF018B641D85E34ED2D32 /* Orbit */;
+			targetProxy = 7F41001E01457D01BD6AFFA3 /* PBXContainerItemProxy */;
+		};
+		9C481ADFABFF06D7A3D74BAC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B87EF018B641D85E34ED2D32 /* Orbit */;
+			targetProxy = 506E17A96F853FA73105BB02 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		1C3F5A8A5772DFD0CD0785E5 /* Release */ = {
@@ -548,6 +701,66 @@
 			};
 			name = Debug;
 		};
+		91F06D89F9B92C31E55934B7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../orbit-rs/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.terminal.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Orbit.app/Contents/MacOS/Orbit";
+			};
+			name = Debug;
+		};
+		C53F9E88EFF3E749D28CEA46 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../orbit-rs/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.terminal.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Orbit.app/Contents/MacOS/Orbit";
+			};
+			name = Release;
+		};
+		CA1090AFD6418AF179169ECF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../orbit-rs/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.terminal.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = Orbit;
+			};
+			name = Release;
+		};
 		FBFF5D8A6298BD9025349208 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -611,6 +824,26 @@
 			};
 			name = Debug;
 		};
+		FE2C67ABC00F97626F71D836 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/../orbit-rs/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.terminal.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = Orbit;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -628,6 +861,24 @@
 			buildConfigurations = (
 				FBFF5D8A6298BD9025349208 /* Debug */,
 				58C4C1DF9D487759A4FB7D08 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		70326219EB34E5A4602DD84C /* Build configuration list for PBXNativeTarget "OrbitUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE2C67ABC00F97626F71D836 /* Debug */,
+				CA1090AFD6418AF179169ECF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A1F8B0B2C00262A4637BCFCA /* Build configuration list for PBXNativeTarget "OrbitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				91F06D89F9B92C31E55934B7 /* Debug */,
+				C53F9E88EFF3E749D28CEA46 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

@@ -191,6 +191,33 @@ ps aux --sort=-%cpu 2>/dev/null | head -51 | tail -50 | awk -F' ' '{
 "#
 }
 
+#[cfg(test)]
+mod tests {
+    use super::parse_processes;
+
+    #[test]
+    fn parses_numeric_and_string_process_metrics() {
+        let output = r#"{"pid":1,"user":"root","cpu":12.5,"mem":3.2,"vsz":100,"rss":50,"stat":"S","command":"init"}
+{"pid":2,"user":"alice","cpu":"7.5","mem":"1.25","vsz":200,"rss":60,"stat":"R","command":"bash"}"#;
+
+        let processes = parse_processes(output);
+
+        assert_eq!(processes.len(), 2);
+        assert_eq!(processes[0].cpu, 12.5);
+        assert_eq!(processes[0].mem, 3.2);
+        assert_eq!(processes[1].cpu, 7.5);
+        assert_eq!(processes[1].mem, 1.25);
+    }
+}
+
+fn parse_metric(value: Option<&serde_json::Value>) -> f64 {
+    match value {
+        Some(serde_json::Value::Number(number)) => number.as_f64().unwrap_or(0.0),
+        Some(serde_json::Value::String(text)) => text.parse().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
 pub fn parse_processes(output: &str) -> Vec<ProcessInfo> {
     let mut processes = Vec::new();
     for line in output.lines() {
@@ -206,18 +233,8 @@ pub fn parse_processes(output: &str) -> Vec<ProcessInfo> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
-                cpu: p
-                    .get("cpu")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("0")
-                    .parse()
-                    .unwrap_or(0.0),
-                mem: p
-                    .get("mem")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("0")
-                    .parse()
-                    .unwrap_or(0.0),
+                cpu: parse_metric(p.get("cpu")),
+                mem: parse_metric(p.get("mem")),
                 vsz: p.get("vsz").and_then(|v| v.as_u64()).unwrap_or(0),
                 rss: p.get("rss").and_then(|v| v.as_u64()).unwrap_or(0),
                 stat: p

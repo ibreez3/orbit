@@ -107,8 +107,8 @@ private struct AppearancePane: View {
                     GridItem(.adaptive(minimum: 130, maximum: 160), spacing: 10)
                 ], spacing: 10) {
                     ForEach(displayThemes) { theme in
-                        ThemeCard(theme: theme, isSelected: themeState.theme.rawValue == theme.id) {
-                            if let t = AppTheme(rawValue: theme.id) {
+                        ThemeCard(theme: theme, isSelected: AppTheme(themeFileID: theme.id) == themeState.theme) {
+                            if let t = AppTheme(themeFileID: theme.id) {
                                 appState.setTheme(t)
                             }
                         }
@@ -334,7 +334,8 @@ private struct KeybindingsPane: View {
 
     private func actionLabel(for action: String) -> String {
         switch action {
-        case "spotlight": return "Spotlight 搜索"
+        case "quickConnect": return "快速连接"
+        case "commandPalette": return "命令面板"
         case "settings": return "打开设置"
         case "newTerminal": return "新建终端"
         case "toggleSftp": return "SFTP 侧栏"
