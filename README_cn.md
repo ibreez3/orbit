@@ -19,7 +19,7 @@
 
 Orbit 是一款原生 macOS SSH 管理终端，基于 SwiftUI、AppKit、SwiftTerm 和 Rust SSH/SFTP 核心构建。它面向需要管理多台 Linux 服务器的开发者与运维人员，把 SSH 终端、SFTP、资源监控、命令片段、跳板机和凭据管理整合到一个专注的桌面应用里。
 
-当前预览版本：**v0.0.6-pre**
+当前预览版本：**v0.0.7-pre**
 
 ## 功能特性
 

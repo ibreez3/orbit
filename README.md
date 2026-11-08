@@ -19,7 +19,7 @@ Native macOS SSH workspace for developers and operators.
 
 Orbit is a native macOS SSH manager built with SwiftUI, AppKit, SwiftTerm, and a Rust SSH/SFTP core. It is designed for people who manage multiple Linux servers and want terminal sessions, SFTP, monitoring, snippets, jump hosts, and credentials in one focused desktop app.
 
-Current preview release: **v0.0.6-pre**
+Current preview release: **v0.0.7-pre**
 
 ## Features
 

@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [v0.0.7-pre] - 2026-11-08
+
+### Added
+- Server-first homepage with a single quick-connect input, recent connections, and compact secondary actions.
+- Server folders up to three levels, multi-tag classification, drag-and-drop organization, and tag filtering.
+- Temporary SSH connections with inline authentication and optional promotion into saved assets.
+- Command palette on `⌘⇧P`; quick connect on `⌘K`; resizable and collapsible asset sidebar.
+- Connection attempt and result metadata persisted by the Rust core.
+- XCTest unit suite, XCUITest UI suite, and environment-gated real-server smoke tests.
+
+### Changed
+- Spotlight is now a command-only palette; server search lives in the global input.
+- Server organization uses folder and tag tables with transactional legacy group migration.
+- Window minimum size is 1024×640; the right tool dock keeps its 52pt width.
+
+### Fixed
+- Reconnect for saved, temporary, and local terminals, including split-pane teardown and orphan session cleanup.
+- Temporary connection panel layout collapse, port formatting, focus restoration, and `Esc` priority.
+- Quick terminal input routing, `Ctrl+\`` hotkey under IME, and menu entry.
+- Status bar session count and database dock entry.
+- SSH TCP and handshake timeouts; proxy bind failures return errors instead of panicking.
+- Partial server updates no longer wipe omitted credentials.
+- Monitor process CPU/memory parsing and SFTP percent escaping.
+- User-facing API error text no longer exposes internal error codes.
+
 ## [v0.0.6-pre] - 2026-07-02
 
 ### Added
