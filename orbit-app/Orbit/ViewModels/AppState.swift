@@ -16,6 +16,7 @@ class AppState: ObservableObject {
     let sftpDrawer = SftpDrawerState()
 
     private var pendingQuitTabId: String? = nil
+    private var autoReconnectTasks: [String: Task<Void, Never>] = [:]
 
     @Published var databaseConnectionDialogOpen: Bool = false
     @Published private var databasePanelInvalidationTokens: [String: Int] = [:]
@@ -1572,6 +1573,9 @@ class AppState: ObservableObject {
             }
         }
         if tool == .ai {
+            if !aiState.aiConfig.enabled {
+                return "AI 助手未启用（可在设置中开启）"
+            }
             if (context.kind == .terminal || context.kind == .localShell) && context.sessionId == nil {
                 return "终端会话建立后可使用 AI"
             }
@@ -1648,6 +1652,15 @@ class AppState: ObservableObject {
             return
         }
 
+        if case .local = tab.connectionTarget {
+            attachLocalSplit(
+                tabId: tab.id,
+                existingChannelId: existingChannelId,
+                direction: direction
+            )
+            return
+        }
+
         let tabId = tab.id
         Task {
             let newChannelId: String
@@ -1698,6 +1711,37 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Local terminals are backed by per-pane `LocalShell` processes rather
+    /// than SSH channels, so splitting one never goes through the Rust bridge.
+    private func attachLocalSplit(
+        tabId: String,
+        existingChannelId: String,
+        direction: SplitDirection
+    ) {
+        guard let idx = tabs.firstIndex(where: { $0.id == tabId }),
+              tabOwnsChannel(tabs[idx], channelId: existingChannelId) else { return }
+
+        let newChannelId = "local-\(UUID().uuidString)"
+        let newSplitId = UUID().uuidString
+        let newLeaf = PaneNode.leaf(channelId: newChannelId)
+
+        if let tree = tabs[idx].paneTree {
+            tabs[idx].paneTree = tree.replacingLeaf(channelId: existingChannelId, with:
+                .split(id: newSplitId, direction: direction, ratio: 0.5,
+                       first: .leaf(channelId: existingChannelId), second: newLeaf))
+        } else {
+            tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
+                                         first: .leaf(channelId: existingChannelId), second: newLeaf)
+        }
+        requestFocusPane(tabId: tabId, paneId: newChannelId)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if let tv = OrbitBridge.shared.terminalView(for: newChannelId) as? OrbitTerminalView {
+                tv.window?.makeFirstResponder(tv)
+            }
+        }
+    }
+
     private func tabOwnsChannel(_ tab: TabItem, channelId: String) -> Bool {
         if let tree = tab.paneTree {
             return tree.contains(channelId)
@@ -1716,9 +1760,20 @@ class AppState: ObservableObject {
             return
         }
 
+        let isLocal: Bool
+        if case .local = tab.connectionTarget {
+            isLocal = true
+        } else {
+            isLocal = false
+        }
+        if isLocal {
+            stopLocalShell(channelId: focused)
+        }
         bridge.removeSSHHandlers(sessionId: focused)
         bridge.removeTerminalView(sessionId: focused)
-        Task { try? await bridge.disconnectSSHAsync(sessionId: focused) }
+        if !isLocal {
+            Task { try? await bridge.disconnectSSHAsync(sessionId: focused) }
+        }
 
         if let newTree = tree.removing(channelId: focused) {
             if case .leaf(let remaining) = newTree {
@@ -1751,8 +1806,21 @@ class AppState: ObservableObject {
               let tree = tabs[tabIdx].paneTree,
               let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
               let next = tree.findAdjacent(channelId: focused, forward: forward) else { return }
-        requestFocusPane(tabId: active, paneId: next)
-        if let tv = OrbitBridge.shared.terminalView(for: next) as? OrbitTerminalView {
+        focusPane(tabId: active, channelId: next)
+    }
+
+    func navigatePane(direction: PaneNavigationDirection) {
+        guard let active = activeTabId,
+              let tabIdx = tabs.firstIndex(where: { $0.id == active }),
+              let tree = tabs[tabIdx].paneTree,
+              let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
+              let next = tree.neighbor(of: focused, direction: direction) else { return }
+        focusPane(tabId: active, channelId: next)
+    }
+
+    private func focusPane(tabId: String, channelId: String) {
+        requestFocusPane(tabId: tabId, paneId: channelId)
+        if let tv = OrbitBridge.shared.terminalView(for: channelId) as? OrbitTerminalView {
             tv.window?.makeFirstResponder(tv)
         }
     }
@@ -1781,15 +1849,32 @@ class AppState: ObservableObject {
         } else {
             channelIds = []
         }
+        let isLocal: Bool
+        if case .local = tab.connectionTarget {
+            isLocal = true
+        } else {
+            isLocal = false
+        }
         for channelId in channelIds {
+            if isLocal {
+                stopLocalShell(channelId: channelId)
+            }
             bridge.removeSSHHandlers(sessionId: channelId)
             bridge.removeTerminalView(sessionId: channelId)
         }
+        guard !isLocal else { return }
         Task.detached {
             for channelId in channelIds {
                 try? self.bridge.disconnectSSH(sessionId: channelId)
             }
         }
+    }
+
+    private func stopLocalShell(channelId: String) {
+        guard let terminalView = bridge.terminalView(for: channelId) as? OrbitTerminalView,
+              let shell = terminalView.localShell else { return }
+        shell.stop()
+        terminalView.localShell = nil
     }
 
     func removeTab(_ id: String) {
@@ -1820,6 +1905,7 @@ class AppState: ObservableObject {
     }
 
     func confirmQuit() {
+        cancelAutoReconnects()
         if let tabId = pendingQuitTabId {
             performRemoveTab(tabId)
         }
@@ -1834,6 +1920,7 @@ class AppState: ObservableObject {
     }
 
     private func performRemoveTab(_ id: String) {
+        cancelAutoReconnect(tabId: id)
         let removedIndex = tabs.firstIndex(where: { $0.id == id }) ?? 0
         if let tab = tabs.first(where: { $0.id == id }) {
             disconnectAllChannels(tab: tab)
@@ -1911,56 +1998,73 @@ class AppState: ObservableObject {
         }
     }
 
-    func connectSSH(tabId: String, serverId: String) {
-        Task {
-            do {
-                let sessionId = try await workspaceBridge.connectSSHAsync(serverId: serverId)
-                let expectedTarget = ServerConnectionTarget.saved(serverId: serverId)
-                let installed = await MainActor.run {
-                    guard let tab = tabState.tab(id: tabId),
-                          tab.type == .terminal,
-                          tab.connectionTarget == expectedTarget,
-                          tab.sessionId == nil else { return false }
-                    updateTabSessionId(tabId, sessionId: sessionId)
-                    return true
-                }
-                if !installed {
-                    await discardSSHSession(sessionId)
-                }
-            } catch {
+    /// Connects a saved server to an existing tab.
+    /// - Returns: `true` when the session was installed on the expected tab.
+    @discardableResult
+    func connectSSH(
+        tabId: String,
+        serverId: String,
+        suppressFailureAlert: Bool = false
+    ) async -> Bool {
+        do {
+            let sessionId = try await workspaceBridge.connectSSHAsync(serverId: serverId)
+            let expectedTarget = ServerConnectionTarget.saved(serverId: serverId)
+            let installed = await MainActor.run {
+                guard let tab = tabState.tab(id: tabId),
+                      tab.type == .terminal,
+                      tab.connectionTarget == expectedTarget,
+                      tab.sessionId == nil else { return false }
+                updateTabSessionId(tabId, sessionId: sessionId)
+                return true
+            }
+            if !installed {
+                await discardSSHSession(sessionId)
+            }
+            return installed
+        } catch {
+            if !suppressFailureAlert {
                 await MainActor.run {
                     alertTitle = "连接失败"
                     alertMessage = "\(error.localizedDescription)"
                 }
             }
+            return false
         }
     }
 
-    func connectTemporarySSH(tabId: String) {
-        guard let draft = temporaryDraft(for: tabId) else { return }
+    /// Connects a temporary draft to an existing tab.
+    /// - Returns: `true` when the session was installed on the expected tab.
+    @discardableResult
+    func connectTemporarySSH(
+        tabId: String,
+        suppressFailureAlert: Bool = false
+    ) async -> Bool {
+        guard let draft = temporaryDraft(for: tabId) else { return false }
         let expectedTarget = ServerConnectionTarget.temporary(tabId: tabId)
-        Task {
-            do {
-                let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
-                    input: draft.connectionInput
-                )
-                let installed = await MainActor.run {
-                    guard let tab = tabState.tab(id: tabId),
-                          tab.type == .terminal,
-                          tab.connectionTarget == expectedTarget,
-                          tab.sessionId == nil else { return false }
-                    updateTabSessionId(tabId, sessionId: sessionId)
-                    return true
-                }
-                if !installed {
-                    await discardSSHSession(sessionId)
-                }
-            } catch {
+        do {
+            let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
+                input: draft.connectionInput
+            )
+            let installed = await MainActor.run {
+                guard let tab = tabState.tab(id: tabId),
+                      tab.type == .terminal,
+                      tab.connectionTarget == expectedTarget,
+                      tab.sessionId == nil else { return false }
+                updateTabSessionId(tabId, sessionId: sessionId)
+                return true
+            }
+            if !installed {
+                await discardSSHSession(sessionId)
+            }
+            return installed
+        } catch {
+            if !suppressFailureAlert {
                 await MainActor.run {
                     alertTitle = "连接失败"
                     alertMessage = error.localizedDescription
                 }
             }
+            return false
         }
     }
 
@@ -2040,9 +2144,67 @@ class AppState: ObservableObject {
                 removeTab(tab.id)
             }
         } else {
-            // Single pane: close the whole tab
-            removeTab(tab.id)
+            // Single pane: keep the tab so the user keeps their scrollback,
+            // then reconnect automatically when that preference is enabled.
+            tabs[tabIdx].sessionId = nil
+            tabs[tabIdx].focusedChannelId = nil
+            tabs[tabIdx].paneTree = nil
+            tabs[tabIdx].sessionGeneration &+= 1
+            if tab.id == activeTabId {
+                closeSessionScopedTools()
+            }
+            if shouldAutoReconnect(tab) {
+                scheduleAutoReconnect(tabId: tab.id)
+            }
         }
+    }
+
+    // MARK: - Auto reconnect
+
+    var isAutoReconnectEnabled: Bool {
+        UserDefaults.standard.object(forKey: "sshReconnectEnabled") as? Bool ?? true
+    }
+
+    var autoReconnectInterval: TimeInterval {
+        let stored = UserDefaults.standard.object(forKey: "sshReconnectInterval") as? Double ?? 3
+        return max(1, min(30, stored))
+    }
+
+    private func shouldAutoReconnect(_ tab: TabItem) -> Bool {
+        guard isAutoReconnectEnabled, pendingQuitTabId == nil else { return false }
+        switch tab.connectionTarget {
+        case .saved, .temporary:
+            return true
+        case .local:
+            return false
+        }
+    }
+
+    private func scheduleAutoReconnect(tabId: String) {
+        guard autoReconnectTasks[tabId] == nil else { return }
+        guard let tab = tabs.first(where: { $0.id == tabId }), shouldAutoReconnect(tab) else {
+            return
+        }
+        let interval = autoReconnectInterval
+        autoReconnectTasks[tabId] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            await MainActor.run {
+                self.autoReconnectTasks.removeValue(forKey: tabId)
+                guard let tab = self.tabs.first(where: { $0.id == tabId }),
+                      self.shouldAutoReconnect(tab) else { return }
+                self.reconnectTab(tabId, isAutoReconnect: true)
+            }
+        }
+    }
+
+    func cancelAutoReconnect(tabId: String) {
+        autoReconnectTasks.removeValue(forKey: tabId)?.cancel()
+    }
+
+    func cancelAutoReconnects() {
+        autoReconnectTasks.values.forEach { $0.cancel() }
+        autoReconnectTasks.removeAll()
     }
 
     func openSpotlight() {
@@ -2065,10 +2227,13 @@ class AppState: ObservableObject {
         UserDefaults.standard.set(newTheme.rawValue, forKey: "theme")
     }
 
-    func reconnectTab(_ tabId: String) {
+    func reconnectTab(_ tabId: String, isAutoReconnect: Bool = false) {
         guard let tabIdx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         let tab = tabs[tabIdx]
         guard tab.type == .terminal else { return }
+        if !isAutoReconnect {
+            cancelAutoReconnect(tabId: tabId)
+        }
 
         var sessionIds = Set<String>()
         if let oldSid = tab.sessionId { sessionIds.insert(oldSid) }
@@ -2097,13 +2262,32 @@ class AppState: ObservableObject {
             }
         }
 
-        switch tab.connectionTarget {
-        case .saved(let serverId):
-            connectSSH(tabId: tabId, serverId: serverId)
-        case .temporary:
-            connectTemporarySSH(tabId: tabId)
-        case .local:
-            break
+        let target = tab.connectionTarget
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let connected: Bool
+            switch target {
+            case .saved(let serverId):
+                connected = await self.connectSSH(
+                    tabId: tabId,
+                    serverId: serverId,
+                    suppressFailureAlert: isAutoReconnect
+                )
+            case .temporary:
+                connected = await self.connectTemporarySSH(
+                    tabId: tabId,
+                    suppressFailureAlert: isAutoReconnect
+                )
+            case .local:
+                connected = false
+            }
+            if isAutoReconnect {
+                if connected {
+                    self.cancelAutoReconnect(tabId: tabId)
+                } else {
+                    self.scheduleAutoReconnect(tabId: tabId)
+                }
+            }
         }
     }
 
@@ -2293,10 +2477,29 @@ class AppState: ObservableObject {
     }
 
     func toggleAIPanel() {
+        if aiPanelOpen {
+            toggleAIDrawerForCurrentContext()
+            return
+        }
+        guard aiState.aiConfig.enabled else {
+            alertTitle = "AI 助手未启用"
+            alertMessage = "请先在 设置 > AI 助手 中启用 AI 面板。"
+            return
+        }
         toggleAIDrawerForCurrentContext()
     }
 
+    /// Closes the AI drawer when the setting is turned off.
+    func applyAIEnabledSetting() {
+        guard !aiState.aiConfig.enabled else { return }
+        aiPanelOpen = false
+        if activeTool?.tool == .ai {
+            activeTool = nil
+        }
+    }
+
     func submitAIQuestion(_ question: String) {
+        guard aiState.aiConfig.enabled else { return }
         let serverId = currentServerId
         let tabId = currentActiveTabId
 

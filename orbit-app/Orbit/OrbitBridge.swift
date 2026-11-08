@@ -113,6 +113,26 @@ class OrbitBridge {
         guard app != nil else {
             throw OrbitError.initializationFailed
         }
+        applyConnectionPreferencesUnlocked()
+    }
+
+    /// Pushes the SSH settings from UserDefaults into the Rust core. Also
+    /// updates keepalive on sessions that are already connected.
+    func applyConnectionPreferences() {
+        guard (try? ensureInitialized()) != nil else { return }
+        initLock.lock()
+        defer { initLock.unlock() }
+        applyConnectionPreferencesUnlocked()
+    }
+
+    private func applyConnectionPreferencesUnlocked() {
+        guard let app else { return }
+        let defaults = UserDefaults.standard
+        let timeout = defaults.object(forKey: "sshTimeout") as? Double ?? 10
+        let keepalive = defaults.object(forKey: "sshKeepaliveInterval") as? Double ?? 30
+        let clampedTimeout = UInt32(max(1, min(300, timeout.rounded())))
+        let clampedKeepalive = UInt32(max(0, min(3600, keepalive.rounded())))
+        _ = orbit_set_connection_settings(app, clampedTimeout, clampedKeepalive)
     }
 
     static func databaseURL(
@@ -865,6 +885,7 @@ class OrbitBridge {
 
     func connectSSH(serverId: String) throws -> String {
         try ensureInitialized()
+        applyConnectionPreferencesUnlocked()
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         var outSessionId: UnsafeMutablePointer<CChar>?
         let rc = serverId.withCString { sidPtr in
@@ -879,6 +900,7 @@ class OrbitBridge {
 
     func connectTemporarySSH(input: TemporaryConnectionInput) throws -> String {
         try ensureInitialized()
+        applyConnectionPreferencesUnlocked()
         let jsonString = try Self.encodeJSONString(input)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         var outSessionId: UnsafeMutablePointer<CChar>?

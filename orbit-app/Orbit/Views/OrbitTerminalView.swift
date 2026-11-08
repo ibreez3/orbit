@@ -50,6 +50,11 @@ enum TerminalRenderSettings {
         return CGFloat(fontSize > 0 ? fontSize : 14)
     }
 
+    /// The settings UI defaults this to ON, so an unset key must mean ON too.
+    static var selectToCopyEnabled: Bool {
+        UserDefaults.standard.object(forKey: "selectToCopy") as? Bool ?? true
+    }
+
     private static var cachedFontKey: String?
     private static var cachedFont: NSFont?
 
@@ -89,11 +94,12 @@ enum TerminalRenderSettings {
         let colors = tc.ansi.map { SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue) }
         terminalView.installColors(colors)
 
+        let effectiveAlpha = backgroundAlpha * (snapshot.backgroundBlur ? 0.82 : 1.0)
         terminalView.nativeBackgroundColor = NSColor(
             red: tc.background.red,
             green: tc.background.green,
             blue: tc.background.blue,
-            alpha: backgroundAlpha
+            alpha: effectiveAlpha
         )
         terminalView.nativeForegroundColor = NSColor(
             red: tc.foreground.red,
@@ -173,6 +179,9 @@ enum TerminalRenderSettings {
 class OrbitTerminalView: SwiftTerm.TerminalView {
     var tabId: String?
     weak var appState: AppState?
+    /// Owned here (rather than by the coordinator) so the shell survives the
+    /// view/coordinator rebuild that happens when a pane is split.
+    var localShell: LocalShell?
     private var renderTheme: AppTheme = .catppuccinMocha
     private var renderBackgroundAlpha: CGFloat = 1
     private var observingSettingsKeys = false
@@ -189,40 +198,11 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     // Pending paste text after confirmation
     private var pendingPasteText: String?
 
-    // Background blur
-    private var blurView: NSVisualEffectView?
-
-    // MARK: - Blur background
-
-    func setupBlur() {
-        guard blurView == nil else { return }
-        guard UserDefaults.standard.bool(forKey: "backgroundBlur") else { return }
-        let blur = NSVisualEffectView()
-        blur.wantsLayer = true
-        blur.blendingMode = .behindWindow
-        blur.state = .active
-        blur.material = .hudWindow
-        blur.autoresizingMask = [.width, .height]
-        blur.frame = bounds
-        addSubview(blur, positioned: .below, relativeTo: nil)
-        blurView = blur
-
-        // Make terminal background semi-transparent
-        nativeBackgroundColor = nativeBackgroundColor.withAlphaComponent(0.85)
-    }
-
-    func removeBlur() {
-        blurView?.removeFromSuperview()
-        blurView = nil
-        nativeBackgroundColor = nativeBackgroundColor.withAlphaComponent(1.0)
-    }
-
+    /// Background blur is rendered once behind the whole window; the terminal
+    /// only needs to become translucent so that backdrop can show through.
     func updateBlurEnabled(_ enabled: Bool) {
-        if enabled {
-            setupBlur()
-        } else {
-            removeBlur()
-        }
+        let alpha = renderBackgroundAlpha * (enabled ? 0.82 : 1.0)
+        nativeBackgroundColor = nativeBackgroundColor.withAlphaComponent(alpha)
     }
 
     func configureRenderSettings(theme: AppTheme, backgroundAlpha: CGFloat = 1) {
@@ -261,7 +241,7 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
             mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
                 guard let self = self,
                       self.window?.firstResponder == self,
-                      UserDefaults.standard.bool(forKey: "selectToCopy"),
+                      TerminalRenderSettings.selectToCopyEnabled,
                       self.selectionActive else { return event }
                 self.copy(self)
                 return event

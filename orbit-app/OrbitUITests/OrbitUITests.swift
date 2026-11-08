@@ -40,6 +40,64 @@ final class OrbitUITests: XCTestCase {
         XCTAssertFalse(palette.waitForExistence(timeout: 2))
     }
 
+    func testDoubleClickTitlebarTogglesZoom() {
+        let window = app.windows["Orbit"]
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        let initialFrame = window.frame
+
+        doubleClickTitlebar(of: window)
+        let resized = NSPredicate { _, _ in
+            abs(window.frame.width - initialFrame.width) > 1
+                || abs(window.frame.height - initialFrame.height) > 1
+        }
+        expectation(for: resized, evaluatedWith: window)
+        waitForExpectations(timeout: 5)
+
+        doubleClickTitlebar(of: window)
+        let restored = NSPredicate { _, _ in
+            abs(window.frame.width - initialFrame.width) <= 1
+                && abs(window.frame.height - initialFrame.height) <= 1
+        }
+        expectation(for: restored, evaluatedWith: window)
+        waitForExpectations(timeout: 5)
+    }
+
+    func testLocalTerminalSplitCreatesTwoPanes() {
+        app.buttons["homeLocalTerminalButton"].click()
+
+        let summary = app.staticTexts["statusBarSummary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        let single = NSPredicate(format: "value CONTAINS %@", "已连接 1 个会话")
+        expectation(for: single, evaluatedWith: summary)
+        waitForExpectations(timeout: 10)
+
+        app.typeKey("d", modifierFlags: [.command, .shift])
+
+        let split = NSPredicate(format: "value CONTAINS %@", "已连接 2 个会话")
+        expectation(for: split, evaluatedWith: summary)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.staticTexts["分屏失败"].exists)
+    }
+
+    func testSettingsWindowSupportsZoom() {
+        let settings = openSettingsWindow()
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        defer {
+            if settings.exists {
+                app.typeKey("w", modifierFlags: .command)
+            }
+        }
+
+        let initialFrame = settings.frame
+        doubleClickTitlebar(of: settings)
+        let resized = NSPredicate { _, _ in
+            abs(settings.frame.width - initialFrame.width) > 1
+                || abs(settings.frame.height - initialFrame.height) > 1
+        }
+        expectation(for: resized, evaluatedWith: settings)
+        waitForExpectations(timeout: 5)
+    }
+
     func testTemporaryPanelRequiresPasswordAndEscapeClosesIt() {
         let passwordField = openTemporaryPanel(address: "tester@127.0.0.1:1")
 
@@ -64,6 +122,64 @@ final class OrbitUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(app.textFields["serverQuickConnectInput"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["homeLocalTerminalButton"].exists)
+    }
+
+    func testEditedKeybindingTakesEffect() {
+        let settings = openSettingsWindow()
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+
+        defer {
+            if app.textFields["commandPaletteSearchField"].exists {
+                app.typeKey(.escape, modifierFlags: [])
+            }
+            if !settings.exists {
+                _ = openSettingsWindow()
+            }
+            if settings.buttons["快捷键"].waitForExistence(timeout: 3) {
+                settings.buttons["快捷键"].click()
+            }
+            let reset = app.buttons["keybindingResetButton"]
+            if reset.waitForExistence(timeout: 3) {
+                reset.click()
+            }
+            if settings.buttons["外观"].exists {
+                settings.buttons["外观"].click()
+            }
+            if settings.exists {
+                app.typeKey("w", modifierFlags: .command)
+            }
+        }
+
+        let shortcutsTab = settings.buttons["快捷键"]
+        XCTAssertTrue(shortcutsTab.waitForExistence(timeout: 5))
+        shortcutsTab.click()
+
+        let row = app.buttons["keybinding-commandPalette"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let rowInfo = "rowHittable=\(row.isHittable) rowFrame=\(row.frame) settingsFrame=\(settings.frame)"
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).click()
+        let recording = app.staticTexts["keybindingRecordingStatus"]
+        let overlayAppeared = recording.waitForExistence(timeout: 2)
+        XCTAssertTrue(overlayAppeared, "clicking a keybinding row should start recording; \(rowInfo)")
+        app.typeKey("j", modifierFlags: .command)
+        sleep(1)
+        let updatedRow = app.buttons["keybinding-commandPalette"]
+        XCTAssertTrue(updatedRow.waitForExistence(timeout: 2))
+        let updatedInfo = "overlay=\(overlayAppeared) label=\(updatedRow.label) title=\(updatedRow.title) value=\(String(describing: updatedRow.value))"
+
+        // Leave the capture pane before using a menu shortcut to close.
+        if settings.buttons["外观"].exists {
+            settings.buttons["外观"].click()
+        }
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(settings.waitForNonExistence(timeout: 5))
+
+        app.typeKey("j", modifierFlags: .command)
+        XCTAssertTrue(
+            app.textFields["commandPaletteSearchField"].waitForExistence(timeout: 5),
+            "the newly recorded shortcut should open the command palette; \(rowInfo); \(updatedInfo)"
+        )
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     func testRealServerTemporaryConnectionAndReconnect() throws {
@@ -139,6 +255,26 @@ final class OrbitUITests: XCTestCase {
     }
 
     @discardableResult
+    private func openSettingsWindow() -> XCUIElement {
+        let settings = app.windows["设置"]
+        if !settings.exists {
+            let button = app.buttons["dock-settings"]
+            if button.waitForExistence(timeout: 5) {
+                button.click()
+            }
+        }
+        _ = settings.waitForExistence(timeout: 10)
+        return settings
+    }
+
+    @discardableResult
+    private func doubleClickTitlebar(of window: XCUIElement) {
+        let point = window
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            .withOffset(CGVector(dx: 0, dy: 12))
+        point.doubleClick()
+    }
+
     private func openTemporaryPanel(address: String) -> XCUIElement {
         let input = app.textFields["serverQuickConnectInput"]
         XCTAssertTrue(input.waitForExistence(timeout: 10))
@@ -178,6 +314,7 @@ final class OrbitUITests: XCTestCase {
     private func textValue(_ element: XCUIElement) -> String {
         (element.value as? String) ?? element.label
     }
+
 
     private func paste(_ text: String, into element: XCUIElement) {
         NSPasteboard.general.clearContents()

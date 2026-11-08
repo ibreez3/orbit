@@ -16,6 +16,7 @@ enum SpotlightItem: Identifiable {
 struct SpotlightView: View {
     @EnvironmentObject var uiState: UIState
     let appState: AppState
+    @ObservedObject private var keyBindings = KeyBindings.shared
     @FocusState private var isSearchFocused: Bool
     @State private var selectedIndex = 0
     @State private var keyMonitor: Any?
@@ -72,9 +73,8 @@ struct SpotlightView: View {
             }),
             ("切换主题", "circle.lefthalf.filled", {
                 let themes = AppTheme.allCases
-                if let index = themes.firstIndex(of: appState.theme) {
-                    appState.setTheme(themes[(index + 1) % themes.count])
-                }
+                let index = themes.firstIndex(of: appState.theme) ?? -1
+                appState.setTheme(themes[(index + 1) % themes.count])
                 appState.closeSpotlight()
             })
         ]
@@ -171,7 +171,7 @@ struct SpotlightView: View {
             Text("↑↓ 导航")
             Text("↵ 执行")
             Spacer()
-            Text("⌘⇧P 命令面板")
+            Text("\(keyBindings.binding(for: "commandPalette").displayString) 命令面板")
         }
         .font(.system(size: 11))
         .foregroundStyle(.tertiary)

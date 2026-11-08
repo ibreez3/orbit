@@ -842,12 +842,25 @@ final class ServerWorkspaceStateTests: XCTestCase {
         let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
         let tabId = state.addTemporaryTerminalTab(draft: .fixture())
         state.updateTabSessionId(tabId, sessionId: "session-1")
+        state.aiState.aiConfig.enabled = true
 
         XCTAssertNil(state.canOpenTool(.ai))
         XCTAssertNil(state.canOpenTool(.snippets))
         XCTAssertNotNil(state.canOpenTool(.sftp))
         XCTAssertNotNil(state.canOpenTool(.monitor))
         XCTAssertFalse(state.canUsePersistedServerTools)
+    }
+
+    func testAIStaysDisabledUntilEnabledInSettings() {
+        let state = AppState(workspaceBridge: FakeServerWorkspaceBridge())
+        let tabId = state.addTemporaryTerminalTab(draft: .fixture())
+        state.updateTabSessionId(tabId, sessionId: "session-1")
+        state.aiState.aiConfig.enabled = false
+
+        XCTAssertEqual(state.canOpenTool(.ai), "AI 助手未启用（可在设置中开启）")
+
+        state.aiState.aiConfig.enabled = true
+        XCTAssertNil(state.canOpenTool(.ai))
     }
 }
 
@@ -877,7 +890,7 @@ private enum FakeError: Error, Equatable {
     case snapshotRefreshFailed
 }
 
-private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
+final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     private let temporarySessionId: String
     private let promotedServer: Server
     private var promotionErrors: [Error]
@@ -895,6 +908,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
 
     private(set) var connectedInput: TemporaryConnectionInput?
     private(set) var connectCallCount = 0
+    private(set) var spawnCallCount = 0
     private(set) var promotedSessionId: String?
     private(set) var promotedInput: PromoteTemporaryServerInput?
     private(set) var promotionCallCount = 0
@@ -1048,6 +1062,7 @@ private final class FakeServerWorkspaceBridge: ServerWorkspaceBridge {
     }
 
     func spawnChannelAsync(existingSessionId: String) async throws -> String {
+        spawnCallCount += 1
         if let spawnStarted {
             spawnStarted.fulfill()
             return await withCheckedContinuation { continuation in

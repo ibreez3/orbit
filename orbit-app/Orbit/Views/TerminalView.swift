@@ -306,17 +306,28 @@ struct TerminalView: NSViewRepresentable {
         tv.configureRenderSettings(theme: theme)
     }
 
+    private var isLocalTarget: Bool {
+        if case .local = connectionTarget {
+            return true
+        }
+        return false
+    }
+
     func makeNSView(context: Context) -> OrbitTerminalView {
         // Reuse cached terminal view if available (preserves buffer on pane tree changes)
         if let cid = channelId, let cached = OrbitBridge.shared.terminalView(for: cid) as? OrbitTerminalView {
             context.coordinator.sessionId = cid
             context.coordinator.terminalView = cached
             cached.terminalDelegate = context.coordinator
-            context.coordinator.registerHandlers()
+            if isLocalTarget {
+                context.coordinator.adoptLocalShell()
+            } else {
+                context.coordinator.registerHandlers()
+                let term = cached.getTerminal()
+                do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
+            }
             Self.applySettings(cached, theme: themeState.theme)
             cached.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
-            let term = cached.getTerminal()
-            do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
             return cached
         }
 
@@ -330,7 +341,13 @@ struct TerminalView: NSViewRepresentable {
         // Background blur
         tv.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
 
-        if let cid = channelId {
+        if isLocalTarget {
+            if let cid = channelId {
+                context.coordinator.sessionId = cid
+                OrbitBridge.shared.cacheTerminalView(tv, sessionId: cid)
+            }
+            context.coordinator.connect()
+        } else if let cid = channelId {
             context.coordinator.sessionId = cid
             OrbitBridge.shared.cacheTerminalView(tv, sessionId: cid)
             context.coordinator.registerHandlers()
@@ -354,7 +371,11 @@ struct TerminalView: NSViewRepresentable {
         }
         if let cid = channelId, context.coordinator.sessionId != cid {
             context.coordinator.sessionId = cid
-            context.coordinator.registerHandlers()
+            if context.coordinator.isLocal {
+                context.coordinator.adoptLocalShell()
+            } else {
+                context.coordinator.registerHandlers()
+            }
         }
         nsView.tabId = tabId
         nsView.appState = appState
@@ -376,7 +397,7 @@ struct TerminalView: NSViewRepresentable {
         let connectionTarget: ServerConnectionTarget
         let tabId: String
         let appState: AppState
-        weak var terminalView: SwiftTerm.TerminalView?
+        weak var terminalView: OrbitTerminalView?
         var sessionId: String?
         var sessionGeneration: Int
         private var alive = true
@@ -506,7 +527,8 @@ struct TerminalView: NSViewRepresentable {
                         if let tv = self.terminalView {
                             tv.feed(text: "\r\n\u{1b}[33m--- 本地终端已退出 ---\u{1b}[0m\r\n")
                         }
-                        if let tabIdx = self.appState.tabs.firstIndex(where: { $0.id == self.tabId }) {
+                        if let tabIdx = self.appState.tabs.firstIndex(where: { $0.id == self.tabId }),
+                           self.appState.tabs[tabIdx].paneTree == nil {
                             self.appState.tabs[tabIdx].sessionId = nil
                         }
                     } else {
@@ -529,18 +551,43 @@ struct TerminalView: NSViewRepresentable {
             }
         }
 
-        private func connectLocal() {
-            let shell = LocalShell()
+        /// Reattaches a rebuilt view to the shell already running for this pane.
+        /// A shell that has already exited stays exited until explicitly restarted.
+        func adoptLocalShell() {
+            guard isLocal else { return }
+            guard let shell = terminalView?.localShell else { return }
             localShell = shell
+            guard shell.isRunning else { return }
             shell.onData = makeDataHandler()
             shell.onClosed = makeClosedHandler()
+            if let term = terminalView?.getTerminal() {
+                shell.resize(cols: UInt16(term.cols), rows: UInt16(term.rows))
+            }
+        }
 
-            let fakeSid = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
-            sessionId = fakeSid
+        private func connectLocal(reuseId: String? = nil) {
+            if let existing = terminalView?.localShell, existing.isRunning {
+                adoptLocalShell()
+                return
+            }
+
+            let effectiveId = channelId
+                ?? reuseId
+                ?? sessionId
+                ?? "local-\(Int(Date().timeIntervalSince1970 * 1000))"
+            let shell = LocalShell()
+            localShell = shell
+            terminalView?.localShell = shell
+            shell.onData = makeDataHandler()
+            shell.onClosed = makeClosedHandler()
+            sessionId = effectiveId
 
             DispatchQueue.main.async {
-                self.appState.updateTabSessionId(self.tabId, sessionId: fakeSid)
+                if self.channelId == nil {
+                    self.appState.updateTabSessionId(self.tabId, sessionId: effectiveId)
+                }
                 if let tv = self.terminalView {
+                    OrbitBridge.shared.cacheTerminalView(tv, sessionId: effectiveId)
                     let term = tv.getTerminal()
                     shell.start(cols: UInt16(term.cols), rows: UInt16(term.rows))
                 } else {
@@ -552,9 +599,14 @@ struct TerminalView: NSViewRepresentable {
 
         func restartLocal() {
             guard isLocal else { return }
+            let previousId = sessionId ?? channelId
+            localShell?.stop()
+            if terminalView?.localShell === localShell {
+                terminalView?.localShell = nil
+            }
             localShell = nil
             sessionId = nil
-            connectLocal()
+            connectLocal(reuseId: previousId)
         }
 
         private func connectSSH() {
@@ -709,7 +761,7 @@ struct TerminalView: NSViewRepresentable {
 
         func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {
             // Auto-copy selected text to clipboard when selectToCopy is enabled
-            guard UserDefaults.standard.bool(forKey: "selectToCopy") else { return }
+            guard TerminalRenderSettings.selectToCopyEnabled else { return }
             if let tv = terminalView, tv.selectionActive {
                 tv.copy(tv)
             }

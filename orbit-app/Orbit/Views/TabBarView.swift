@@ -3,6 +3,7 @@ import SwiftUI
 struct TabBarView: View {
     let appState: AppState
     @EnvironmentObject var tabState: TabState
+    @ObservedObject private var keyBindings = KeyBindings.shared
     @State private var hoveredTabId: String? = nil
 
     var body: some View {
@@ -28,7 +29,7 @@ struct TabBarView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .help("快速连接 (⌘K)")
+            .help("快速连接 (\(keyBindings.binding(for: "quickConnect").displayString))")
             .accessibilityLabel("打开快速连接")
 
             networkIndicator

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [v0.0.8-pre] - 2026-11-08
+
+### Fixed
+- Splitting a local terminal now opens a second local shell pane instead of failing with an SSH channel error; each pane keeps its own shell, and closing a pane or tab terminates only its shell.
+- The workspace window supports the standard title-bar behaviors again: double-clicking the title bar or an empty part of the global bar zooms the window (or minimizes it, following the system double-click preference), and the window can be dragged by its title bar.
+- The settings window is resizable and supports title-bar double-click zoom.
+- Every control in the settings window now takes effect: SSH timeout, keepalive, auto-reconnect interval, AI enable gating, all customizable keybindings, database query timeout and auto-`LIMIT`, custom theme selection, window background blur, and the select-to-copy default.
+- Settings that change live UI state (AI dock availability, keybinding rows, status-bar shortcut hints) refresh immediately instead of waiting for an unrelated redraw.
+- Keybinding rows are now clickable across the full row, and key recording no longer depends on which control owns keyboard focus.
+- Removed the non-functional Metal GPU renderer toggle.
+
 ## [v0.0.7-pre] - 2026-11-08
 
 ### Added

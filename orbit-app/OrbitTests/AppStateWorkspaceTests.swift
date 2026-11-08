@@ -72,8 +72,10 @@ final class AppStateWorkspaceTests: XCTestCase {
             closedHandler: { state.handleChannelClosed(channelId: sessionId) }
         )
 
-        XCTAssertTrue(state.tabs.isEmpty)
-        XCTAssertNil(state.activeTabId)
+        state.cancelAutoReconnects()
+        XCTAssertEqual(state.tabs.count, 1)
+        XCTAssertNil(state.tabs.first?.sessionId)
+        XCTAssertEqual(state.activeTabId, tab.id)
 
         bridge.handleSSHData(sessionId: sessionId, data: Data("late".utf8))
         bridge.setSSHHandlers(

@@ -3,6 +3,7 @@ import SwiftUI
 struct SessionToolDockView: View {
     @EnvironmentObject var toolState: ToolState
     @EnvironmentObject var inventoryState: InventoryState
+    @EnvironmentObject var aiState: AIState
     let appState: AppState
 
     var body: some View {
@@ -45,6 +46,7 @@ struct SessionToolDockView: View {
             .foregroundStyle(.secondary)
             .help("设置")
             .accessibilityLabel("设置")
+            .accessibilityIdentifier("dock-settings")
         }
         .padding(.vertical, 10)
         .frame(width: 52)

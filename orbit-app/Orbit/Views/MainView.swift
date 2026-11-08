@@ -10,7 +10,9 @@ struct MainView: View {
     @State private var batchExecutionVisible: Bool = false
     @State private var assetTreeDragStartWidth: CGFloat?
     @State private var workspaceKeyMonitor: Any?
+    @State private var titlebarInteraction = TitlebarInteractionController()
     @State private var workspaceWindowIdentity = WorkspaceWindowIdentity()
+    @AppStorage("backgroundBlur") private var backgroundBlur: Bool = false
 
     init(appState: AppState = AppState()) {
         _appState = StateObject(wrappedValue: appState)
@@ -84,12 +86,14 @@ struct MainView: View {
         }
         .onAppear {
             installWorkspaceKeyMonitor()
+            titlebarInteraction.install { workspaceWindowIdentity.windowNumber }
             if inventoryState.servers.isEmpty { appState.loadServers() }
             if inventoryState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
             if inventoryState.databaseConnections.isEmpty { appState.loadDatabaseConnections() }
         }
         .onDisappear {
             removeWorkspaceKeyMonitor()
+            titlebarInteraction.uninstall()
         }
 
         return base
@@ -104,6 +108,8 @@ struct MainView: View {
             .onReceive(nc(.closePane)) { _ in appState.closeCurrentPane() }
             .onReceive(nc(.navigatePrevPane)) { _ in appState.navigatePane(forward: false) }
             .onReceive(nc(.navigateNextPane)) { _ in appState.navigatePane(forward: true) }
+            .onReceive(nc(.navigateLeftPane)) { _ in appState.navigatePane(direction: .left) }
+            .onReceive(nc(.navigateRightPane)) { _ in appState.navigatePane(direction: .right) }
             .onReceive(nc(.growPane)) { _ in appState.resizePane(grow: true) }
             .onReceive(nc(.shrinkPane)) { _ in appState.resizePane(grow: false) }
             .modifier(SftpDrawerModifier(appState: appState))
@@ -155,15 +161,19 @@ struct MainView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        performHeaderDoubleClickAction()
+                    }
             }
 
-            Spacer(minLength: 0)
+            headerFlexibleSpace
 
             ServerQuickConnectView(appState: appState)
                 .frame(minWidth: minimumInputWidth, idealWidth: 500, maxWidth: 500)
                 .layoutPriority(2)
 
-            Spacer(minLength: 0)
+            headerFlexibleSpace
 
             Menu {
                 Button("添加服务器") { appState.openDialog() }
@@ -188,6 +198,23 @@ struct MainView: View {
             .accessibilityLabel("设置")
         }
         .padding(.horizontal, 10)
+    }
+
+    /// Empty stretches of the global bar behave like the title bar, matching
+    /// the drag/zoom area above it without stealing clicks from the controls.
+    private var headerFlexibleSpace: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                performHeaderDoubleClickAction()
+            }
+    }
+
+    private func performHeaderDoubleClickAction() {
+        let window = NSApp.windows.first {
+            $0.windowNumber == workspaceWindowIdentity.windowNumber
+        } ?? NSApp.keyWindow
+        TitlebarInteractionController.performDoubleClickAction(on: window)
     }
 
     private var workspaceLayout: some View {
@@ -227,7 +254,7 @@ struct MainView: View {
             Divider()
             SessionToolDockView(appState: appState)
         }
-        .background(themeWindowColor)
+        .background(WindowBackdrop(color: themeWindowColor, blurEnabled: backgroundBlur))
         .preferredColorScheme(themeColorScheme)
     }
 
@@ -517,7 +544,10 @@ struct MainView: View {
             }
 
             let input = WorkspaceKeyboardInput(
-                key: event.charactersIgnoringModifiers ?? "",
+                key: KeyBinding.token(
+                    keyCode: event.keyCode,
+                    characters: event.charactersIgnoringModifiers
+                ) ?? "",
                 modifiers: KeyBinding.Modifiers(
                     flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                 ),
@@ -671,5 +701,59 @@ private struct AlertModifier: ViewModifier {
         } message: {
             Text(uiState.alertMessage ?? "")
         }
+    }
+}
+
+// MARK: - Window blur backdrop
+
+private struct WindowBackdrop: View {
+    let color: Color
+    let blurEnabled: Bool
+
+    var body: some View {
+        ZStack {
+            if blurEnabled {
+                VisualEffectBackground()
+                    .ignoresSafeArea()
+                color.opacity(0.82)
+            } else {
+                color
+            }
+            WindowTransparencyConfigurator(transparent: blurEnabled)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct VisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.material = .hudWindow
+        view.isEmphasized = false
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+private struct WindowTransparencyConfigurator: NSViewRepresentable {
+    let transparent: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { apply(to: view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { apply(to: nsView) }
+    }
+
+    private func apply(to view: NSView) {
+        guard let window = view.window else { return }
+        window.isOpaque = !transparent
+        window.backgroundColor = transparent ? .clear : .windowBackgroundColor
     }
 }

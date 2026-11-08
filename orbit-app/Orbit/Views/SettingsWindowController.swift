@@ -27,7 +27,7 @@ class SettingsWindowController: NSObject, NSWindowDelegate {
             .environmentObject(appState.snippetState)
             .environmentObject(appState.toolState)
             .environmentObject(appState.aiState)
-            .frame(width: 720, height: 520)
+            .frame(minWidth: 600, minHeight: 400)
 
         let hc = NSHostingController(rootView: rootView)
 

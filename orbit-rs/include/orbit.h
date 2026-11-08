@@ -135,6 +135,11 @@ ORBIT_API int32_t orbit_docker_action(struct OrbitApp *app, const char *server_i
 
 ORBIT_API void orbit_shutdown_pool(struct OrbitApp *app);
 
+/**
+ * Updates SSH connection preferences and applies keepalive to live sessions.
+ */
+ORBIT_API int32_t orbit_set_connection_settings(struct OrbitApp *app, uint32_t timeout_seconds, uint32_t keepalive_seconds);
+
 ORBIT_API int32_t orbit_exec_command(struct OrbitApp *app, const char *server_id, const char *command, uint32_t timeout_ms, char **out_output);
 
 ORBIT_API int32_t orbit_start_port_forward(struct OrbitApp *app, const char *forwarding_id, const char *server_id, uint16_t local_port, const char *remote_host, uint16_t remote_port, uint16_t *out_local_port);

@@ -3,6 +3,7 @@ import SwiftUI
 struct StatusBarView: View {
     let appState: AppState
     @EnvironmentObject private var tabState: TabState
+    @ObservedObject private var keyBindings = KeyBindings.shared
 
     var body: some View {
         let context = appState.activeSessionContext
@@ -18,7 +19,7 @@ struct StatusBarView: View {
 
             Spacer()
 
-            Text("⌘K 快速连接 · ⌘⇧P 命令面板")
+            Text("\(keyBindings.binding(for: "quickConnect").displayString) 快速连接 · \(keyBindings.binding(for: "commandPalette").displayString) 命令面板")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)

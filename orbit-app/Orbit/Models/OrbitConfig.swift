@@ -222,7 +222,17 @@ class ThemeManager {
     }
 
     func theme(withId id: String) -> OrbitTheme? {
-        return themes.first { $0.id == id }
+        if let exact = themes.first(where: { $0.id == id }) {
+            return exact
+        }
+        let normalized = id.lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+        return themes.first {
+            $0.id.lowercased()
+                .replacingOccurrences(of: "-", with: "")
+                .replacingOccurrences(of: "_", with: "") == normalized
+        }
     }
 
     /// Returns the full path to the user themes directory for display/creation

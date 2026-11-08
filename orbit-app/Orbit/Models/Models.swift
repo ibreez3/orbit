@@ -282,27 +282,67 @@ struct DatabasePanelSnapshot {
     var lastUpdated: Date?
 }
 
-enum AppTheme: String, CaseIterable {
-    case light
-    case dark
-    case catppuccinMocha
-    case dracula
-    case tokyoNight
-    case nord
-    case solarizedDark
-    case gruvboxDark
+struct AppTheme: RawRepresentable, Hashable, Identifiable, CaseIterable {
+    let rawValue: String
 
+    var id: String { rawValue }
+
+    init?(rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        self.rawValue = Self.canonicalID(for: trimmed)
+    }
+
+    private init(canonical: String) {
+        self.rawValue = canonical
+    }
+
+    static let light = AppTheme(canonical: "light")
+    static let dark = AppTheme(canonical: "dark")
+    static let catppuccinMocha = AppTheme(canonical: "catppuccinMocha")
+    static let dracula = AppTheme(canonical: "dracula")
+    static let tokyoNight = AppTheme(canonical: "tokyoNight")
+    static let nord = AppTheme(canonical: "nord")
+    static let solarizedDark = AppTheme(canonical: "solarizedDark")
+    static let gruvboxDark = AppTheme(canonical: "gruvboxDark")
+
+    static let allCases: [AppTheme] = [
+        .light,
+        .dark,
+        .catppuccinMocha,
+        .dracula,
+        .tokyoNight,
+        .nord,
+        .solarizedDark,
+        .gruvboxDark,
+    ]
+
+    /// Maps a theme file identifier such as `catppuccin-mocha` onto the
+    /// canonical built-in identifier. Custom theme files remain addressable by
+    /// their own file identifier.
     init?(themeFileID id: String) {
-        let normalized = id
-            .lowercased()
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let builtIn = Self.allCases.first(where: {
+            Self.normalizedID($0.rawValue) == Self.normalizedID(trimmed)
+        }) {
+            self = builtIn
+            return
+        }
+        guard ThemeManager.shared.theme(withId: trimmed) != nil else { return nil }
+        self.init(rawValue: trimmed)
+    }
+
+    private static func canonicalID(for id: String) -> String {
+        allCases.first(where: {
+            normalizedID($0.rawValue) == normalizedID(id)
+        })?.rawValue ?? id
+    }
+
+    private static func normalizedID(_ id: String) -> String {
+        id.lowercased()
             .replacingOccurrences(of: "-", with: "")
             .replacingOccurrences(of: "_", with: "")
-        guard let theme = Self.allCases.first(where: {
-            $0.rawValue.lowercased() == normalized
-        }) else {
-            return nil
-        }
-        self = theme
     }
 }
 
@@ -396,9 +436,80 @@ enum SplitDirection: String, Codable {
     case vertical
 }
 
+enum PaneNavigationDirection {
+    case left
+    case right
+    case up
+    case down
+}
+
 indirect enum PaneNode: Identifiable {
     case leaf(channelId: String)
     case split(id: String, direction: SplitDirection, ratio: Double, first: PaneNode, second: PaneNode)
+
+    var firstChannelId: String {
+        switch self {
+        case .leaf(let channelId):
+            return channelId
+        case .split(_, _, _, let first, _):
+            return first.firstChannelId
+        }
+    }
+
+    /// Returns the pane adjacent to `channelId` in the given screen direction.
+    func neighbor(of channelId: String, direction: PaneNavigationDirection) -> String? {
+        var branches: [(split: PaneNode, wentFirst: Bool)] = []
+
+        func collectPath(_ node: PaneNode) -> Bool {
+            switch node {
+            case .leaf(let id):
+                return id == channelId
+            case .split(_, _, _, let first, let second):
+                if collectPath(first) {
+                    branches.append((node, true))
+                    return true
+                }
+                if collectPath(second) {
+                    branches.append((node, false))
+                    return true
+                }
+                return false
+            }
+        }
+
+        guard collectPath(self) else { return nil }
+
+        let axis: SplitDirection
+        let movingTowardSecond: Bool
+        switch direction {
+        case .left:
+            axis = .horizontal
+            movingTowardSecond = false
+        case .right:
+            axis = .horizontal
+            movingTowardSecond = true
+        case .up:
+            axis = .vertical
+            movingTowardSecond = false
+        case .down:
+            axis = .vertical
+            movingTowardSecond = true
+        }
+
+        for branch in branches {
+            guard case .split(_, let splitDirection, _, let first, let second) = branch.split,
+                  splitDirection == axis else {
+                continue
+            }
+            if movingTowardSecond, branch.wentFirst {
+                return second.firstChannelId
+            }
+            if !movingTowardSecond, !branch.wentFirst {
+                return first.firstChannelId
+            }
+        }
+        return nil
+    }
 
     var id: String {
         switch self {

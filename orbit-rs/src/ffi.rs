@@ -1879,6 +1879,25 @@ pub extern "C" fn orbit_shutdown_pool(app: *mut OrbitApp) {
     }
 }
 
+/// Updates SSH connection preferences and applies keepalive to live sessions.
+#[no_mangle]
+pub extern "C" fn orbit_set_connection_settings(
+    app: *mut OrbitApp,
+    timeout_seconds: u32,
+    keepalive_seconds: u32,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let settings = crate::transport::set_connection_settings(timeout_seconds, keepalive_seconds);
+    if let Ok(mut manager) = app.ssh.lock() {
+        manager.set_keepalive_all(settings.keepalive_seconds);
+    }
+    app.pool.set_keepalive(settings.keepalive_seconds);
+    0
+}
+
 #[no_mangle]
 pub extern "C" fn orbit_exec_command(
     app: *mut OrbitApp,

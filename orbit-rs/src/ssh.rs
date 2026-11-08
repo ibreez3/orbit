@@ -286,6 +286,16 @@ impl SshManager {
         }
     }
 
+    /// Applies a keepalive change to every live terminal session.
+    pub fn set_keepalive_all(&mut self, seconds: u32) {
+        for shared in self.sessions.values_mut() {
+            let _ = transport::apply_keepalive(&mut shared.guard.session, seconds);
+        }
+        for idle in self.idle_pool.values_mut().flatten() {
+            let _ = transport::apply_keepalive(&mut idle.guard.session, seconds);
+        }
+    }
+
     pub fn connect(
         &mut self,
         session_id: &str,
@@ -590,24 +600,44 @@ impl SshManager {
         db: &Database,
         command: &str,
     ) -> Result<SshCommandOutput> {
-        debug!(server = %server.name, command, "执行远程命令并检查退出状态");
+        Self::exec_command_output_with_timeout(pool, server, db, command, 30_000)
+    }
+
+    /// Executes a remote command with an explicit read timeout.
+    ///
+    /// When the timeout elapses the SSH channel is dropped, which makes the
+    /// remote sshd terminate the command's process group.
+    pub fn exec_command_output_with_timeout(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        command: &str,
+        timeout_ms: u32,
+    ) -> Result<SshCommandOutput> {
+        debug!(server = %server.name, command, timeout_ms, "执行远程命令并检查退出状态");
         let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let mut channel = session.channel_session()?;
             channel.exec(command)?;
-            session.set_timeout(30_000);
+            session.set_timeout(timeout_ms.max(1));
 
             let mut stdout = String::new();
             let stdout_result = channel.read_to_string(&mut stdout);
+            if let Err(error) = stdout_result {
+                session.set_timeout(0);
+                return Err(error.into());
+            }
             let mut stderr = String::new();
             let mut stderr_stream = channel.stderr();
             let stderr_result = stderr_stream.read_to_string(&mut stderr);
+            if let Err(error) = stderr_result {
+                session.set_timeout(0);
+                return Err(error.into());
+            }
             let wait_result = channel.wait_close();
             let exit_status_result = channel.exit_status();
             session.set_timeout(0);
 
-            stdout_result?;
-            stderr_result?;
             wait_result?;
             Ok(SshCommandOutput {
                 stdout,
