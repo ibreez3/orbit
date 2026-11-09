@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [v0.0.9-pre] - 2026-11-09
+
+### Changed
+- Rotated the Sparkle EdDSA update signing key and enabled signed DMG and appcast publishing in the release workflow.
+- Existing installations need one manual install of this build; automatic updates resume after that.
+
 ## [v0.0.8-pre] - 2026-11-08
 
 ### Fixed
