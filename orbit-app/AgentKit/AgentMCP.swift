@@ -124,6 +124,49 @@ public enum AgentToolCatalog {
                 "required": .array([.string("server"), .string("command")]),
                 "additionalProperties": .bool(false)
             ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.jobStatus,
+            description: "Get the status of a long-running orbit_exec job.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object(["jobId": .object(["type": .string("string")])]),
+                "required": .array([.string("jobId")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.jobOutput,
+            description: "Read buffered output from a long-running orbit_exec job starting at a cursor.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "jobId": .object(["type": .string("string")]),
+                    "cursor": .object(["type": .string("integer"), "minimum": .number(0)])
+                ]),
+                "required": .array([.string("jobId")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.jobCancel,
+            description: "Cancel a long-running orbit_exec job.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object(["jobId": .object(["type": .string("string")])]),
+                "required": .array([.string("jobId")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.approvalStatus,
+            description: "Check whether a pending write approval has been granted in Orbit.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object(["requestId": .object(["type": .string("string")])]),
+                "required": .array([.string("requestId")]),
+                "additionalProperties": .bool(false)
+            ])
         )
     ]
 }

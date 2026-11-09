@@ -1362,6 +1362,55 @@ class OrbitBridge {
         }
     }
 
+    func agentJobStatus(jobId: String) async throws -> AgentJobStatus {
+        try await runOffThread {
+            try self.ensureInitialized()
+            var outJSON: UnsafeMutablePointer<CChar>?
+            let rc = jobId.withCString { jobPtr in
+                orbit_agent_job_status(self.app, jobPtr, &outJSON)
+            }
+            guard rc == 0, let outJSON else {
+                throw OrbitError.apiError(rc)
+            }
+            defer { orbit_free_string(outJSON) }
+            let data = Data(String(cString: outJSON).utf8)
+            return try JSONDecoder().decode(AgentJobStatus.self, from: data)
+        }
+    }
+
+    func agentJobOutput(jobId: String, cursor: Int?) async throws -> AgentJobOutput {
+        try await runOffThread {
+            try self.ensureInitialized()
+            var outJSON: UnsafeMutablePointer<CChar>?
+            let rc = jobId.withCString { jobPtr in
+                orbit_agent_job_output(
+                    self.app,
+                    jobPtr,
+                    UInt64(max(0, cursor ?? 0)),
+                    &outJSON
+                )
+            }
+            guard rc == 0, let outJSON else {
+                throw OrbitError.apiError(rc)
+            }
+            defer { orbit_free_string(outJSON) }
+            let data = Data(String(cString: outJSON).utf8)
+            return try JSONDecoder().decode(AgentJobOutput.self, from: data)
+        }
+    }
+
+    func agentJobCancel(jobId: String) async throws {
+        try await runOffThread {
+            try self.ensureInitialized()
+            let rc = jobId.withCString { jobPtr in
+                orbit_agent_job_cancel(self.app, jobPtr)
+            }
+            guard rc == 0 else {
+                throw OrbitError.apiError(rc)
+            }
+        }
+    }
+
     @discardableResult
     func startPortForward(forwardingId: String, serverId: String, localPort: UInt16, remoteHost: String, remotePort: UInt16) throws -> UInt16 {
         try ensureInitialized()

@@ -73,6 +73,16 @@ final class FakeAgentExecTransport: AgentExecTransport {
             durationMs: 1
         )
     }
+
+    func agentJobStatus(jobId: String) async throws -> AgentJobStatus {
+        AgentJobStatus(jobId: jobId, status: .completed, exitCode: 0, durationMs: 1, truncated: false)
+    }
+
+    func agentJobOutput(jobId: String, cursor: Int?) async throws -> AgentJobOutput {
+        AgentJobOutput(jobId: jobId, chunk: "", nextCursor: cursor ?? 0, eof: true, truncated: false)
+    }
+
+    func agentJobCancel(jobId: String) async throws {}
 }
 
 private extension Server {

@@ -32,6 +32,7 @@ final class AgentGateway {
     private var socketServer: AgentSocketServer?
     private var pendingAdmissions: [String: PendingAdmission] = [:]
     private var pendingWrites: [String: PendingWrite] = [:]
+    private var jobOwners: [String: String] = [:]
 
     private init() {
         self.sessions = AgentSessionStore()
@@ -106,6 +107,7 @@ final class AgentGateway {
         socketServer = nil
         pendingAdmissions.removeAll()
         pendingWrites.removeAll()
+        jobOwners.removeAll()
         lock.unlock()
         server?.stop()
         sessions.revokeAll()
@@ -294,6 +296,12 @@ final class AgentGateway {
             return await handleExec(request, execService: execService, sessionId: sessionId)
         case AgentToolName.approvalStatus:
             return handleWriteApprovalStatus(request, sessionId: sessionId)
+        case AgentToolName.jobStatus:
+            return await handleJobStatus(request, execService: execService, sessionId: sessionId)
+        case AgentToolName.jobOutput:
+            return await handleJobOutput(request, execService: execService, sessionId: sessionId)
+        case AgentToolName.jobCancel:
+            return await handleJobCancel(request, execService: execService, sessionId: sessionId)
         default:
             return errorResponse(request.id, .invalidRequest, "Unsupported agent tool: \(tool)")
         }
@@ -355,6 +363,11 @@ final class AgentGateway {
         execRequest.escalated = escalated
         do {
             let result = try await execService.exec(execRequest)
+            if let jobId = result.jobId {
+                lock.lock()
+                jobOwners[jobId] = sessionId
+                lock.unlock()
+            }
             record(AgentAuditEvent(
                 type: "agent.tool.call",
                 sessionId: sessionId,
@@ -512,6 +525,74 @@ final class AgentGateway {
         return pendingWrites[requestId]
     }
 
+    private func handleJobStatus(
+        _ request: AgentRequest,
+        execService: AgentCommandExecuting,
+        sessionId: String
+    ) async -> AgentResponse {
+        guard let jobId = request.args?.objectValue?["jobId"]?.stringValue,
+              jobBelongs(jobId, to: sessionId) else {
+            return errorResponse(request.id, .unauthorized, "Unknown job for this session")
+        }
+        do {
+            let status = try await execService.jobStatus(jobId: jobId)
+            return ok(request.id, try AgentJSONValue.encoding(status))
+        } catch let serviceError as AgentServiceError {
+            return errorResponse(request.id, serviceError.code, serviceError.message)
+        } catch {
+            return errorResponse(request.id, .invalidRequest, error.localizedDescription)
+        }
+    }
+
+    private func handleJobOutput(
+        _ request: AgentRequest,
+        execService: AgentCommandExecuting,
+        sessionId: String
+    ) async -> AgentResponse {
+        guard let object = request.args?.objectValue,
+              let jobId = object["jobId"]?.stringValue,
+              jobBelongs(jobId, to: sessionId) else {
+            return errorResponse(request.id, .unauthorized, "Unknown job for this session")
+        }
+        let cursor = Int(object["cursor"]?.numberValue ?? 0)
+        do {
+            let output = try await execService.jobOutput(jobId: jobId, cursor: cursor)
+            return ok(request.id, try AgentJSONValue.encoding(output))
+        } catch let serviceError as AgentServiceError {
+            return errorResponse(request.id, serviceError.code, serviceError.message)
+        } catch {
+            return errorResponse(request.id, .invalidRequest, error.localizedDescription)
+        }
+    }
+
+    private func handleJobCancel(
+        _ request: AgentRequest,
+        execService: AgentCommandExecuting,
+        sessionId: String
+    ) async -> AgentResponse {
+        guard let jobId = request.args?.objectValue?["jobId"]?.stringValue,
+              jobBelongs(jobId, to: sessionId) else {
+            return errorResponse(request.id, .unauthorized, "Unknown job for this session")
+        }
+        do {
+            try await execService.jobCancel(jobId: jobId)
+            lock.lock()
+            jobOwners.removeValue(forKey: jobId)
+            lock.unlock()
+            return ok(request.id, .object(["status": .string("cancelled")]))
+        } catch let serviceError as AgentServiceError {
+            return errorResponse(request.id, serviceError.code, serviceError.message)
+        } catch {
+            return errorResponse(request.id, .invalidRequest, error.localizedDescription)
+        }
+    }
+
+    private func jobBelongs(_ jobId: String, to sessionId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return jobOwners[jobId] == sessionId
+    }
+
     private func handleRevoke(_ request: AgentRequest) -> AgentResponse {
         guard let sessionId = request.sessionId,
               let token = request.token else {
@@ -522,6 +603,9 @@ final class AgentGateway {
             return errorResponse(request.id, .unauthorized, "Invalid agent session token")
         }
         sessions.revoke(sessionId: sessionId)
+        lock.lock()
+        jobOwners = jobOwners.filter { $0.value != sessionId }
+        lock.unlock()
         record(AgentAuditEvent(
             type: "agent.session.revoked",
             sessionId: sessionId,

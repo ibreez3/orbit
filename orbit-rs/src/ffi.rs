@@ -1997,7 +1997,8 @@ pub extern "C" fn orbit_agent_exec(
     }
 
     if job.wait_for_finish(wait_ms) {
-        let result = job.completed_output(&server.id);
+        let mut result = job.completed_output(&server.id);
+        result.job_id = Some(job_id);
         json_to_out(&result, out_json)
     } else {
         let status = job.status_dto();
