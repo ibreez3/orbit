@@ -27,7 +27,7 @@ public enum AgentCLI {
         stderr: (String) -> Void
     ) throws {
         guard let command = arguments.first else {
-            throw AgentCLIError.usage("Usage: orbit-cli <auth|servers|exec> ...")
+            throw AgentCLIError.usage("Usage: orbit-cli <auth|servers|exec|job> ...")
         }
         let rest = Array(arguments.dropFirst())
         switch command {
@@ -37,6 +37,8 @@ public enum AgentCLI {
             try runServers(rest, client: client, sessions: sessions, stdout: stdout)
         case "exec":
             try runExec(rest, client: client, sessions: sessions, stdout: stdout)
+        case "job":
+            try runJob(rest, client: client, sessions: sessions, stdout: stdout)
         default:
             throw AgentCLIError.usage("Unknown command: \(command)")
         }
@@ -167,6 +169,49 @@ public enum AgentCLI {
 
         let result = try client.call(
             tool: AgentToolName.exec,
+            args: .object(argumentsObject),
+            session: session
+        )
+        stdout(result.jsonString ?? "{}")
+    }
+
+    private static func runJob(
+        _ arguments: [String],
+        client: AgentGatewayCalling,
+        sessions: AgentSessionFileStore,
+        stdout: (String) -> Void
+    ) throws {
+        guard let subcommand = arguments.first else {
+            throw AgentCLIError.usage("Usage: orbit-cli job <status|output|cancel> --job <id> ...")
+        }
+        let parsed = parse(Array(arguments.dropFirst()))
+        guard let jobId = parsed.options["--job"] ?? parsed.positional.first,
+              !jobId.isEmpty else {
+            throw AgentCLIError.usage("job requires --job <id>")
+        }
+        let session = try resolveSession(parsed, sessions: sessions)
+
+        var argumentsObject: [String: AgentJSONValue] = ["jobId": .string(jobId)]
+        let tool: String
+        switch subcommand {
+        case "status":
+            tool = AgentToolName.jobStatus
+        case "output":
+            tool = AgentToolName.jobOutput
+            if let rawCursor = parsed.options["--cursor"] {
+                guard let cursor = Int(rawCursor), cursor >= 0 else {
+                    throw AgentCLIError.usage("--cursor must be a non-negative integer")
+                }
+                argumentsObject["cursor"] = .number(Double(cursor))
+            }
+        case "cancel":
+            tool = AgentToolName.jobCancel
+        default:
+            throw AgentCLIError.usage("Unknown job command: \(subcommand)")
+        }
+
+        let result = try client.call(
+            tool: tool,
             args: .object(argumentsObject),
             session: session
         )

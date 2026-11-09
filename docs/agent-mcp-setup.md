@@ -18,6 +18,8 @@ claude mcp add orbit -- /Applications/Orbit.app/Contents/MacOS/orbit-mcp
 
 - `orbit_list_servers`
 - `orbit_exec`
+- `orbit_job_status` / `orbit_job_output` / `orbit_job_cancel`
+- `orbit_approval_status`
 
 当前阶段只提供通用执行能力，不提供 `orbit_list_containers`、`orbit_docker_logs` 等专用工具。AI 直接执行：
 
@@ -48,7 +50,17 @@ export ORBIT_AGENT_SESSION=<sessionId>
 /Applications/Orbit.app/Contents/MacOS/orbit-cli servers
 /Applications/Orbit.app/Contents/MacOS/orbit-cli exec --server <服务器名> --mode read -- "docker ps -a"
 /Applications/Orbit.app/Contents/MacOS/orbit-cli exec --server <服务器名> --mode read -- "docker logs --tail 200 <container>"
+
+# 第一次写操作会弹出 Orbit 授权面板；授权后本会话对该服务器免问
+/Applications/Orbit.app/Contents/MacOS/orbit-cli exec --session <sessionId> --server <服务器名> --mode write -- "docker restart <container>"
+
+# 长命令返回 jobId 后，用 job 子命令轮询或取消
+/Applications/Orbit.app/Contents/MacOS/orbit-cli job status --session <sessionId> --job <jobId>
+/Applications/Orbit.app/Contents/MacOS/orbit-cli job output --session <sessionId> --job <jobId> --cursor 0
+/Applications/Orbit.app/Contents/MacOS/orbit-cli job cancel --session <sessionId> --job <jobId>
 ```
+
+`orbit_exec` 在 `waitMs` 内没有结束时返回 `jobId`。MCP 客户端用 `orbit_job_status` 查看状态，用 `orbit_job_output` 从 `cursor` 开始读取增量输出，用 `orbit_job_cancel` 终止任务。CLI 调用可以传入 `--wait-ms` 控制等待时间。
 
 ## 授权模型
 
@@ -71,4 +83,4 @@ export ORBIT_AGENT_SESSION=<sessionId>
 - **Orbit 没有弹窗**：确认 Orbit 正在运行，且设置 → AI Agent 总开关开启；bridge 会在 socket 不存在时尝试拉起 Orbit。
 - **没有服务器**：检查服务器的“允许 AI 访问”开关，以及服务器是否已保存。
 - **会话过期**：重新执行 `orbit-cli auth` 或重新调用工具触发接入审批。
-- **Claude Code 工具超时**：所有调用约 55 秒内返回；长命令会返回 job id，通过 job 工具轮询（后续阶段）。
+- **Claude Code 工具超时**：所有调用约 55 秒内返回；长命令会返回 job id，通过 `orbit_job_status` / `orbit_job_output` 轮询。

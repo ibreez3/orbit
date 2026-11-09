@@ -1,6 +1,17 @@
 import Darwin
 import Foundation
 
+public enum AgentSocketError: LocalizedError, Equatable {
+    case pathTooLong(Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .pathTooLong(let maximum):
+            return "Unix socket path must be shorter than \(maximum) bytes"
+        }
+    }
+}
+
 public final class AgentSocketServer {
     public typealias Handler = (AgentRequest, @escaping (AgentResponse) -> Void) -> Void
 
@@ -24,6 +35,10 @@ public final class AgentSocketServer {
 
     public func start() throws {
         guard !running else { return }
+        let maximumPathBytes = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+        guard socketPath.utf8.count < maximumPathBytes else {
+            throw AgentSocketError.pathTooLong(maximumPathBytes - 1)
+        }
         let directory = URL(fileURLWithPath: socketPath).deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: directory,

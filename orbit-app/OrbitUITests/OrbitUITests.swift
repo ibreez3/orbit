@@ -4,16 +4,22 @@ import XCTest
 final class OrbitUITests: XCTestCase {
     private var app: XCUIApplication!
     private var temporaryDirectory: URL!
+    private var agentSupportDirectory: URL!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("orbit-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        // Unix socket paths are limited to ~104 bytes; the sandboxed UI test
+        // runner's container path is already long, so keep this directory short.
+        agentSupportDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("a-\(UUID().uuidString.prefix(6))", isDirectory: true)
         app = XCUIApplication()
         app.launchEnvironment["ORBIT_DB_PATH"] = temporaryDirectory
             .appendingPathComponent("orbit.db")
             .path
+        app.launchEnvironment["ORBIT_AGENT_SUPPORT_DIR"] = agentSupportDirectory.path
         app.launch()
         app.activate()
         XCTAssertTrue(app.buttons["homeLocalTerminalButton"].waitForExistence(timeout: 10))
@@ -23,6 +29,9 @@ final class OrbitUITests: XCTestCase {
         app?.terminate()
         if let temporaryDirectory {
             try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+        if let agentSupportDirectory {
+            try? FileManager.default.removeItem(at: agentSupportDirectory)
         }
     }
 
@@ -48,6 +57,76 @@ final class OrbitUITests: XCTestCase {
         XCTAssertTrue(tab.waitForExistence(timeout: 5))
         tab.click()
         XCTAssertTrue(app.switches["agentGatewayEnabledToggle"].waitForExistence(timeout: 5))
+    }
+
+    func testAgentWriteApproval() throws {
+        let cli = try orbitCLIURL()
+        let socketDeadline = Date().addingTimeInterval(10)
+        while !FileManager.default.fileExists(atPath: agentSocketURL.path),
+              Date() < socketDeadline {
+            usleep(100_000)
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: agentSocketURL.path),
+            "agent socket did not appear at \(agentSocketURL.path)"
+        )
+
+        // Seed a server the agent can target. It does not need to be reachable:
+        // this test proves admission and write approval are gated, and that a
+        // command result comes back after the approval is granted.
+        app.buttons["homeAddServerButton"].click()
+        let name = app.textFields["serverNameField"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        paste("UI Write Test", into: name)
+        paste("127.0.0.1", into: app.textFields["serverHostField"])
+        paste("tester", into: app.textFields["serverUsernameField"])
+        let save = app.buttons["serverSaveButton"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: save)
+        waitForExpectations(timeout: 5)
+        save.click()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 5))
+
+        let auth = try launchCLI(cli, ["auth", "--client", "UI Write Test"])
+        defer { terminateIfRunning(auth.process) }
+        let allow = app.buttons["agentApprovalAllowButton"]
+        XCTAssertTrue(
+            allow.waitForExistence(timeout: 10),
+            "the admission approval panel should appear before a session is issued"
+        )
+        allow.click()
+        XCTAssertTrue(waitForExit(auth.process, timeout: 15))
+        let authOutput = readCLIOutput(auth.pipe)
+        let sessionId = try XCTUnwrap(
+            authOutput.split(separator: "\n").compactMap { line -> String? in
+                guard let data = line.data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return nil
+                }
+                return object["sessionId"] as? String
+            }.first,
+            authOutput
+        )
+
+        var output = ""
+        for _ in 0..<2 {
+            let exec = try launchCLI(cli, [
+                "exec",
+                "--session", sessionId,
+                "--server", "UI Write Test",
+                "--mode", "write",
+                "--", "echo", "write-ok"
+            ])
+            if allow.waitForExistence(timeout: 10) {
+                allow.click()
+            }
+            XCTAssertTrue(waitForExit(exec.process, timeout: 20))
+            output = readCLIOutput(exec.pipe)
+            if !output.contains("pending_approval") {
+                break
+            }
+        }
+        XCTAssertFalse(output.contains("pending_approval"), output)
+        XCTAssertTrue(output.contains("\"status\""), output)
     }
 
     func testAddServerDialogLayoutAndValidation() {
@@ -355,6 +434,67 @@ final class OrbitUITests: XCTestCase {
         (element.value as? String) ?? element.label
     }
 
+    private var agentSocketURL: URL {
+        agentSupportDirectory.appendingPathComponent("agent.sock")
+    }
+
+    private func orbitCLIURL() throws -> URL {
+        var directory = Bundle.main.bundleURL
+        for _ in 0..<6 {
+            let candidate = directory
+                .appendingPathComponent("Orbit.app/Contents/MacOS/orbit-cli")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+            directory.deleteLastPathComponent()
+        }
+        if let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier == "com.orbit.terminal"
+        }), let executable = running.executableURL {
+            let candidate = executable.deletingLastPathComponent()
+                .appendingPathComponent("orbit-cli")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        throw NSError(domain: "OrbitUITests", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "orbit-cli was not found in the built Orbit.app"
+        ])
+    }
+
+    private func launchCLI(_ executable: URL, _ arguments: [String]) throws -> (process: Process, pipe: Pipe) {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment["ORBIT_AGENT_SUPPORT_DIR"] = agentSupportDirectory.path
+        process.environment = environment
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        return (process, pipe)
+    }
+
+    private func waitForExit(_ process: Process, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            usleep(100_000)
+        }
+        return !process.isRunning
+    }
+
+    private func terminateIfRunning(_ process: Process) {
+        if process.isRunning {
+            process.terminate()
+            _ = waitForExit(process, timeout: 3)
+        }
+    }
+
+    private func readCLIOutput(_ pipe: Pipe) -> String {
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
 
     private func paste(_ text: String, into element: XCUIElement) {
         NSPasteboard.general.clearContents()

@@ -27,4 +27,19 @@ final class AgentProtocolTests: XCTestCase {
         XCTAssertTrue(AgentPaths.socketPath.hasSuffix("/agent/agent.sock"))
         XCTAssertTrue(AgentPaths.socketPath.contains("Library/Application Support/Orbit"))
     }
+
+    func testAgentSupportDirectoryHonorsEnvironmentOverride() {
+        let key = "ORBIT_AGENT_SUPPORT_DIR"
+        let previous = getenv(key).map { String(cString: $0) }
+        setenv(key, "/tmp/orbit-agent-paths-test", 1)
+        defer {
+            if let previous {
+                setenv(key, previous, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+        XCTAssertEqual(AgentPaths.supportDirectory.path, "/tmp/orbit-agent-paths-test")
+        XCTAssertEqual(AgentPaths.socketPath, "/tmp/orbit-agent-paths-test/agent.sock")
+    }
 }

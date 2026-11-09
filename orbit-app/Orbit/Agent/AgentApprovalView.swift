@@ -33,9 +33,11 @@ struct AgentApprovalView: View {
                 Spacer()
                 Button("拒绝", action: onDeny)
                     .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("agentApprovalDenyButton")
                 Button(allowTitle, action: onAllow)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("agentApprovalAllowButton")
             }
         }
         .padding(20)

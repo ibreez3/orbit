@@ -47,4 +47,72 @@ final class AgentCLITests: XCTestCase {
             stderr: { _ in }
         ))
     }
+
+    func testJobStatusUsesTheJobToolAndPrintsResult() throws {
+        let client = FakeGatewayClient()
+        let sessions = try makeSessions()
+        try saveSession(sessions)
+        var output: [String] = []
+
+        try AgentCLI.run(
+            arguments: ["job", "status", "--session", "s", "--job", "j"],
+            client: client,
+            sessions: sessions,
+            stdout: { output.append($0) },
+            stderr: { _ in }
+        )
+
+        XCTAssertEqual(client.lastTool, AgentToolName.jobStatus)
+        XCTAssertEqual(client.lastArgs?.objectValue?["jobId"]?.stringValue, "j")
+        XCTAssertTrue(output.joined().contains("running"))
+    }
+
+    func testJobOutputPassesTheCursor() throws {
+        let client = FakeGatewayClient()
+        let sessions = try makeSessions()
+        try saveSession(sessions)
+
+        try AgentCLI.run(
+            arguments: ["job", "output", "--session", "s", "--job", "j", "--cursor", "5"],
+            client: client,
+            sessions: sessions,
+            stdout: { _ in },
+            stderr: { _ in }
+        )
+
+        XCTAssertEqual(client.lastTool, AgentToolName.jobOutput)
+        XCTAssertEqual(client.lastArgs?.objectValue?["cursor"]?.numberValue, 5)
+    }
+
+    func testJobCancelUsesTheJobCancelTool() throws {
+        let client = FakeGatewayClient()
+        let sessions = try makeSessions()
+        try saveSession(sessions)
+
+        try AgentCLI.run(
+            arguments: ["job", "cancel", "--session", "s", "--job", "j"],
+            client: client,
+            sessions: sessions,
+            stdout: { _ in },
+            stderr: { _ in }
+        )
+
+        XCTAssertEqual(client.lastTool, AgentToolName.jobCancel)
+        XCTAssertEqual(client.lastArgs?.objectValue?["jobId"]?.stringValue, "j")
+    }
+
+    private func makeSessions() throws -> AgentSessionFileStore {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("cli-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return AgentSessionFileStore(directory: directory)
+    }
+
+    private func saveSession(_ sessions: AgentSessionFileStore) throws {
+        _ = try sessions.save(
+            AgentSessionCredential(sessionId: "s", token: "t"),
+            clientName: "test"
+        )
+    }
 }

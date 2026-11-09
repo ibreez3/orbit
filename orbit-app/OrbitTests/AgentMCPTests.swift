@@ -72,6 +72,8 @@ final class AgentMCPTests: XCTestCase {
 final class FakeGatewayClient: AgentGatewayCalling {
     var admission: AgentAdmissionResult
     private(set) var callCount = 0
+    private(set) var lastTool: String?
+    private(set) var lastArgs: AgentJSONValue?
 
     init(admission: AgentAdmissionResult = .approved(.init(sessionId: "s", token: "t"))) {
         self.admission = admission
@@ -94,7 +96,18 @@ final class FakeGatewayClient: AgentGatewayCalling {
 
     func call(tool: String, args: AgentJSONValue, session: AgentSessionCredential) throws -> AgentJSONValue {
         callCount += 1
-        return .object(["servers": .array([])])
+        lastTool = tool
+        lastArgs = args
+        switch tool {
+        case AgentToolName.jobStatus:
+            return .object(["status": .string("running")])
+        case AgentToolName.jobOutput:
+            return .object(["chunk": .string(""), "nextCursor": .number(0), "eof": .bool(false)])
+        case AgentToolName.jobCancel:
+            return .object(["status": .string("cancelled")])
+        default:
+            return .object(["servers": .array([])])
+        }
     }
 
     func revoke(_ session: AgentSessionCredential) throws {}

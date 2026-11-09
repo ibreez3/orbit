@@ -2,6 +2,10 @@ import Foundation
 
 public enum AgentPaths {
     public static var supportDirectory: URL {
+        if let override = ProcessInfo.processInfo.environment["ORBIT_AGENT_SUPPORT_DIR"],
+           !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base
             .appendingPathComponent("Orbit", isDirectory: true)

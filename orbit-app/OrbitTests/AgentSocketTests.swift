@@ -28,4 +28,16 @@ final class AgentSocketTests: XCTestCase {
         )
         XCTAssertEqual(response.result, .object(["pong": .bool(true)]))
     }
+
+    func testRejectsSocketPathLongerThanSockaddrLimit() {
+        let path = NSTemporaryDirectory()
+            + String(repeating: "x", count: 200)
+            + ".sock"
+        let server = AgentSocketServer(socketPath: path)
+        XCTAssertThrowsError(try server.start()) { error in
+            guard case AgentSocketError.pathTooLong = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
 }
