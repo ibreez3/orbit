@@ -16,6 +16,7 @@ public struct AgentExecRequest: Sendable {
     public var maxOutputBytes: UInt32
     public var idempotencyKey: String?
     public var sessionId: String?
+    public var escalated: Bool
 
     public init(
         serverQuery: String,
@@ -25,7 +26,8 @@ public struct AgentExecRequest: Sendable {
         waitMs: UInt32,
         maxOutputBytes: UInt32,
         idempotencyKey: String?,
-        sessionId: String? = nil
+        sessionId: String? = nil,
+        escalated: Bool = false
     ) {
         self.serverQuery = serverQuery
         self.command = command
@@ -35,6 +37,7 @@ public struct AgentExecRequest: Sendable {
         self.maxOutputBytes = maxOutputBytes
         self.idempotencyKey = idempotencyKey
         self.sessionId = sessionId
+        self.escalated = escalated
     }
 }
 

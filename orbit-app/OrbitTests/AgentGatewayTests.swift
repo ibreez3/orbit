@@ -62,6 +62,71 @@ final class AgentGatewayTests: XCTestCase {
         XCTAssertNotNil(object["requestId"]?.stringValue)
     }
 
+    func testFirstWriteRequiresApprovalThenReusesGrant() async throws {
+        let approver = FakeApprover(result: true)
+        let gateway = makeGateway(
+            approver: approver,
+            servers: [.fixture(id: "srv")]
+        )
+        let session = try await approveSession(gateway)
+
+        let first = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("rm x"),
+                "mode": .string("write")
+            ]
+        ))
+        XCTAssertTrue(first.ok)
+
+        let second = await gateway.handle(callRequest(
+            id: "2",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("rm y"),
+                "mode": .string("write")
+            ]
+        ))
+        XCTAssertTrue(second.ok)
+        XCTAssertEqual(approver.writeCount, 1)
+    }
+
+    private func approveSession(_ gateway: AgentGateway) async throws -> AgentSessionCredential {
+        let hello = await gateway.handle(
+            AgentRequest(
+                id: "hello",
+                op: .hello,
+                args: .object(["clientName": .string("Claude Code")])
+            )
+        )
+        guard case .object(let object)? = hello.result,
+              let sessionId = object["sessionId"]?.stringValue,
+              let token = object["token"]?.stringValue else {
+            throw NSError(domain: "AgentGatewayTests", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "admission was not approved"
+            ])
+        }
+        return AgentSessionCredential(sessionId: sessionId, token: token)
+    }
+
+    private func callRequest(
+        id: String,
+        session: AgentSessionCredential,
+        args: [String: AgentJSONValue]
+    ) -> AgentRequest {
+        AgentRequest(
+            id: id,
+            op: .call,
+            sessionId: session.sessionId,
+            token: session.token,
+            tool: AgentToolName.exec,
+            args: .object(args)
+        )
+    }
+
     private func makeGateway(
         approver: AgentApprovalPresenting,
         approvalWait: TimeInterval = 5,

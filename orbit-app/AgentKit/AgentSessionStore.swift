@@ -94,6 +94,12 @@ public final class AgentSessionStore {
         return sessions[sessionId]?.writeServers.contains(serverId) ?? false
     }
 
+    public func agentName(sessionId: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessions[sessionId]?.agentName
+    }
+
     public func markJobActive(sessionId: String, jobId: String) {
         update(sessionId: sessionId) { session in
             session.jobs.insert(jobId)

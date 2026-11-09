@@ -98,6 +98,7 @@ final class AgentExecService: AgentCommandExecuting {
             maxOutputBytes: request.maxOutputBytes
         )
         result.mode = request.mode
+        result.escalated = request.escalated
         return result
     }
 

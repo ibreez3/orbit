@@ -10,6 +10,18 @@ final class AgentGateway {
         var error: AgentErrorBody?
     }
 
+    private struct PendingWrite {
+        let sessionId: String
+        var status: AgentApprovalState
+        var error: AgentErrorBody?
+    }
+
+    private enum WriteApprovalOutcome {
+        case approved
+        case pending(requestId: String)
+        case denied(AgentErrorBody)
+    }
+
     private let lock = NSLock()
     private let sessions: AgentSessionStore
     private let approvalWait: TimeInterval
@@ -19,6 +31,7 @@ final class AgentGateway {
     private var audit: AgentAuditRecording?
     private var socketServer: AgentSocketServer?
     private var pendingAdmissions: [String: PendingAdmission] = [:]
+    private var pendingWrites: [String: PendingWrite] = [:]
 
     private init() {
         self.sessions = AgentSessionStore()
@@ -92,6 +105,7 @@ final class AgentGateway {
         let server = socketServer
         socketServer = nil
         pendingAdmissions.removeAll()
+        pendingWrites.removeAll()
         lock.unlock()
         server?.stop()
         sessions.revokeAll()
@@ -278,6 +292,8 @@ final class AgentGateway {
             }
         case AgentToolName.exec:
             return await handleExec(request, execService: execService, sessionId: sessionId)
+        case AgentToolName.approvalStatus:
+            return handleWriteApprovalStatus(request, sessionId: sessionId)
         default:
             return errorResponse(request.id, .invalidRequest, "Unsupported agent tool: \(tool)")
         }
@@ -291,16 +307,52 @@ final class AgentGateway {
         guard let parsed = parseExecRequest(request.args) else {
             return errorResponse(request.id, .invalidRequest, "Invalid orbit_exec arguments")
         }
-        if parsed.mode == .write {
-            return errorResponse(
-                request.id,
-                .writeGrantRequired,
-                "Write approval is required for this server"
-            )
+
+        let directory = AgentServerDirectory(servers: execService.listServers())
+        let server: AgentServerSummary
+        switch directory.resolve(parsed.serverQuery) {
+        case .resolved(let resolved):
+            server = resolved
+        case .notFound:
+            return errorResponse(request.id, .serverNotFound, "Server not found: \(parsed.serverQuery)")
+        case .notExposed:
+            return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
+        case .ambiguous:
+            return errorResponse(request.id, .invalidRequest, "Server name is ambiguous; use the server id")
+        }
+
+        var requiresWrite = parsed.mode == .write
+        var escalated = false
+        if case .requireWrite = AgentCommandGuard.evaluate(
+            command: parsed.command,
+            declaredMode: parsed.mode
+        ) {
+            requiresWrite = true
+            escalated = parsed.mode == .read
+        }
+
+        if requiresWrite && !sessions.hasWriteGrant(sessionId: sessionId, serverId: server.id) {
+            switch await requestWriteApproval(
+                sessionId: sessionId,
+                server: server,
+                command: parsed.command
+            ) {
+            case .approved:
+                break
+            case .pending(let requestId):
+                return ok(request.id, .object([
+                    "status": .string("pending_approval"),
+                    "requestId": .string(requestId),
+                    "message": .string("Approve the write operation in Orbit, then retry the same call.")
+                ]))
+            case .denied(let error):
+                return AgentResponse(id: request.id, ok: false, result: nil, error: error)
+            }
         }
 
         var execRequest = parsed
         execRequest.sessionId = sessionId
+        execRequest.escalated = escalated
         do {
             let result = try await execService.exec(execRequest)
             record(AgentAuditEvent(
@@ -309,12 +361,12 @@ final class AgentGateway {
                 serverId: result.serverId,
                 tool: AgentToolName.exec,
                 command: parsed.command,
-                mode: parsed.mode.rawValue,
+                mode: result.mode.rawValue,
                 exitCode: result.exitCode,
                 durationMs: result.durationMs,
                 stdoutBytes: result.stdoutBytes,
                 stderrBytes: result.stderrBytes,
-                result: result.status.rawValue
+                result: result.escalated ? "escalated" : result.status.rawValue
             ))
             let value = try AgentJSONValue.encoding(result)
             return ok(request.id, value)
@@ -323,6 +375,141 @@ final class AgentGateway {
         } catch {
             return errorResponse(request.id, .invalidRequest, error.localizedDescription)
         }
+    }
+
+    private func requestWriteApproval(
+        sessionId: String,
+        server: AgentServerSummary,
+        command: String
+    ) async -> WriteApprovalOutcome {
+        let requestId = UUID().uuidString
+        lock.lock()
+        guard let approval else {
+            lock.unlock()
+            return .denied(AgentErrorBody(
+                code: .orbitUnavailable,
+                message: "Orbit agent gateway is not configured"
+            ))
+        }
+        pendingWrites[requestId] = PendingWrite(
+            sessionId: sessionId,
+            status: .pending,
+            error: nil
+        )
+        lock.unlock()
+
+        let agentName = sessions.agentName(sessionId: sessionId) ?? "AI Agent"
+        let writeRequest = AgentWriteRequest(
+            requestId: requestId,
+            agentName: agentName,
+            serverId: server.id,
+            serverName: server.name,
+            command: command
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            let approved = await approval.requestWrite(writeRequest)
+            if approved {
+                self.sessions.grantWrite(sessionId: sessionId, serverId: server.id)
+                self.setWriteApproval(requestId, status: .approved, error: nil)
+                self.record(AgentAuditEvent(
+                    type: "agent.write.granted",
+                    sessionId: sessionId,
+                    agent: agentName,
+                    serverId: server.id,
+                    command: command,
+                    result: "approved"
+                ))
+            } else {
+                let body = AgentErrorBody(
+                    code: .writeDenied,
+                    message: "The user denied write access for this server"
+                )
+                self.setWriteApproval(requestId, status: .denied, error: body)
+                self.record(AgentAuditEvent(
+                    type: "agent.write.denied",
+                    sessionId: sessionId,
+                    agent: agentName,
+                    serverId: server.id,
+                    command: command,
+                    result: "denied"
+                ))
+            }
+        }
+
+        let deadline = Date().addingTimeInterval(approvalWait)
+        while Date() < deadline {
+            if let snapshot = writeApprovalSnapshot(requestId), snapshot.status != .pending {
+                switch snapshot.status {
+                case .approved:
+                    return .approved
+                case .denied, .expired:
+                    return .denied(snapshot.error ?? AgentErrorBody(
+                        code: .writeDenied,
+                        message: "The user denied write access"
+                    ))
+                case .pending:
+                    break
+                }
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return .pending(requestId: requestId)
+    }
+
+    private func handleWriteApprovalStatus(
+        _ request: AgentRequest,
+        sessionId: String
+    ) -> AgentResponse {
+        guard let requestId = request.args?.objectValue?["requestId"]?.stringValue,
+              let snapshot = writeApprovalSnapshot(requestId) else {
+            return errorResponse(request.id, .invalidRequest, "Unknown approval request")
+        }
+        guard snapshot.sessionId == sessionId else {
+            return errorResponse(request.id, .unauthorized, "Approval belongs to another session")
+        }
+        switch snapshot.status {
+        case .pending:
+            return ok(request.id, .object([
+                "status": .string("pending"),
+                "requestId": .string(requestId)
+            ]))
+        case .approved:
+            return ok(request.id, .object([
+                "status": .string("approved"),
+                "requestId": .string(requestId)
+            ]))
+        case .denied, .expired:
+            return AgentResponse(
+                id: request.id,
+                ok: false,
+                result: nil,
+                error: snapshot.error ?? AgentErrorBody(
+                    code: .writeDenied,
+                    message: "Write approval was denied"
+                )
+            )
+        }
+    }
+
+    private func setWriteApproval(
+        _ requestId: String,
+        status: AgentApprovalState,
+        error: AgentErrorBody?
+    ) {
+        lock.lock()
+        if var pending = pendingWrites[requestId] {
+            pending.status = status
+            pending.error = error
+            pendingWrites[requestId] = pending
+        }
+        lock.unlock()
+    }
+
+    private func writeApprovalSnapshot(_ requestId: String) -> PendingWrite? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingWrites[requestId]
     }
 
     private func handleRevoke(_ request: AgentRequest) -> AgentResponse {
