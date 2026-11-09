@@ -36,6 +36,8 @@ final class AgentGateway {
     private var jobOwners: [String: String] = [:]
     private var jobServers: [String: String] = [:]
     private var disabledServers: Set<String> = []
+    private var serverGenerations: [String: UInt64] = [:]
+    private var gatewayGeneration: UInt64 = 0
 
     private init() {
         self.sessions = AgentSessionStore()
@@ -112,11 +114,13 @@ final class AgentGateway {
         try server.start()
         lock.lock()
         socketServer = server
+        gatewayGeneration &+= 1
         lock.unlock()
     }
 
     func stop() {
         lock.lock()
+        gatewayGeneration &+= 1
         let server = socketServer
         let exec = execService
         let shells = shellManager
@@ -140,6 +144,7 @@ final class AgentGateway {
         } else {
             disabledServers.insert(serverId)
         }
+        serverGenerations[serverId, default: 0] &+= 1
         let exec = execService
         let shells = shellManager
         let jobs = jobServers
@@ -209,7 +214,7 @@ final class AgentGateway {
         let clientVersion = args["clientVersion"]?.stringValue ?? ""
         let bridgeVersion = args["bridgeVersion"]?.stringValue ?? ""
         let parentPath = args["parentPath"]?.stringValue ?? ""
-        let parentPid = Int32(args["parentPid"]?.numberValue ?? 0)
+        let parentPid = AgentNumeric.int32(args["parentPid"]?.numberValue, default: 0)
         let requestId = UUID().uuidString
         let admission = AgentAdmissionRequest(
             requestId: requestId,
@@ -225,11 +230,30 @@ final class AgentGateway {
             return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
         }
         pendingAdmissions[requestId] = PendingAdmission(status: .pending)
+        let generation = gatewayGeneration
         lock.unlock()
 
         Task { [weak self] in
             guard let self else { return }
             let approved = await approval.requestAdmission(admission)
+            guard self.isCurrentGeneration(generation) else {
+                let body = AgentErrorBody(
+                    code: .admissionDenied,
+                    message: "Orbit stopped the agent gateway before approval completed"
+                )
+                self.setAdmission(
+                    requestId,
+                    status: .denied,
+                    session: nil,
+                    error: body
+                )
+                self.record(AgentAuditEvent(
+                    type: "agent.admission.denied",
+                    agent: name,
+                    result: "denied"
+                ))
+                return
+            }
             if approved {
                 let credential = self.sessions.createSession(agentName: name)
                 self.setAdmission(
@@ -409,6 +433,8 @@ final class AgentGateway {
         if isServerDisabled(server.id) {
             return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
         }
+        let generation = currentGeneration()
+        let serverGeneration = currentServerGeneration(server.id)
 
         var requiresWrite = parsed.mode == .write
         var escalated = false
@@ -439,16 +465,50 @@ final class AgentGateway {
             }
         }
 
+        guard isCurrentGeneration(generation),
+              isCurrentServerGeneration(serverGeneration, serverId: server.id),
+              !isServerDisabled(server.id) else {
+            let code: AgentErrorCode = isCurrentGeneration(generation)
+                ? .serverNotExposed
+                : .orbitUnavailable
+            return errorResponse(
+                request.id,
+                code,
+                "The server is no longer available to AI agents"
+            )
+        }
+
         var execRequest = parsed
         execRequest.sessionId = sessionId
         execRequest.escalated = escalated
         do {
             let result = try await execService.exec(execRequest)
-            if let jobId = result.jobId {
-                lock.lock()
+            let allowed: Bool
+            lock.lock()
+            allowed = gatewayGeneration == generation
+                && serverGenerations[server.id, default: 0] == serverGeneration
+                && !disabledServers.contains(server.id)
+            if allowed, let jobId = result.jobId {
                 jobOwners[jobId] = sessionId
                 jobServers[jobId] = server.id
-                lock.unlock()
+            }
+            lock.unlock()
+
+            guard allowed else {
+                if let jobId = result.jobId {
+                    try? await execService.jobCancel(jobId: jobId)
+                }
+                let code: AgentErrorCode = isCurrentGeneration(generation)
+                    ? .serverNotExposed
+                    : .orbitUnavailable
+                return errorResponse(
+                    request.id,
+                    code,
+                    "The server is no longer available to AI agents"
+                )
+            }
+            if let jobId = result.jobId, result.status == .running {
+                sessions.markJobActive(sessionId: sessionId, jobId: jobId)
             }
             record(AgentAuditEvent(
                 type: "agent.tool.call",
@@ -495,6 +555,8 @@ final class AgentGateway {
         if isServerDisabled(server.id) {
             return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
         }
+        let generation = currentGeneration()
+        let serverGeneration = currentServerGeneration(server.id)
 
         if !sessions.hasWriteGrant(sessionId: sessionId, serverId: server.id) {
             switch await requestWriteApproval(
@@ -515,8 +577,36 @@ final class AgentGateway {
             }
         }
 
+        guard isCurrentGeneration(generation),
+              isCurrentServerGeneration(serverGeneration, serverId: server.id),
+              !isServerDisabled(server.id),
+              isServerExposed(server.id) else {
+            let code: AgentErrorCode = isCurrentGeneration(generation)
+                ? .serverNotExposed
+                : .orbitUnavailable
+            return errorResponse(
+                request.id,
+                code,
+                "The server is no longer available to AI agents"
+            )
+        }
+
         do {
             let shellId = try await manager.open(serverId: server.id, sessionId: sessionId)
+            guard isCurrentGeneration(generation),
+                  isCurrentServerGeneration(serverGeneration, serverId: server.id),
+                  !isServerDisabled(server.id),
+                  isServerExposed(server.id) else {
+                await manager.close(shellId: shellId)
+                let code: AgentErrorCode = isCurrentGeneration(generation)
+                    ? .serverNotExposed
+                    : .orbitUnavailable
+                return errorResponse(
+                    request.id,
+                    code,
+                    "The server is no longer available to AI agents"
+                )
+            }
             record(AgentAuditEvent(
                 type: "agent.shell.opened",
                 sessionId: sessionId,
@@ -559,8 +649,12 @@ final class AgentGateway {
             return errorResponse(request.id, .writeGrantRequired, "Write access for this server was revoked")
         }
 
-        let timeoutMs = max(0, object["timeoutMs"]?.numberValue ?? 50_000)
-        let timeout = min(max(timeoutMs / 1000, 0.001), 50)
+        let timeoutMs = AgentNumeric.uint32(
+            object["timeoutMs"]?.numberValue,
+            default: 50_000,
+            range: 1...50_000
+        )
+        let timeout = Double(timeoutMs) / 1000
         do {
             let result = try await manager.exec(
                 shellId: shellId,
@@ -579,7 +673,8 @@ final class AgentGateway {
             ))
             return ok(request.id, .object([
                 "output": .string(result.output),
-                "exitCode": .number(Double(result.exitCode))
+                "exitCode": .number(Double(result.exitCode)),
+                "truncated": .bool(result.truncated)
             ]))
         } catch let shellError as AgentShellError {
             return errorResponse(request.id, shellError.code, shellError.errorDescription ?? "Shell error")
@@ -647,6 +742,39 @@ final class AgentGateway {
         return disabledServers.contains(serverId)
     }
 
+    private func isServerExposed(_ serverId: String) -> Bool {
+        lock.lock()
+        let exec = execService
+        let disabled = disabledServers.contains(serverId)
+        lock.unlock()
+        guard !disabled, let exec else { return false }
+        return exec.listServers().contains { $0.id == serverId }
+    }
+
+    private func currentGeneration() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return gatewayGeneration
+    }
+
+    private func currentServerGeneration(_ serverId: String) -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return serverGenerations[serverId, default: 0]
+    }
+
+    private func isCurrentGeneration(_ generation: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return gatewayGeneration == generation
+    }
+
+    private func isCurrentServerGeneration(_ generation: UInt64, serverId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return serverGenerations[serverId, default: 0] == generation
+    }
+
     private func currentShellManager() -> AgentShellManaging? {
         lock.lock()
         defer { lock.unlock() }
@@ -672,6 +800,7 @@ final class AgentGateway {
             status: .pending,
             error: nil
         )
+        let generation = gatewayGeneration
         lock.unlock()
 
         let agentName = sessions.agentName(sessionId: sessionId) ?? "AI Agent"
@@ -685,6 +814,24 @@ final class AgentGateway {
         Task { [weak self] in
             guard let self else { return }
             let approved = await approval.requestWrite(writeRequest)
+            guard self.isCurrentGeneration(generation),
+                  self.sessions.agentName(sessionId: sessionId) != nil,
+                  self.isServerExposed(server.id) else {
+                let body = AgentErrorBody(
+                    code: .writeDenied,
+                    message: "Write approval was revoked before it was granted"
+                )
+                self.setWriteApproval(requestId, status: .denied, error: body)
+                self.record(AgentAuditEvent(
+                    type: "agent.write.denied",
+                    sessionId: sessionId,
+                    agent: agentName,
+                    serverId: server.id,
+                    command: command,
+                    result: "denied"
+                ))
+                return
+            }
             if approved {
                 self.sessions.grantWrite(sessionId: sessionId, serverId: server.id)
                 self.setWriteApproval(requestId, status: .approved, error: nil)
@@ -799,6 +946,9 @@ final class AgentGateway {
         }
         do {
             let status = try await execService.jobStatus(jobId: jobId)
+            if status.status != .running {
+                sessions.markJobFinished(sessionId: sessionId, jobId: jobId)
+            }
             return ok(request.id, try AgentJSONValue.encoding(status))
         } catch let serviceError as AgentServiceError {
             return errorResponse(request.id, serviceError.code, serviceError.message)
@@ -817,9 +967,16 @@ final class AgentGateway {
               jobBelongs(jobId, to: sessionId) else {
             return errorResponse(request.id, .unauthorized, "Unknown job for this session")
         }
-        let cursor = Int(object["cursor"]?.numberValue ?? 0)
+        let cursor = AgentNumeric.int(
+            object["cursor"]?.numberValue,
+            default: 0,
+            range: 0...Int.max
+        )
         do {
             let output = try await execService.jobOutput(jobId: jobId, cursor: cursor)
+            if output.eof {
+                sessions.markJobFinished(sessionId: sessionId, jobId: jobId)
+            }
             return ok(request.id, try AgentJSONValue.encoding(output))
         } catch let serviceError as AgentServiceError {
             return errorResponse(request.id, serviceError.code, serviceError.message)
@@ -843,6 +1000,7 @@ final class AgentGateway {
             jobOwners.removeValue(forKey: jobId)
             jobServers.removeValue(forKey: jobId)
             lock.unlock()
+            sessions.markJobFinished(sessionId: sessionId, jobId: jobId)
             return ok(request.id, .object(["status": .string("cancelled")]))
         } catch let serviceError as AgentServiceError {
             return errorResponse(request.id, serviceError.code, serviceError.message)
@@ -889,9 +1047,21 @@ final class AgentGateway {
             return nil
         }
         let mode = object["mode"]?.stringValue.flatMap(AgentExecMode.init(rawValue:)) ?? .read
-        let timeout = UInt32(object["timeoutMs"]?.numberValue ?? 30_000)
-        let wait = UInt32(object["waitMs"]?.numberValue ?? 30_000)
-        let maxBytes = UInt32(object["maxOutputBytes"]?.numberValue ?? 262_144)
+        let timeout = AgentNumeric.uint32(
+            object["timeoutMs"]?.numberValue,
+            default: 30_000,
+            range: 1...300_000
+        )
+        let wait = AgentNumeric.uint32(
+            object["waitMs"]?.numberValue,
+            default: 30_000,
+            range: 1...50_000
+        )
+        let maxBytes = AgentNumeric.uint32(
+            object["maxOutputBytes"]?.numberValue,
+            default: 262_144,
+            range: 1...1_048_576
+        )
         return AgentExecRequest(
             serverQuery: server,
             command: command,

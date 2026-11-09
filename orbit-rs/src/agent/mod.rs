@@ -275,6 +275,13 @@ impl AgentJob {
         &self.id
     }
 
+    fn is_running(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.state == AgentJobState::Running)
+            .unwrap_or(false)
+    }
+
     fn push_stdout(&self, bytes: &[u8]) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.stdout_bytes += bytes.len();
@@ -424,6 +431,8 @@ pub struct AgentJobRegistry {
 }
 
 impl AgentJobRegistry {
+    const MAX_RETAINED_JOBS: usize = 512;
+
     pub fn new() -> Self {
         Self {
             jobs: std::collections::HashMap::new(),
@@ -431,7 +440,14 @@ impl AgentJobRegistry {
     }
 
     pub fn insert(&mut self, job: Arc<AgentJob>) {
+        if self.jobs.len() >= Self::MAX_RETAINED_JOBS {
+            self.jobs.retain(|_, existing| existing.is_running());
+        }
         self.jobs.insert(job.id().to_string(), job);
+    }
+
+    pub fn len(&self) -> usize {
+        self.jobs.len()
     }
 
     pub fn get(&self, job_id: &str) -> Option<Arc<AgentJob>> {
@@ -565,6 +581,17 @@ mod tests {
         let (text, truncated) = truncate_agent_output("abc", 4);
         assert_eq!(text, "abc");
         assert!(!truncated);
+    }
+
+    #[test]
+    fn job_registry_keeps_a_bounded_number_of_finished_jobs() {
+        let mut registry = super::AgentJobRegistry::new();
+        for index in 0..600 {
+            let job = std::sync::Arc::new(super::AgentJob::new(format!("job-{index}"), 1024));
+            job.finish(super::AgentJobState::Completed, Some(0));
+            registry.insert(job);
+        }
+        assert!(registry.len() <= 512);
     }
 
     #[test]

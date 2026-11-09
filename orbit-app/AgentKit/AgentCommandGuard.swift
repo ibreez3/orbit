@@ -10,6 +10,9 @@ public enum AgentCommandGuard {
         if declaredMode == .write {
             return .requireWrite(reason: "The agent declared a write command")
         }
+        if hasUnquotedCommandSubstitution(command) {
+            return .requireWrite(reason: "Command substitution cannot be safely classified")
+        }
         for segment in splitSegments(command) {
             if let reason = inspect(segment) {
                 return .requireWrite(reason: reason)
@@ -22,7 +25,7 @@ public enum AgentCommandGuard {
         "rm", "rmdir", "mv", "cp", "install", "touch", "mkdir", "ln",
         "chmod", "chown", "chgrp", "truncate", "dd", "mkfs", "mount", "umount",
         "shutdown", "reboot", "halt", "poweroff", "kill", "pkill", "killall",
-        "tee", "eval", "xargs", "env", "sudo"
+        "tee", "eval", "xargs", "env", "sudo", "source", "."
     ]
 
     private static func inspect(_ segment: String) -> String? {
@@ -39,6 +42,14 @@ public enum AgentCommandGuard {
         guard let rawCommand = tokens.first else { return nil }
         let command = (rawCommand as NSString).lastPathComponent.lowercased()
         let arguments = Array(tokens.dropFirst())
+
+        if ["timeout", "nice", "nohup", "command", "exec", "time", "builtin", "busybox"].contains(command) {
+            guard let inner = wrapperInner(command: command, arguments: arguments),
+                  !inner.isEmpty else {
+                return nil
+            }
+            return inspect(inner.joined(separator: " "))
+        }
 
         if mutatingCommands.contains(command) {
             return "\(command) is a write command"
@@ -126,17 +137,16 @@ public enum AgentCommandGuard {
             }
             return "docker system may modify state"
         case "exec":
-            if rest.contains(where: { $0.hasPrefix("-") && $0.contains("t") }) {
-                return "Interactive docker exec requires write approval"
-            }
-            guard let containerIndex = rest.firstIndex(where: { !$0.hasPrefix("-") }) else {
+            guard let parsed = parseDockerExec(rest) else {
                 return "docker exec requires a container and command"
             }
-            let inner = Array(rest.dropFirst(containerIndex + 1))
-            guard !inner.isEmpty else {
+            if parsed.interactive {
+                return "Interactive docker exec requires write approval"
+            }
+            guard !parsed.inner.isEmpty else {
                 return "docker exec requires an inner command"
             }
-            return inspect(inner.joined(separator: " "))
+            return inspect(parsed.inner.joined(separator: " "))
         default:
             return "docker \(subcommand) may modify container state"
         }
@@ -173,12 +183,24 @@ public enum AgentCommandGuard {
             }
             if character == "&" {
                 let next = command.index(after: index)
+                let previousIsRedirect = index > command.startIndex
+                    && command[command.index(before: index)] == ">"
+                let nextIsRedirect = next < command.endIndex && command[next] == ">"
+                if previousIsRedirect || nextIsRedirect {
+                    current.append(character)
+                    index = next
+                    continue
+                }
                 if next < command.endIndex, command[next] == "&" {
                     segments.append(current)
                     current = ""
                     index = command.index(after: next)
-                    continue
+                } else {
+                    segments.append(current)
+                    current = ""
+                    index = next
                 }
+                continue
             }
             if character == "|" {
                 let next = command.index(after: index)
@@ -198,6 +220,136 @@ public enum AgentCommandGuard {
         }
         segments.append(current)
         return segments
+    }
+
+    private static let dockerExecValueOptions: Set<String> = [
+        "-u", "--user", "-e", "--env", "--env-file",
+        "-w", "--workdir", "--detach-keys"
+    ]
+
+    private static func parseDockerExec(
+        _ arguments: [String]
+    ) -> (interactive: Bool, container: String, inner: [String])? {
+        var index = 0
+        var interactive = false
+        while index < arguments.count {
+            let token = arguments[index]
+            if token == "--" {
+                index += 1
+                break
+            }
+            guard token.hasPrefix("-"), token != "-" else { break }
+
+            let optionName = token
+                .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                .first
+                .map(String.init) ?? token
+            if optionName == "-i" || optionName == "--interactive"
+                || optionName == "-t" || optionName == "--tty" {
+                interactive = true
+            }
+            if optionName.hasPrefix("-"), !optionName.hasPrefix("--"),
+               optionName.dropFirst().contains(where: { $0 == "i" || $0 == "t" }) {
+                interactive = true
+            }
+
+            if dockerExecValueOptions.contains(optionName) && !token.contains("=") {
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+        guard index < arguments.count else { return nil }
+        let container = arguments[index]
+        var inner = Array(arguments.dropFirst(index + 1))
+        if inner.first == "--" {
+            inner.removeFirst()
+        }
+        return (interactive, container, inner)
+    }
+
+    private static func wrapperInner(command: String, arguments: [String]) -> [String]? {
+        var rest = arguments
+        switch command {
+        case "timeout":
+            while let first = rest.first, first.hasPrefix("-") {
+                let optionName = first
+                    .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                    .first
+                    .map(String.init) ?? first
+                let takesValue = ["-s", "-k", "--signal", "--kill-after"].contains(optionName)
+                rest.removeFirst()
+                if takesValue, !first.contains("="), !rest.isEmpty {
+                    rest.removeFirst()
+                }
+            }
+            guard !rest.isEmpty else { return nil }
+            rest.removeFirst()
+            return rest
+        case "nice":
+            while let first = rest.first, first.hasPrefix("-") {
+                rest.removeFirst()
+                if first == "-n", !rest.isEmpty {
+                    rest.removeFirst()
+                }
+            }
+            return rest
+        case "command":
+            if rest.first == "-v" || rest.first == "-V" {
+                return nil
+            }
+            while let first = rest.first, first.hasPrefix("-") {
+                rest.removeFirst()
+            }
+            return rest
+        case "nohup", "exec", "time", "builtin", "busybox":
+            while let first = rest.first, first.hasPrefix("-") {
+                rest.removeFirst()
+            }
+            return rest
+        default:
+            return nil
+        }
+    }
+
+    private static func hasUnquotedCommandSubstitution(_ text: String) -> Bool {
+        var quote: Character?
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            let next = text.index(after: index)
+            if let activeQuote = quote {
+                if activeQuote == "\"" {
+                    if character == "`" {
+                        return true
+                    }
+                    if (character == "$" || character == "<"),
+                       next < text.endIndex, text[next] == "(" {
+                        return true
+                    }
+                }
+                if character == activeQuote,
+                   !(index > text.startIndex && text[text.index(before: index)] == "\\") {
+                    quote = nil
+                }
+                index = next
+                continue
+            }
+            if character == "'" || character == "\"" {
+                quote = character
+                index = next
+                continue
+            }
+            if character == "`" {
+                return true
+            }
+            if (character == "$" || character == "<"),
+               next < text.endIndex, text[next] == "(" {
+                return true
+            }
+            index = next
+        }
+        return false
     }
 
     private static func hasUnquotedRedirection(_ text: String) -> Bool {

@@ -34,6 +34,7 @@ final class AgentExecService: AgentCommandExecuting {
     private let exposure: AgentExposureStore
     private let idempotencyLock = NSLock()
     private var idempotencyEntries: [String: IdempotencyEntry] = [:]
+    private var inFlight: [String: Task<AgentExecResult, Error>] = [:]
 
     init(
         transport: AgentExecTransport,
@@ -114,6 +115,51 @@ final class AgentExecService: AgentCommandExecuting {
             )
         }
 
+        if let idempotencyKey {
+            let task: Task<AgentExecResult, Error>
+            let owner: Bool
+            idempotencyLock.lock()
+            if let existing = inFlight[idempotencyKey] {
+                task = existing
+                owner = false
+            } else {
+                task = Task {
+                    try await self.transport.agentExec(
+                        serverId: serverID,
+                        command: request.command,
+                        timeoutMs: request.timeoutMs,
+                        waitMs: request.waitMs,
+                        maxOutputBytes: request.maxOutputBytes
+                    )
+                }
+                inFlight[idempotencyKey] = task
+                owner = true
+            }
+            idempotencyLock.unlock()
+
+            do {
+                var result = try await task.value
+                if owner {
+                    if let jobID = result.jobId {
+                        recordJob(jobID, for: idempotencyKey)
+                    }
+                    idempotencyLock.lock()
+                    inFlight.removeValue(forKey: idempotencyKey)
+                    idempotencyLock.unlock()
+                }
+                result.mode = request.mode
+                result.escalated = request.escalated
+                return result
+            } catch {
+                if owner {
+                    idempotencyLock.lock()
+                    inFlight.removeValue(forKey: idempotencyKey)
+                    idempotencyLock.unlock()
+                }
+                throw error
+            }
+        }
+
         var result = try await transport.agentExec(
             serverId: serverID,
             command: request.command,
@@ -121,9 +167,6 @@ final class AgentExecService: AgentCommandExecuting {
             waitMs: request.waitMs,
             maxOutputBytes: request.maxOutputBytes
         )
-        if let idempotencyKey, let jobID = result.jobId {
-            recordJob(jobID, for: idempotencyKey)
-        }
         result.mode = request.mode
         result.escalated = request.escalated
         return result

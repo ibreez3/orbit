@@ -44,6 +44,10 @@ public final class AgentSocketClient: AgentGatewayCalling {
     public func connect(timeout: TimeInterval) throws {
         lock.lock()
         defer { lock.unlock() }
+        try connectLocked(timeout: timeout)
+    }
+
+    private func connectLocked(timeout: TimeInterval) throws {
         guard fd < 0 else { return }
 
         let socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -84,27 +88,36 @@ public final class AgentSocketClient: AgentGatewayCalling {
 
     public func close() {
         lock.lock()
-        let current = fd
-        fd = -1
-        readBuffer.removeAll(keepingCapacity: false)
-        lock.unlock()
-        if current >= 0 {
-            shutdown(current, SHUT_RDWR)
-            Darwin.close(current)
-        }
+        defer { lock.unlock() }
+        dropConnectionLocked()
     }
 
     public func send(_ request: AgentRequest, timeout: TimeInterval) throws -> AgentResponse {
         lock.lock()
         defer { lock.unlock() }
-        guard fd >= 0 else {
-            throw AgentSocketClientError.notConnected
+        if fd < 0 {
+            try connectLocked(timeout: 1)
         }
 
-        var data = try JSONEncoder().encode(request)
-        data.append(0x0A)
-        try writeAll(data)
-        return try readResponse(timeout: timeout)
+        do {
+            var data = try JSONEncoder().encode(request)
+            data.append(0x0A)
+            try writeAll(data)
+            return try readResponse(for: request.id, timeout: timeout)
+        } catch {
+            dropConnectionLocked()
+            throw error
+        }
+    }
+
+    private func dropConnectionLocked() {
+        let current = fd
+        fd = -1
+        readBuffer.removeAll(keepingCapacity: false)
+        if current >= 0 {
+            shutdown(current, SHUT_RDWR)
+            Darwin.close(current)
+        }
     }
 
     public func hello(_ hello: AgentHello) throws -> AgentAdmissionResult {
@@ -230,18 +243,21 @@ public final class AgentSocketClient: AgentGatewayCalling {
         }
     }
 
-    private func readResponse(timeout: TimeInterval) throws -> AgentResponse {
+    private func readResponse(for requestId: String, timeout: TimeInterval) throws -> AgentResponse {
         let deadline = Date().addingTimeInterval(timeout)
         while true {
             if let newline = readBuffer.firstIndex(of: 0x0A) {
                 let line = readBuffer[..<newline]
                 readBuffer.removeSubrange(...newline)
                 guard !line.isEmpty else { continue }
+                let response: AgentResponse
                 do {
-                    return try JSONDecoder().decode(AgentResponse.self, from: Data(line))
+                    response = try JSONDecoder().decode(AgentResponse.self, from: Data(line))
                 } catch {
                     throw AgentSocketClientError.invalidResponse
                 }
+                guard response.id == requestId else { continue }
+                return response
             }
 
             let remaining = deadline.timeIntervalSinceNow

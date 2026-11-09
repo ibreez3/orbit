@@ -91,7 +91,8 @@ export ORBIT_AGENT_SESSION=<sessionId>
 
 - 服务器凭据只在 Rust 加密存储和进程内存中；工具返回、日志和审计都不包含密码、私钥或完整 token。
 - 网关只监听本机 Unix socket（`agent.sock`，0600），不开放 TCP。
-- 读模式会拦截明显的写命令（重定向、`rm`、重启、`docker rm` 等）；命中后升级为写授权。
+- 读模式会拦截明显的写命令（重定向、`rm`、重启、`docker rm`、`docker exec` 的写内层命令等）；命中后升级为写授权。
+- 单次 `orbit_exec` 的等待上限为 50 秒、命令超时上限为 300 秒、输出上限为 1 MiB。持久 shell 的输出超过 1 MiB 时保留尾部并返回 `truncated: true`。
 - 这是“凭据隔离 + 授权 + 审计”机制，不是对抗恶意本地进程的沙箱。AI 读取远端 `.env` 等文件时仍可能把远端密钥带进自己的上下文。
 
 ## 常见问题

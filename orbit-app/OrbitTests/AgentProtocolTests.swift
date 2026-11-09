@@ -28,6 +28,25 @@ final class AgentProtocolTests: XCTestCase {
         XCTAssertTrue(AgentPaths.socketPath.contains("Library/Application Support/Orbit"))
     }
 
+    func testAgentNumericClampsAgentSuppliedValues() {
+        XCTAssertEqual(
+            AgentNumeric.uint32(1e12, default: 30_000, range: 1...300_000),
+            300_000
+        )
+        XCTAssertEqual(
+            AgentNumeric.uint32(-5, default: 30_000, range: 1...300_000),
+            1
+        )
+        XCTAssertEqual(
+            AgentNumeric.uint32(.nan, default: 30_000, range: 1...300_000),
+            30_000
+        )
+        XCTAssertEqual(AgentNumeric.int32(1e12, default: 0), Int32.max)
+        XCTAssertEqual(AgentNumeric.int32(.infinity, default: 7), 7)
+        XCTAssertEqual(AgentNumeric.int(-5, default: 0, range: 0...100), 0)
+        XCTAssertEqual(AgentNumeric.int(1.9, default: 0, range: 0...100), 1)
+    }
+
     func testAgentSupportDirectoryHonorsEnvironmentOverride() {
         let key = "ORBIT_AGENT_SUPPORT_DIR"
         let previous = getenv(key).map { String(cString: $0) }

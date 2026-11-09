@@ -45,6 +45,159 @@ final class AgentGatewayTests: XCTestCase {
         XCTAssertEqual(approver.admissionCount, 1)
     }
 
+    func testRunningJobIsTrackedInActiveSessions() async throws {
+        let service = JobLifecycleExecService(servers: [.fixture(id: "srv")])
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")],
+            execService: service
+        )
+        let session = try await approveSession(gateway)
+        let exec = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("sleep 10"),
+                "mode": .string("read")
+            ]
+        ))
+        XCTAssertTrue(exec.ok)
+        XCTAssertEqual(gateway.activeSessions.first?.openJobCount, 1)
+
+        let status = await gateway.handle(callRequest(
+            id: "2",
+            session: session,
+            tool: AgentToolName.jobStatus,
+            args: ["jobId": .string("job-1")]
+        ))
+        XCTAssertTrue(status.ok)
+        XCTAssertEqual(gateway.activeSessions.first?.openJobCount, 0)
+    }
+
+    func testStopDuringInFlightExecCancelsJob() async throws {
+        let service = BlockingExecService(servers: [.fixture(id: "srv")], delayMs: 100)
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")],
+            execService: service
+        )
+        let session = try await approveSession(gateway)
+        let task = Task {
+            await gateway.handle(callRequest(
+                id: "1",
+                session: session,
+                args: [
+                    "server": .string("srv"),
+                    "command": .string("sleep 10"),
+                    "mode": .string("read")
+                ]
+            ))
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        gateway.stop()
+        let response = await task.value
+        XCTAssertFalse(response.ok)
+        XCTAssertTrue(service.cancelled.contains("job-1"))
+    }
+
+    func testDisablingServerDuringInFlightExecCancelsJob() async throws {
+        let service = BlockingExecService(servers: [.fixture(id: "srv")], delayMs: 100)
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")],
+            execService: service
+        )
+        let session = try await approveSession(gateway)
+        let task = Task {
+            await gateway.handle(callRequest(
+                id: "1",
+                session: session,
+                args: [
+                    "server": .string("srv"),
+                    "command": .string("sleep 10"),
+                    "mode": .string("read")
+                ]
+            ))
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        gateway.applyServerExposureChange(serverId: "srv", enabled: false)
+        let response = await task.value
+        XCTAssertFalse(response.ok)
+        XCTAssertTrue(service.cancelled.contains("job-1"))
+    }
+
+    func testStopDuringInFlightShellOpenClosesShell() async throws {
+        let shells = BlockingShellManager(delayMs: 100)
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")],
+            shellManager: shells
+        )
+        let session = try await approveSession(gateway)
+        let task = Task {
+            await gateway.handle(callRequest(
+                id: "1",
+                session: session,
+                tool: AgentToolName.shellOpen,
+                args: ["server": .string("srv")]
+            ))
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        gateway.stop()
+        let response = await task.value
+        XCTAssertFalse(response.ok)
+        XCTAssertTrue(shells.closed.contains("shell-1"))
+    }
+
+    func testStopDuringPendingAdmissionDoesNotIssueSession() async {
+        let approver = FakeApprover(result: true, delayMs: 100)
+        let gateway = makeGateway(approver: approver, approvalWait: 0.01)
+        let response = await gateway.handle(AgentRequest(
+            id: "1",
+            op: .hello,
+            args: .object(["clientName": .string("Codex")])
+        ))
+        guard case .object(let object)? = response.result else {
+            return XCTFail("expected pending response")
+        }
+        XCTAssertEqual(object["status"]?.stringValue, "pending_approval")
+
+        gateway.stop()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertTrue(gateway.activeSessions.isEmpty)
+    }
+
+    func testDisablingServerDuringPendingWriteDoesNotGrant() async throws {
+        let approver = FakeApprover(result: true, delayMs: 100)
+        let gateway = makeGateway(
+            approver: approver,
+            approvalWait: 0.01,
+            servers: [.fixture(id: "srv")]
+        )
+        let session = gateway.sessions.createSession(agentName: "Claude Code")
+
+        let response = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("rm x"),
+                "mode": .string("write")
+            ]
+        ))
+        guard case .object(let object)? = response.result else {
+            return XCTFail("expected pending response")
+        }
+        XCTAssertEqual(object["status"]?.stringValue, "pending_approval")
+
+        gateway.applyServerExposureChange(serverId: "srv", enabled: false)
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertFalse(
+            gateway.sessions.hasWriteGrant(sessionId: session.sessionId, serverId: "srv")
+        )
+    }
+
     func testSlowApprovalReturnsPendingWithoutExecuting() async {
         let approver = FakeApprover(result: true, delayMs: 100)
         let gateway = makeGateway(approver: approver, approvalWait: 0.01)
@@ -126,6 +279,42 @@ final class AgentGatewayTests: XCTestCase {
             ]
         ))
         XCTAssertEqual(read.error?.code, .serverNotExposed)
+    }
+
+    func testAgentSuppliedNumbersAreClamped() async throws {
+        let service = FakeExecService(servers: [.fixture(id: "srv")])
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")],
+            execService: service
+        )
+        let hello = await gateway.handle(AgentRequest(
+            id: "hello",
+            op: .hello,
+            args: .object([
+                "clientName": .string("Claude Code"),
+                "parentPid": .number(1e12)
+            ])
+        ))
+        XCTAssertTrue(hello.ok)
+
+        let session = try await approveSession(gateway)
+        let response = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("ls"),
+                "mode": .string("read"),
+                "timeoutMs": .number(1e12),
+                "waitMs": .number(1e12),
+                "maxOutputBytes": .number(1e12)
+            ]
+        ))
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(service.lastRequest?.timeoutMs, 300_000)
+        XCTAssertEqual(service.lastRequest?.waitMs, 50_000)
+        XCTAssertEqual(service.lastRequest?.maxOutputBytes, 1_048_576)
     }
 
     func testShellToolsRequireWriteApprovalThenRouteToManager() async throws {
@@ -373,10 +562,11 @@ final class AgentGatewayTests: XCTestCase {
         approvalWait: TimeInterval = 5,
         servers: [AgentServerSummary] = [],
         shellManager: AgentShellManaging? = FakeShellManager(),
-        sessions: AgentSessionStore = AgentSessionStore()
+        sessions: AgentSessionStore = AgentSessionStore(),
+        execService: AgentCommandExecuting? = nil
     ) -> AgentGateway {
         AgentGateway(
-            execService: FakeExecService(servers: servers),
+            execService: execService ?? FakeExecService(servers: servers),
             approval: approver,
             sessions: sessions,
             audit: FakeAudit(),
@@ -408,12 +598,16 @@ final class FakeApprover: AgentApprovalPresenting {
 
     func requestWrite(_ request: AgentWriteRequest) async -> Bool {
         writeCount += 1
+        if delayMs > 0 {
+            try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+        }
         return result
     }
 }
 
 final class FakeExecService: AgentCommandExecuting {
     let servers: [AgentServerSummary]
+    private(set) var lastRequest: AgentExecRequest?
 
     init(servers: [AgentServerSummary] = []) {
         self.servers = servers
@@ -424,7 +618,8 @@ final class FakeExecService: AgentCommandExecuting {
     }
 
     func exec(_ request: AgentExecRequest) async throws -> AgentExecResult {
-        AgentExecResult(
+        lastRequest = request
+        return AgentExecResult(
             status: .completed,
             serverId: request.serverQuery,
             stdout: "ok",
@@ -453,6 +648,118 @@ final class FakeAudit: AgentAuditRecording {
     func record(_ event: AgentAuditEvent) {
         events.append(event)
     }
+}
+
+final class JobLifecycleExecService: AgentCommandExecuting {
+    let servers: [AgentServerSummary]
+
+    init(servers: [AgentServerSummary]) {
+        self.servers = servers
+    }
+
+    func listServers() -> [AgentServerSummary] {
+        servers
+    }
+
+    func exec(_ request: AgentExecRequest) async throws -> AgentExecResult {
+        AgentExecResult(
+            status: .running,
+            serverId: request.serverQuery,
+            durationMs: 1,
+            jobId: "job-1",
+            mode: request.mode
+        )
+    }
+
+    func jobStatus(jobId: String) async throws -> AgentJobStatus {
+        AgentJobStatus(jobId: jobId, status: .completed, exitCode: 0, durationMs: 1, truncated: false)
+    }
+
+    func jobOutput(jobId: String, cursor: Int?) async throws -> AgentJobOutput {
+        AgentJobOutput(jobId: jobId, chunk: "", nextCursor: cursor ?? 0, eof: true, truncated: false)
+    }
+
+    func jobCancel(jobId: String) async throws {}
+    func cancelJobs(serverId: String) {}
+}
+
+final class BlockingShellManager: AgentShellManaging {
+    let delayMs: UInt64
+    private(set) var closed: [String] = []
+    private var owners: [String: (sessionId: String, serverId: String)] = [:]
+
+    init(delayMs: UInt64) {
+        self.delayMs = delayMs
+    }
+
+    func open(serverId: String, sessionId: String) async throws -> String {
+        try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+        owners["shell-1"] = (sessionId: sessionId, serverId: serverId)
+        return "shell-1"
+    }
+
+    func exec(
+        shellId: String,
+        command: String,
+        timeout: TimeInterval
+    ) async throws -> AgentShellCommandResult {
+        AgentShellCommandResult(output: "", exitCode: 0)
+    }
+
+    func close(shellId: String) async {
+        closed.append(shellId)
+        owners.removeValue(forKey: shellId)
+    }
+
+    func closeAll() async {}
+    func closeAll(sessionId: String) async {}
+    func closeAll(serverId: String) async {}
+
+    func owner(shellId: String) -> (sessionId: String, serverId: String)? {
+        owners[shellId]
+    }
+}
+
+final class BlockingExecService: AgentCommandExecuting {
+    let servers: [AgentServerSummary]
+    let delayMs: UInt64
+    private(set) var started = 0
+    private(set) var cancelled: [String] = []
+
+    init(servers: [AgentServerSummary], delayMs: UInt64) {
+        self.servers = servers
+        self.delayMs = delayMs
+    }
+
+    func listServers() -> [AgentServerSummary] {
+        servers
+    }
+
+    func exec(_ request: AgentExecRequest) async throws -> AgentExecResult {
+        started += 1
+        try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+        return AgentExecResult(
+            status: .running,
+            serverId: request.serverQuery,
+            durationMs: delayMs,
+            jobId: "job-1",
+            mode: request.mode
+        )
+    }
+
+    func jobStatus(jobId: String) async throws -> AgentJobStatus {
+        AgentJobStatus(jobId: jobId, status: .running, exitCode: nil, durationMs: 0, truncated: false)
+    }
+
+    func jobOutput(jobId: String, cursor: Int?) async throws -> AgentJobOutput {
+        AgentJobOutput(jobId: jobId, chunk: "", nextCursor: cursor ?? 0, eof: false, truncated: false)
+    }
+
+    func jobCancel(jobId: String) async throws {
+        cancelled.append(jobId)
+    }
+
+    func cancelJobs(serverId: String) {}
 }
 
 final class MutableClock {

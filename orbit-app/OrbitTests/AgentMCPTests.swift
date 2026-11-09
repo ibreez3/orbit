@@ -50,6 +50,34 @@ final class AgentMCPTests: XCTestCase {
         XCTAssertTrue(textContent(response).contains("servers"))
     }
 
+    func testExpiredSessionTriggersReadmissionOnNextCall() {
+        let client = ExpiringGatewayClient()
+        let core = MCPBridgeCore(client: client)
+
+        let first = core.handle(MCPRequest(
+            jsonrpc: "2.0",
+            id: .string("1"),
+            method: "tools/call",
+            params: .object([
+                "name": .string(AgentToolName.listServers),
+                "arguments": .object([:])
+            ])
+        ))
+        XCTAssertTrue(textContent(first).contains("pending_approval"))
+
+        let second = core.handle(MCPRequest(
+            jsonrpc: "2.0",
+            id: .string("2"),
+            method: "tools/call",
+            params: .object([
+                "name": .string(AgentToolName.listServers),
+                "arguments": .object([:])
+            ])
+        ))
+        XCTAssertTrue(textContent(second).contains("servers"))
+        XCTAssertEqual(client.helloCount, 2)
+    }
+
     private func toolNames(_ response: MCPResponse?) -> [String] {
         guard case .object(let result)? = response?.result,
               case .array(let tools)? = result["tools"] else {
@@ -117,6 +145,44 @@ final class FakeGatewayClient: AgentGatewayCalling {
         default:
             return .object(["servers": .array([])])
         }
+    }
+
+    func revoke(_ session: AgentSessionCredential) throws {}
+}
+
+final class ExpiringGatewayClient: AgentGatewayCalling {
+    private(set) var helloCount = 0
+    private(set) var callCount = 0
+
+    func hello(_ hello: AgentHello) throws -> AgentAdmissionResult {
+        helloCount += 1
+        return .approved(AgentSessionCredential(
+            sessionId: "session-\(helloCount)",
+            token: "token-\(helloCount)"
+        ))
+    }
+
+    func approvalStatus(requestId: String) throws -> AgentApprovalStatus {
+        AgentApprovalStatus(
+            requestId: requestId,
+            status: .approved,
+            session: AgentSessionCredential(sessionId: "session", token: "token")
+        )
+    }
+
+    func call(
+        tool: String,
+        args: AgentJSONValue,
+        session: AgentSessionCredential
+    ) throws -> AgentJSONValue {
+        callCount += 1
+        if callCount == 1 {
+            throw AgentSocketClientError.remote(AgentErrorBody(
+                code: .sessionExpired,
+                message: "The agent session expired"
+            ))
+        }
+        return .object(["servers": .array([])])
     }
 
     func revoke(_ session: AgentSessionCredential) throws {}

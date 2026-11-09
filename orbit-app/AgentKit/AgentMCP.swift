@@ -297,8 +297,32 @@ public final class MCPBridgeCore {
                         ])
                     )
                 }
+                if body.code == .sessionExpired || body.code == .unauthorized {
+                    session = nil
+                    pendingRequestId = nil
+                    return toolResponse(
+                        id: request.id,
+                        value: .object([
+                            "status": .string("pending_approval"),
+                            "message": .string(
+                                "The Orbit session ended. Approve this Agent again, then retry the same tool call."
+                            )
+                        ])
+                    )
+                }
+                if body.code == .orbitUnavailable {
+                    session = nil
+                    pendingRequestId = nil
+                }
                 return toolError(id: request.id, code: body.code.rawValue, message: body.message)
             default:
+                switch error {
+                case .notConnected, .connectFailed, .io:
+                    session = nil
+                    pendingRequestId = nil
+                default:
+                    break
+                }
                 return toolError(
                     id: request.id,
                     code: AgentErrorCode.orbitUnavailable.rawValue,

@@ -27,6 +27,35 @@ final class AgentShellManagerTests: XCTestCase {
         }
     }
 
+    func testShellOutputIsTruncatedAtTheLimit() async throws {
+        let transport = FakeShellTransport(
+            outputPrefix: String(repeating: "x", count: 1000) + "\n"
+        )
+        let manager = AgentShellManager(
+            transport: transport,
+            sessions: AgentSessionStore(),
+            maxOutputBytes: 128
+        )
+        let session = manager.sessions.createSession(agentName: "Claude Code")
+        manager.sessions.grantWrite(sessionId: session.sessionId, serverId: "srv")
+        let shellId = try await manager.open(serverId: "srv", sessionId: session.sessionId)
+        let result = try await manager.exec(shellId: shellId, command: "cat big", timeout: 2)
+        XCTAssertTrue(result.truncated)
+        XCTAssertLessThanOrEqual(result.output.utf8.count, 128)
+    }
+
+    func testClosingASessionDisconnectsItsIdleBaseSession() async throws {
+        let transport = FakeShellTransport()
+        let manager = AgentShellManager(transport: transport, sessions: AgentSessionStore())
+        let session = manager.sessions.createSession(agentName: "Claude Code")
+        manager.sessions.grantWrite(sessionId: session.sessionId, serverId: "srv")
+        let shellId = try await manager.open(serverId: "srv", sessionId: session.sessionId)
+
+        await manager.closeAll(sessionId: session.sessionId)
+        XCTAssertTrue(transport.closed.contains(shellId))
+        XCTAssertTrue(transport.closed.contains("base-srv"))
+    }
+
     func testShellExecTimesOutWhenMarkerNeverArrives() async throws {
         let transport = FakeShellTransport(emitsCompletion: false)
         let manager = AgentShellManager(transport: transport, sessions: AgentSessionStore())
@@ -46,13 +75,15 @@ final class AgentShellManagerTests: XCTestCase {
 
 final class FakeShellTransport: AgentShellTransport {
     let emitsCompletion: Bool
+    let outputPrefix: String
     private var handlers: [String: (Data) -> Void] = [:]
     private var nextShell = 0
     private(set) var written: [String: String] = [:]
     private(set) var closed: [String] = []
 
-    init(emitsCompletion: Bool = true) {
+    init(emitsCompletion: Bool = true, outputPrefix: String = "hi\n") {
         self.emitsCompletion = emitsCompletion
+        self.outputPrefix = outputPrefix
     }
 
     func connect(serverId: String) async throws -> String {
@@ -72,7 +103,7 @@ final class FakeShellTransport: AgentShellTransport {
               let handler = handlers[shellId] else {
             return
         }
-        handler(Data("hi\n".utf8))
+        handler(Data(outputPrefix.utf8))
         handler(Data("__ORBIT_DONE_\(uuid)__0\n".utf8))
     }
 

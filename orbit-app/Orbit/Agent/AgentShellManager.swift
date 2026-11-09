@@ -58,18 +58,25 @@ final class AgentShellManager: AgentShellManaging {
         let serverId: String
         let sessionId: String
         var buffer: String
+        var truncated: Bool
         var pending: PendingCommand?
     }
 
     let sessions: AgentSessionStore
     private let transport: AgentShellTransport
+    private let maxOutputBytes: Int
     private let lock = NSLock()
     private var shells: [String: Shell] = [:]
     private var baseSessions: [String: String] = [:]
 
-    init(transport: AgentShellTransport, sessions: AgentSessionStore) {
+    init(
+        transport: AgentShellTransport,
+        sessions: AgentSessionStore,
+        maxOutputBytes: Int = 1_048_576
+    ) {
         self.transport = transport
         self.sessions = sessions
+        self.maxOutputBytes = max(1, maxOutputBytes)
     }
 
     func open(serverId: String, sessionId: String) async throws -> String {
@@ -84,6 +91,7 @@ final class AgentShellManager: AgentShellManaging {
             serverId: serverId,
             sessionId: sessionId,
             buffer: "",
+            truncated: false,
             pending: nil
         )
         insertShell(shell)
@@ -113,13 +121,15 @@ final class AgentShellManager: AgentShellManaging {
                 return
             }
 
-            let seconds = min(max(timeout, 0.001), 300)
+            let safeTimeout = timeout.isFinite ? timeout : 0.001
+            let seconds = min(max(safeTimeout, 0.001), 300)
             let timeoutTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 guard !Task.isCancelled else { return }
                 self?.finish(shellId: shellId, result: .failure(AgentShellError.timeout))
             }
             shell.buffer = ""
+            shell.truncated = false
             shell.pending = PendingCommand(
                 sentinel: sentinel,
                 continuation: continuation,
@@ -162,12 +172,15 @@ final class AgentShellManager: AgentShellManaging {
     }
 
     func closeAll(sessionId: String) async {
-        let matching = takeShells(sessionId: sessionId)
+        let (matching, baseSessionsToClose) = takeShells(sessionId: sessionId)
 
         for shell in matching {
             finishPending(shell, error: AgentShellError.closed)
             sessions.markShellClosed(sessionId: shell.sessionId, shellId: shell.id)
             await transport.close(shellId: shell.id)
+        }
+        for baseSessionId in baseSessionsToClose {
+            await transport.close(shellId: baseSessionId)
         }
     }
 
@@ -226,14 +239,21 @@ final class AgentShellManager: AgentShellManaging {
         return (allShells, allBaseSessions)
     }
 
-    private func takeShells(sessionId: String) -> [Shell] {
+    private func takeShells(sessionId: String) -> ([Shell], [String]) {
         lock.lock()
         defer { lock.unlock() }
         let matching = shells.filter { $0.value.sessionId == sessionId }
         for shellId in matching.keys {
             shells.removeValue(forKey: shellId)
         }
-        return Array(matching.values)
+        var baseSessionsToClose: [String] = []
+        for serverId in Set(matching.values.map(\.serverId)) {
+            let stillUsed = shells.values.contains { $0.serverId == serverId }
+            if !stillUsed, let baseSessionId = baseSessions.removeValue(forKey: serverId) {
+                baseSessionsToClose.append(baseSessionId)
+            }
+        }
+        return (Array(matching.values), baseSessionsToClose)
     }
 
     private func takeShells(serverId: String) -> ([Shell], String?) {
@@ -271,8 +291,16 @@ final class AgentShellManager: AgentShellManaging {
             return
         }
         shell.buffer += String(decoding: data, as: UTF8.self)
+        if shell.buffer.utf8.count > maxOutputBytes {
+            // Keep the tail so the completion marker remains reachable while
+            // bounding memory for commands such as yes or tail -f.
+            let tail = shell.buffer.utf8.suffix(maxOutputBytes)
+            shell.buffer = String(decoding: tail, as: UTF8.self)
+            shell.truncated = true
+        }
         var buffer = shell.buffer
-        if let result = pending.sentinel.consume(buffer: &buffer) {
+        if var result = pending.sentinel.consume(buffer: &buffer) {
+            result.truncated = shell.truncated
             shell.pending = nil
             shell.buffer = ""
             shells[shellId] = shell
@@ -295,6 +323,7 @@ final class AgentShellManager: AgentShellManaging {
             return
         }
         shell.pending = nil
+        shell.buffer = ""
         shells[shellId] = shell
         let sessionId = shell.sessionId
         lock.unlock()

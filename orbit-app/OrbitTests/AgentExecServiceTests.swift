@@ -19,6 +19,37 @@ final class AgentExecServiceTests: XCTestCase {
         XCTAssertTrue(service.listServers().isEmpty)
     }
 
+    func testConcurrentIdempotentWritesExecuteOnce() async throws {
+        let server = Server.fixture(id: "srv", name: "api", host: "10.0.0.1")
+        let suite = "AgentExecServiceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let transport = SlowAgentExecTransport()
+        let service = AgentExecService(
+            transport: transport,
+            inventory: { [server] },
+            exposure: AgentExposureStore(defaults: defaults)
+        )
+        let request = AgentExecRequest(
+            serverQuery: "srv",
+            command: "restart api",
+            mode: .write,
+            timeoutMs: 10_000,
+            waitMs: 10_000,
+            maxOutputBytes: 1024,
+            idempotencyKey: "same-key"
+        )
+
+        async let first = service.exec(request)
+        async let second = service.exec(request)
+        let firstResult = try await first
+        let secondResult = try await second
+
+        XCTAssertEqual(transport.callCount, 1)
+        XCTAssertEqual(firstResult.jobId, "job-1")
+        XCTAssertEqual(secondResult.jobId, "job-1")
+    }
+
     func testExecRejectsHiddenAndUnknownServers() async {
         let server = Server.fixture(id: "srv", name: "api", host: "10.0.0.1")
         let suite = "AgentExecServiceTests.\(UUID().uuidString)"
@@ -71,6 +102,39 @@ final class FakeAgentExecTransport: AgentExecTransport {
             stdout: "ok",
             exitCode: 0,
             durationMs: 1
+        )
+    }
+
+    func agentJobStatus(jobId: String) async throws -> AgentJobStatus {
+        AgentJobStatus(jobId: jobId, status: .completed, exitCode: 0, durationMs: 1, truncated: false)
+    }
+
+    func agentJobOutput(jobId: String, cursor: Int?) async throws -> AgentJobOutput {
+        AgentJobOutput(jobId: jobId, chunk: "", nextCursor: cursor ?? 0, eof: true, truncated: false)
+    }
+
+    func agentJobCancel(jobId: String) async throws {}
+}
+
+final class SlowAgentExecTransport: AgentExecTransport {
+    private(set) var callCount = 0
+
+    func agentExec(
+        serverId: String,
+        command: String,
+        timeoutMs: UInt32,
+        waitMs: UInt32,
+        maxOutputBytes: UInt32
+    ) async throws -> AgentExecResult {
+        callCount += 1
+        try await Task.sleep(nanoseconds: 100_000_000)
+        return AgentExecResult(
+            status: .completed,
+            serverId: serverId,
+            stdout: "ok",
+            exitCode: 0,
+            durationMs: 1,
+            jobId: "job-1"
         )
     }
 

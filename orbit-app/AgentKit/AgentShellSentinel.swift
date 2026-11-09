@@ -3,10 +3,12 @@ import Foundation
 public struct AgentShellCommandResult: Equatable, Sendable {
     public var output: String
     public var exitCode: Int32
+    public var truncated: Bool
 
-    public init(output: String, exitCode: Int32) {
+    public init(output: String, exitCode: Int32, truncated: Bool = false) {
         self.output = output
         self.exitCode = exitCode
+        self.truncated = truncated
     }
 }
 
