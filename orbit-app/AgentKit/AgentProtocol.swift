@@ -52,6 +52,21 @@ public enum AgentJSONValue: Codable, Equatable, Sendable {
         guard let data = try? JSONEncoder().encode(self) else { return nil }
         return String(data: data, encoding: .utf8)
     }
+
+    public static func encoding<T: Encodable>(_ value: T) throws -> AgentJSONValue {
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(AgentJSONValue.self, from: data)
+    }
+
+    public var numberValue: Double? {
+        if case .number(let value) = self { return value }
+        return nil
+    }
+
+    public var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
+        return nil
+    }
 }
 
 public enum AgentOp: String, Codable, Sendable {
