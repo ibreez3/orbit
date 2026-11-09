@@ -9,6 +9,7 @@ struct AgentPane: View {
 
     @State private var sessions: [AgentActiveSession] = []
     @State private var auditEvents: [AgentAuditEvent] = []
+    @State private var gatewayRunning = false
     @State private var errorMessage: String?
     @State private var revision = 0
 
@@ -17,6 +18,31 @@ struct AgentPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                SettingsGroup("网关状态") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(gatewayRunning ? Color.green : Color.gray.opacity(0.5))
+                                .frame(width: 8, height: 8)
+                            Text(gatewayRunning ? "运行中" : "已停止")
+                                .font(.system(size: 12, weight: .medium))
+                                .accessibilityIdentifier("agentGatewayStatusLabel")
+                            Spacer()
+                            Text(lastActivityLabel)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("agentGatewayLastActivity")
+                        }
+                        Text(AgentPaths.socketPath)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("agentGatewaySocketPath")
+                    }
+                }
+
                 SettingsGroup("AI Agent 接入") {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("允许 MCP / CLI Agent 接入 Orbit", isOn: $gatewayEnabled)
@@ -29,6 +55,7 @@ struct AgentPane: View {
                             Text(errorMessage)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.red)
+                                .accessibilityIdentifier("agentGatewayError")
                         }
                     }
                 }
@@ -155,7 +182,17 @@ struct AgentPane: View {
                 AgentGateway.shared.stop()
                 sessions = []
             }
+            refresh()
         }
+    }
+
+    private var lastActivityLabel: String {
+        guard let date = auditEvents.last?.timestamp else {
+            return "最后活动：暂无"
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return "最后活动：" + formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private func exposureBinding(for server: Server) -> Binding<Bool> {
@@ -182,6 +219,7 @@ struct AgentPane: View {
     }
 
     private func refresh() {
+        gatewayRunning = AgentGateway.shared.isRunning
         sessions = AgentGateway.shared.activeSessions
         auditEvents = AgentAuditStore.shared.recent(limit: 20)
         _ = revision

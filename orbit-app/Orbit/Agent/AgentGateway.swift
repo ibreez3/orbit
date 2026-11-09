@@ -84,6 +84,12 @@ final class AgentGateway {
         }
     }
 
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return socketServer != nil
+    }
+
     var hasActiveSessions: Bool {
         sessions.hasActiveSessions
     }

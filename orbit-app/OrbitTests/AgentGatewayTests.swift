@@ -3,6 +3,15 @@ import XCTest
 @testable import AgentKit
 
 final class AgentGatewayTests: XCTestCase {
+    func testIsRunningReflectsStartAndStop() throws {
+        let gateway = makeGateway(approver: FakeApprover(result: true))
+        XCTAssertFalse(gateway.isRunning)
+        try gateway.start()
+        XCTAssertTrue(gateway.isRunning)
+        gateway.stop()
+        XCTAssertFalse(gateway.isRunning)
+    }
+
     func testCallWithoutTokenIsUnauthorized() async {
         let gateway = makeGateway(approver: FakeApprover(result: true))
         let response = await gateway.handle(

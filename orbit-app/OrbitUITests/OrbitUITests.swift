@@ -59,6 +59,61 @@ final class OrbitUITests: XCTestCase {
         XCTAssertTrue(app.switches["agentGatewayEnabledToggle"].waitForExistence(timeout: 5))
     }
 
+    func testAgentSettingsShowGatewayStatus() {
+        let settings = openSettingsWindow()
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+
+        let tab = settings.buttons["AI Agent"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.click()
+
+        let status = app.staticTexts["agentGatewayStatusLabel"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        let toggle = app.switches["agentGatewayEnabledToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+
+        let initialStatus = textValue(status)
+        let initialToggle = String(describing: toggle.value)
+        if initialStatus != "运行中" {
+            toggle.click()
+            if !waitForValue(status, "运行中", timeout: 5) {
+                let error = app.staticTexts["agentGatewayError"]
+                return XCTFail(
+                    "initialStatus=\(initialStatus) initialToggle=\(initialToggle) "
+                        + "now=\(textValue(status)) toggle=\(String(describing: toggle.value)) "
+                        + "error=\(error.exists ? textValue(error) : "none")"
+                )
+            }
+        }
+        XCTAssertEqual(textValue(status), "运行中")
+
+        let socket = app.staticTexts["agentGatewaySocketPath"]
+        XCTAssertTrue(socket.exists)
+        XCTAssertTrue(textValue(socket).hasSuffix("/agent.sock"), textValue(socket))
+        XCTAssertTrue(app.staticTexts["agentGatewayLastActivity"].exists)
+
+        toggle.click()
+        XCTAssertTrue(waitForValue(status, "已停止", timeout: 5), textValue(status))
+
+        toggle.click()
+        XCTAssertTrue(waitForValue(status, "运行中", timeout: 5), textValue(status))
+    }
+
+    private func waitForValue(
+        _ element: XCUIElement,
+        _ value: String,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.exists, textValue(element) == value {
+                return true
+            }
+            usleep(200_000)
+        }
+        return false
+    }
+
     func testAgentWriteApproval() throws {
         let cli = try orbitCLIURL()
         let socketDeadline = Date().addingTimeInterval(10)
@@ -431,7 +486,10 @@ final class OrbitUITests: XCTestCase {
     }
 
     private func textValue(_ element: XCUIElement) -> String {
-        (element.value as? String) ?? element.label
+        if let value = element.value as? String, !value.isEmpty {
+            return value
+        }
+        return element.label
     }
 
     private var agentSocketURL: URL {
