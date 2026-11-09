@@ -1952,6 +1952,51 @@ pub extern "C" fn orbit_exec_command(
 }
 
 #[no_mangle]
+pub extern "C" fn orbit_agent_exec(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    command: *const c_char,
+    timeout_ms: u32,
+    wait_ms: u32,
+    max_output_bytes: u32,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || command.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let cmd = match unsafe { CStr::from_ptr(command) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(server) => server,
+        Err(_) => return -3,
+    };
+
+    // Task 15 will use wait_ms to turn long commands into jobs.
+    let _ = wait_ms;
+    let max_bytes = if max_output_bytes == 0 {
+        262_144
+    } else {
+        max_output_bytes as usize
+    };
+
+    match crate::agent::exec_agent_command(&app.pool, &server, &app.db, cmd, timeout_ms, max_bytes) {
+        Ok(result) => json_to_out(&result, out_json),
+        Err(error) => {
+            app.set_error(format!("agent exec failed: {}", error));
+            -4
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn orbit_start_port_forward(
     app: *mut OrbitApp,
     forwarding_id: *const c_char,
@@ -2714,5 +2759,33 @@ mod real_server_ffi_tests {
         orbit_app_free(app);
         unsafe { drop(Box::from_raw(buffer)) };
         println!("real server FFI smoke test passed");
+    }
+
+    #[test]
+    #[ignore]
+    fn agent_exec_captures_stdout_stderr_and_exit_code() {
+        let host = std::env::var("ORBIT_TEST_HOST").expect("ORBIT_TEST_HOST");
+        let user = std::env::var("ORBIT_TEST_USER").expect("ORBIT_TEST_USER");
+        let password = std::env::var("ORBIT_TEST_PASSWORD").expect("ORBIT_TEST_PASSWORD");
+
+        let app = Box::into_raw(Box::new(OrbitApp::new(":memory:").unwrap()));
+        let saved = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, &password))
+            .unwrap();
+        let sid = CString::new(saved.id).unwrap();
+        let cmd = CString::new("printf out; printf err >&2; exit 7").unwrap();
+        let mut out: *mut c_char = ptr::null_mut();
+
+        let rc = orbit_agent_exec(app, sid.as_ptr(), cmd.as_ptr(), 10_000, 10_000, 1_048_576, &mut out);
+        assert_eq!(rc, 0);
+        assert!(!out.is_null());
+        let json = unsafe { CStr::from_ptr(out).to_string_lossy().into_owned() };
+        assert!(json.contains("\"stdout\":\"out\""), "{json}");
+        assert!(json.contains("\"stderr\":\"err\""), "{json}");
+        assert!(json.contains("\"exitCode\":7"), "{json}");
+
+        orbit_free_string(out);
+        orbit_app_free(app);
     }
 }
