@@ -23,7 +23,7 @@ final class AgentGateway {
     }
 
     private let lock = NSLock()
-    private let sessions: AgentSessionStore
+    let sessions: AgentSessionStore
     private let approvalWait: TimeInterval
     private let socketPath: String
     private var execService: AgentCommandExecuting?
@@ -33,6 +33,8 @@ final class AgentGateway {
     private var pendingAdmissions: [String: PendingAdmission] = [:]
     private var pendingWrites: [String: PendingWrite] = [:]
     private var jobOwners: [String: String] = [:]
+    private var jobServers: [String: String] = [:]
+    private var disabledServers: Set<String> = []
 
     private init() {
         self.sessions = AgentSessionStore()
@@ -104,25 +106,64 @@ final class AgentGateway {
     func stop() {
         lock.lock()
         let server = socketServer
+        let exec = execService
+        let jobs = Array(jobOwners.keys)
         socketServer = nil
         pendingAdmissions.removeAll()
         pendingWrites.removeAll()
         jobOwners.removeAll()
+        jobServers.removeAll()
         lock.unlock()
         server?.stop()
         sessions.revokeAll()
+        cancelJobs(jobs, using: exec)
     }
 
     func applyServerExposureChange(serverId: String, enabled: Bool) {
+        lock.lock()
+        if enabled {
+            disabledServers.remove(serverId)
+        } else {
+            disabledServers.insert(serverId)
+        }
+        let exec = execService
+        let jobs = jobServers
+            .filter { $0.value == serverId }
+            .map(\.key)
+        for jobId in jobs {
+            jobOwners.removeValue(forKey: jobId)
+            jobServers.removeValue(forKey: jobId)
+        }
+        lock.unlock()
+
         sessions.revokeServer(serverId: serverId)
         if !enabled {
-            let exec = execService
-            exec?.cancelJobs(serverId: serverId)
+            cancelJobs(jobs, using: exec)
         }
     }
 
     func revokeSession(_ sessionId: String) {
+        lock.lock()
+        let exec = execService
+        let jobs = jobOwners
+            .filter { $0.value == sessionId }
+            .map(\.key)
+        for jobId in jobs {
+            jobOwners.removeValue(forKey: jobId)
+            jobServers.removeValue(forKey: jobId)
+        }
+        lock.unlock()
         sessions.revoke(sessionId: sessionId)
+        cancelJobs(jobs, using: exec)
+    }
+
+    private func cancelJobs(_ jobs: [String], using exec: AgentCommandExecuting?) {
+        guard let exec, !jobs.isEmpty else { return }
+        Task {
+            for jobId in jobs {
+                try? await exec.jobCancel(jobId: jobId)
+            }
+        }
     }
 
     func handle(_ request: AgentRequest) async -> AgentResponse {
@@ -281,7 +322,11 @@ final class AgentGateway {
         switch tool {
         case AgentToolName.listServers:
             do {
-                let value = try AgentJSONValue.encoding(execService.listServers())
+                lock.lock()
+                let disabled = disabledServers
+                lock.unlock()
+                let servers = execService.listServers().filter { !disabled.contains($0.id) }
+                let value = try AgentJSONValue.encoding(servers)
                 record(AgentAuditEvent(
                     type: "agent.tool.call",
                     sessionId: sessionId,
@@ -329,6 +374,13 @@ final class AgentGateway {
             return errorResponse(request.id, .invalidRequest, "Server name is ambiguous; use the server id")
         }
 
+        lock.lock()
+        let isDisabled = disabledServers.contains(server.id)
+        lock.unlock()
+        if isDisabled {
+            return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
+        }
+
         var requiresWrite = parsed.mode == .write
         var escalated = false
         if case .requireWrite = AgentCommandGuard.evaluate(
@@ -366,6 +418,7 @@ final class AgentGateway {
             if let jobId = result.jobId {
                 lock.lock()
                 jobOwners[jobId] = sessionId
+                jobServers[jobId] = server.id
                 lock.unlock()
             }
             record(AgentAuditEvent(
@@ -578,6 +631,7 @@ final class AgentGateway {
             try await execService.jobCancel(jobId: jobId)
             lock.lock()
             jobOwners.removeValue(forKey: jobId)
+            jobServers.removeValue(forKey: jobId)
             lock.unlock()
             return ok(request.id, .object(["status": .string("cancelled")]))
         } catch let serviceError as AgentServiceError {

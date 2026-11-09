@@ -94,6 +94,61 @@ final class AgentGatewayTests: XCTestCase {
         XCTAssertEqual(approver.writeCount, 1)
     }
 
+    func testDisablingServerRevokesWriteGrantAndRejectsCalls() async throws {
+        let approver = FakeApprover(result: true)
+        let gateway = makeGateway(
+            approver: approver,
+            servers: [.fixture(id: "srv")]
+        )
+        let session = try await approveSession(gateway)
+
+        let write = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("rm x"),
+                "mode": .string("write")
+            ]
+        ))
+        XCTAssertTrue(write.ok)
+
+        gateway.applyServerExposureChange(serverId: "srv", enabled: false)
+        XCTAssertFalse(gateway.sessions.hasWriteGrant(sessionId: session.sessionId, serverId: "srv"))
+
+        let read = await gateway.handle(callRequest(
+            id: "2",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("ls"),
+                "mode": .string("read")
+            ]
+        ))
+        XCTAssertEqual(read.error?.code, .serverNotExposed)
+    }
+
+    func testStopRevokesAllSessions() async throws {
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")]
+        )
+        let session = try await approveSession(gateway)
+        gateway.stop()
+        XCTAssertTrue(gateway.activeSessions.isEmpty)
+
+        let response = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            args: [
+                "server": .string("srv"),
+                "command": .string("ls"),
+                "mode": .string("read")
+            ]
+        ))
+        XCTAssertEqual(response.error?.code, .unauthorized)
+    }
+
     private func approveSession(_ gateway: AgentGateway) async throws -> AgentSessionCredential {
         let hello = await gateway.handle(
             AgentRequest(
