@@ -48,6 +48,18 @@ schemes:
         - OrbitUITests
 
 targets:
+  AgentKit:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: AgentKit
+    settings:
+      base:
+        PRODUCT_NAME: AgentKit
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.agentkit
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        SWIFT_VERSION: "5.9"
+
   Orbit:
     type: application
     platform: macOS
@@ -59,6 +71,7 @@ targets:
       - package: SwiftTerm
       - package: Sparkle
         product: Sparkle
+      - target: AgentKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal
@@ -105,6 +118,7 @@ targets:
       - path: OrbitTests
     dependencies:
       - target: Orbit
+      - target: AgentKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.tests
