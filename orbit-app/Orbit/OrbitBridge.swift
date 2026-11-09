@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import AppKit
 
@@ -1327,6 +1328,38 @@ class OrbitBridge {
         }
         defer { orbit_free_string(output) }
         return String(cString: output)
+    }
+
+    func agentExec(
+        serverId: String,
+        command: String,
+        timeoutMs: UInt32,
+        waitMs: UInt32,
+        maxOutputBytes: UInt32
+    ) async throws -> AgentExecResult {
+        try await runOffThread {
+            try self.ensureInitialized()
+            var outJSON: UnsafeMutablePointer<CChar>?
+            let rc = serverId.withCString { serverPtr in
+                command.withCString { commandPtr in
+                    orbit_agent_exec(
+                        self.app,
+                        serverPtr,
+                        commandPtr,
+                        timeoutMs,
+                        waitMs,
+                        maxOutputBytes,
+                        &outJSON
+                    )
+                }
+            }
+            guard rc == 0, let outJSON else {
+                throw OrbitError.apiError(rc)
+            }
+            defer { orbit_free_string(outJSON) }
+            let data = Data(String(cString: outJSON).utf8)
+            return try JSONDecoder().decode(AgentExecResult.self, from: data)
+        }
     }
 
     @discardableResult

@@ -314,6 +314,8 @@ final class AgentGateway {
             ))
             let value = try AgentJSONValue.encoding(result)
             return ok(request.id, value)
+        } catch let serviceError as AgentServiceError {
+            return errorResponse(request.id, serviceError.code, serviceError.message)
         } catch {
             return errorResponse(request.id, .invalidRequest, error.localizedDescription)
         }
