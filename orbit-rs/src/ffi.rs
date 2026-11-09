@@ -1979,20 +1979,115 @@ pub extern "C" fn orbit_agent_exec(
         Err(_) => return -3,
     };
 
-    // Task 15 will use wait_ms to turn long commands into jobs.
-    let _ = wait_ms;
     let max_bytes = if max_output_bytes == 0 {
         262_144
     } else {
         max_output_bytes as usize
     };
 
-    match crate::agent::exec_agent_command(&app.pool, &server, &app.db, cmd, timeout_ms, max_bytes) {
-        Ok(result) => json_to_out(&result, out_json),
-        Err(error) => {
-            app.set_error(format!("agent exec failed: {}", error));
-            -4
+    let (job_id, job) = crate::agent::start_agent_job(
+        server.clone(),
+        app.db_path.clone(),
+        cmd.to_string(),
+        timeout_ms,
+        max_bytes,
+    );
+    if let Ok(mut jobs) = app.agent_jobs.lock() {
+        jobs.insert(job.clone());
+    }
+
+    if job.wait_for_finish(wait_ms) {
+        let result = job.completed_output(&server.id);
+        json_to_out(&result, out_json)
+    } else {
+        let status = job.status_dto();
+        let result = crate::agent::AgentExecOutput {
+            status: "running".to_string(),
+            server_id: server.id.clone(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: -1,
+            duration_ms: status.duration_ms,
+            truncated: false,
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            job_id: Some(job_id),
+            mode: "read".to_string(),
+            escalated: false,
+        };
+        json_to_out(&result, out_json)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_job_status(
+    app: *mut OrbitApp,
+    job_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || job_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let job_id = match unsafe { CStr::from_ptr(job_id) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return -2,
+    };
+    let job = match app.agent_jobs.lock() {
+        Ok(jobs) => jobs.get(job_id),
+        Err(_) => None,
+    };
+    match job {
+        Some(job) => json_to_out(&job.status_dto(), out_json),
+        None => -3,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_job_output(
+    app: *mut OrbitApp,
+    job_id: *const c_char,
+    cursor: u64,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || job_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let job_id = match unsafe { CStr::from_ptr(job_id) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return -2,
+    };
+    let job = match app.agent_jobs.lock() {
+        Ok(jobs) => jobs.get(job_id),
+        Err(_) => None,
+    };
+    match job {
+        Some(job) => json_to_out(&job.output_dto(cursor as usize), out_json),
+        None => -3,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_job_cancel(app: *mut OrbitApp, job_id: *const c_char) -> i32 {
+    if app.is_null() || job_id.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let job_id = match unsafe { CStr::from_ptr(job_id) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return -2,
+    };
+    let job = match app.agent_jobs.lock() {
+        Ok(jobs) => jobs.get(job_id),
+        Err(_) => None,
+    };
+    match job {
+        Some(job) => {
+            job.cancel();
+            0
         }
+        None => -3,
     }
 }
 
@@ -2786,6 +2881,53 @@ mod real_server_ffi_tests {
         assert!(json.contains("\"exitCode\":7"), "{json}");
 
         orbit_free_string(out);
+        orbit_app_free(app);
+    }
+
+    #[test]
+    #[ignore]
+    fn agent_job_runs_in_background_and_can_be_polled() {
+        let host = std::env::var("ORBIT_TEST_HOST").expect("ORBIT_TEST_HOST");
+        let user = std::env::var("ORBIT_TEST_USER").expect("ORBIT_TEST_USER");
+        let password = std::env::var("ORBIT_TEST_PASSWORD").expect("ORBIT_TEST_PASSWORD");
+
+        let app = Box::into_raw(Box::new(OrbitApp::new(":memory:").unwrap()));
+        let saved = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, &password))
+            .unwrap();
+        let sid = CString::new(saved.id).unwrap();
+        let cmd = CString::new("sleep 2; echo done").unwrap();
+        let mut out: *mut c_char = ptr::null_mut();
+        let rc = orbit_agent_exec(app, sid.as_ptr(), cmd.as_ptr(), 30_000, 100, 1_048_576, &mut out);
+        assert_eq!(rc, 0);
+        let first = unsafe { CStr::from_ptr(out).to_string_lossy().into_owned() };
+        orbit_free_string(out);
+        assert!(first.contains("\"status\":\"running\""), "{first}");
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+        let job_id = value["jobId"].as_str().unwrap().to_string();
+        let job_c = CString::new(job_id.clone()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let mut status_out: *mut c_char = ptr::null_mut();
+            let rc = orbit_agent_job_status(app, job_c.as_ptr(), &mut status_out);
+            assert_eq!(rc, 0);
+            let status = unsafe { CStr::from_ptr(status_out).to_string_lossy().into_owned() };
+            orbit_free_string(status_out);
+            if status.contains("\"status\":\"completed\"") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "job did not complete: {status}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let mut output_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_agent_job_output(app, job_c.as_ptr(), 0, &mut output_out);
+        assert_eq!(rc, 0);
+        let output = unsafe { CStr::from_ptr(output_out).to_string_lossy().into_owned() };
+        orbit_free_string(output_out);
+        assert!(output.contains("done"), "{output}");
         orbit_app_free(app);
     }
 }

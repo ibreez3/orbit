@@ -144,6 +144,12 @@ ORBIT_API int32_t orbit_exec_command(struct OrbitApp *app, const char *server_id
 
 ORBIT_API int32_t orbit_agent_exec(struct OrbitApp *app, const char *server_id, const char *command, uint32_t timeout_ms, uint32_t wait_ms, uint32_t max_output_bytes, char **out_json);
 
+ORBIT_API int32_t orbit_agent_job_status(struct OrbitApp *app, const char *job_id, char **out_json);
+
+ORBIT_API int32_t orbit_agent_job_output(struct OrbitApp *app, const char *job_id, uint64_t cursor, char **out_json);
+
+ORBIT_API int32_t orbit_agent_job_cancel(struct OrbitApp *app, const char *job_id);
+
 ORBIT_API int32_t orbit_start_port_forward(struct OrbitApp *app, const char *forwarding_id, const char *server_id, uint16_t local_port, const char *remote_host, uint16_t remote_port, uint16_t *out_local_port);
 
 ORBIT_API int32_t orbit_stop_port_forward(struct OrbitApp *app, const char *forwarding_id);

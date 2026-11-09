@@ -1,4 +1,6 @@
 use std::io::{self, Read};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -6,6 +8,7 @@ use serde::Serialize;
 
 use crate::db::Database;
 use crate::models::Server;
+use crate::transport;
 use crate::transport::SessionPool;
 
 /// Result of one agent-facing command execution.
@@ -155,6 +158,397 @@ fn append_capped(target: &mut Vec<u8>, bytes: &[u8], limit: usize, truncated: &m
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentJobState {
+    Running,
+    Completed,
+    Failed,
+    TimedOut,
+    Cancelled,
+}
+
+impl AgentJobState {
+    fn as_str(self) -> &'static str {
+        match self {
+            AgentJobState::Running => "running",
+            AgentJobState::Completed => "completed",
+            AgentJobState::Failed => "failed",
+            AgentJobState::TimedOut => "timed_out",
+            AgentJobState::Cancelled => "cancelled",
+        }
+    }
+}
+
+pub struct AgentOutputBuffer {
+    data: Vec<u8>,
+    limit: usize,
+    truncated: bool,
+}
+
+impl AgentOutputBuffer {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            data: Vec::new(),
+            limit: if limit == 0 { usize::MAX } else { limit },
+            truncated: false,
+        }
+    }
+
+    pub fn push(&mut self, bytes: &[u8]) {
+        append_capped(&mut self.data, bytes, self.limit, &mut self.truncated);
+    }
+
+    pub fn read(&self, from: usize) -> (String, usize) {
+        let start = from.min(self.data.len());
+        let chunk = String::from_utf8_lossy(&self.data[start..]).into_owned();
+        (chunk, self.data.len())
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
+struct AgentJobInner {
+    state: AgentJobState,
+    exit_code: Option<i32>,
+    stdout: AgentOutputBuffer,
+    stderr: AgentOutputBuffer,
+    combined: AgentOutputBuffer,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    finished_at: Option<Instant>,
+}
+
+pub struct AgentJob {
+    id: String,
+    started: Instant,
+    cancel: AtomicBool,
+    inner: Mutex<AgentJobInner>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentJobStatusDto {
+    pub job_id: String,
+    pub status: AgentJobState,
+    pub exit_code: Option<i32>,
+    pub duration_ms: u64,
+    pub truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentJobOutputDto {
+    pub job_id: String,
+    pub chunk: String,
+    pub next_cursor: usize,
+    pub eof: bool,
+    pub truncated: bool,
+}
+
+impl AgentJob {
+    fn new(id: String, max_bytes: usize) -> Self {
+        Self {
+            id,
+            started: Instant::now(),
+            cancel: AtomicBool::new(false),
+            inner: Mutex::new(AgentJobInner {
+                state: AgentJobState::Running,
+                exit_code: None,
+                stdout: AgentOutputBuffer::new(max_bytes),
+                stderr: AgentOutputBuffer::new(max_bytes),
+                combined: AgentOutputBuffer::new(max_bytes),
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                finished_at: None,
+            }),
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn push_stdout(&self, bytes: &[u8]) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.stdout_bytes += bytes.len();
+            inner.stdout.push(bytes);
+            inner.combined.push(bytes);
+        }
+    }
+
+    fn push_stderr(&self, bytes: &[u8]) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.stderr_bytes += bytes.len();
+            inner.stderr.push(bytes);
+            inner.combined.push(bytes);
+        }
+    }
+
+    fn finish(&self, state: AgentJobState, exit_code: Option<i32>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner.state == AgentJobState::Running {
+                inner.state = state;
+                inner.exit_code = exit_code;
+                inner.finished_at = Some(Instant::now());
+            }
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    pub fn wait_for_finish(&self, wait_ms: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_millis(wait_ms as u64);
+        loop {
+            if self.is_finished() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.state != AgentJobState::Running)
+            .unwrap_or(true)
+    }
+
+    pub fn status_dto(&self) -> AgentJobStatusDto {
+        let (state, exit_code, duration_ms, truncated) = match self.inner.lock() {
+            Ok(inner) => {
+                let duration = inner
+                    .finished_at
+                    .unwrap_or_else(Instant::now)
+                    .duration_since(self.started)
+                    .as_millis() as u64;
+                (
+                    inner.state,
+                    inner.exit_code,
+                    duration,
+                    inner.combined.is_truncated(),
+                )
+            }
+            Err(_) => (AgentJobState::Failed, None, 0, false),
+        };
+        AgentJobStatusDto {
+            job_id: self.id.clone(),
+            status: state,
+            exit_code,
+            duration_ms,
+            truncated,
+        }
+    }
+
+    pub fn output_dto(&self, cursor: usize) -> AgentJobOutputDto {
+        match self.inner.lock() {
+            Ok(inner) => {
+                let (chunk, next_cursor) = inner.combined.read(cursor);
+                let eof = inner.state != AgentJobState::Running && cursor >= inner.combined.len();
+                AgentJobOutputDto {
+                    job_id: self.id.clone(),
+                    chunk,
+                    next_cursor,
+                    eof,
+                    truncated: inner.combined.is_truncated(),
+                }
+            }
+            Err(_) => AgentJobOutputDto {
+                job_id: self.id.clone(),
+                chunk: String::new(),
+                next_cursor: cursor,
+                eof: true,
+                truncated: false,
+            },
+        }
+    }
+
+    pub fn completed_output(&self, server_id: &str) -> AgentExecOutput {
+        let (state, exit_code, stdout, stderr, truncated, stdout_bytes, stderr_bytes, duration_ms) =
+            match self.inner.lock() {
+                Ok(inner) => (
+                    inner.state,
+                    inner.exit_code,
+                    inner.stdout.read(0).0,
+                    inner.stderr.read(0).0,
+                    inner.stdout.is_truncated() || inner.stderr.is_truncated(),
+                    inner.stdout_bytes,
+                    inner.stderr_bytes,
+                    inner
+                        .finished_at
+                        .unwrap_or_else(Instant::now)
+                        .duration_since(self.started)
+                        .as_millis() as u64,
+                ),
+                Err(_) => (
+                    AgentJobState::Failed,
+                    None,
+                    String::new(),
+                    String::new(),
+                    false,
+                    0,
+                    0,
+                    0,
+                ),
+            };
+        AgentExecOutput {
+            status: state.as_str().to_string(),
+            server_id: server_id.to_string(),
+            stdout,
+            stderr,
+            exit_code: exit_code.unwrap_or(-1),
+            duration_ms,
+            truncated,
+            stdout_bytes,
+            stderr_bytes,
+            job_id: None,
+            mode: "read".to_string(),
+            escalated: false,
+        }
+    }
+}
+
+pub struct AgentJobRegistry {
+    jobs: std::collections::HashMap<String, Arc<AgentJob>>,
+}
+
+impl AgentJobRegistry {
+    pub fn new() -> Self {
+        Self {
+            jobs: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, job: Arc<AgentJob>) {
+        self.jobs.insert(job.id().to_string(), job);
+    }
+
+    pub fn get(&self, job_id: &str) -> Option<Arc<AgentJob>> {
+        self.jobs.get(job_id).cloned()
+    }
+
+    pub fn remove(&mut self, job_id: &str) {
+        self.jobs.remove(job_id);
+    }
+}
+
+pub fn start_agent_job(
+    server: Server,
+    db_path: String,
+    command: String,
+    timeout_ms: u32,
+    max_bytes: usize,
+) -> (String, Arc<AgentJob>) {
+    let id = uuid::Uuid::new_v4().to_string();
+    let job = Arc::new(AgentJob::new(id.clone(), max_bytes));
+    let worker = job.clone();
+    std::thread::spawn(move || {
+        run_agent_job(worker, server, db_path, command, timeout_ms);
+    });
+    (id, job)
+}
+
+fn run_agent_job(job: Arc<AgentJob>, server: Server, db_path: String, command: String, timeout_ms: u32) {
+    let db = match Database::new(&db_path) {
+        Ok(db) => db,
+        Err(_) => {
+            job.finish(AgentJobState::Failed, None);
+            return;
+        }
+    };
+    let guard = match transport::create_session(&server, &db) {
+        Ok(guard) => guard,
+        Err(_) => {
+            job.finish(AgentJobState::Failed, None);
+            return;
+        }
+    };
+    let mut channel = match guard.session.channel_session() {
+        Ok(channel) => channel,
+        Err(_) => {
+            job.finish(AgentJobState::Failed, None);
+            return;
+        }
+    };
+    if channel.exec(&command).is_err() {
+        job.finish(AgentJobState::Failed, None);
+        return;
+    }
+    let mut stderr_stream = channel.stderr();
+    let _ = guard.session.set_blocking(false);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1) as u64);
+    let mut stdout_eof = false;
+    let mut stderr_eof = false;
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        if job.cancel.load(Ordering::Relaxed) {
+            let _ = guard.session.set_blocking(true);
+            job.finish(AgentJobState::Cancelled, None);
+            return;
+        }
+        if Instant::now() >= deadline {
+            let _ = guard.session.set_blocking(true);
+            job.finish(AgentJobState::TimedOut, None);
+            return;
+        }
+        let mut progressed = false;
+        if !stdout_eof {
+            match channel.read(&mut buffer) {
+                Ok(0) => stdout_eof = true,
+                Ok(read) => {
+                    job.push_stdout(&buffer[..read]);
+                    progressed = true;
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => {
+                    let _ = guard.session.set_blocking(true);
+                    job.finish(AgentJobState::Failed, None);
+                    return;
+                }
+            }
+        }
+        if !stderr_eof {
+            match stderr_stream.read(&mut buffer) {
+                Ok(0) => stderr_eof = true,
+                Ok(read) => {
+                    job.push_stderr(&buffer[..read]);
+                    progressed = true;
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => {
+                    let _ = guard.session.set_blocking(true);
+                    job.finish(AgentJobState::Failed, None);
+                    return;
+                }
+            }
+        }
+        if stdout_eof && stderr_eof {
+            drop(stderr_stream);
+            let _ = guard.session.set_blocking(true);
+            let exit_code = channel.exit_status().unwrap_or(-1);
+            job.finish(AgentJobState::Completed, Some(exit_code));
+            return;
+        }
+        if !progressed {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::truncate_agent_output;
@@ -171,5 +565,16 @@ mod tests {
         let (text, truncated) = truncate_agent_output("abc", 4);
         assert_eq!(text, "abc");
         assert!(!truncated);
+    }
+
+    #[test]
+    fn job_output_cursor_returns_only_new_bytes() {
+        let mut buffer = super::AgentOutputBuffer::new(16);
+        buffer.push(b"hello");
+        buffer.push(b" world");
+        let (chunk, cursor) = buffer.read(0);
+        assert_eq!(chunk, "hello world");
+        let (tail, _) = buffer.read(cursor);
+        assert_eq!(tail, "");
     }
 }

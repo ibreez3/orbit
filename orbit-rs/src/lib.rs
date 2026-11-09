@@ -1,4 +1,4 @@
-mod agent;
+pub mod agent;
 mod crypto;
 pub mod database;
 mod db;
@@ -15,8 +15,10 @@ use std::sync::Mutex;
 
 pub struct OrbitApp {
     pub db: db::Database,
+    pub db_path: String,
     pub ssh: Mutex<ssh::SshManager>,
     pub pool: transport::SessionPool,
+    pub agent_jobs: Mutex<agent::AgentJobRegistry>,
     pub last_error: Mutex<Option<String>>,
 }
 
@@ -25,8 +27,10 @@ impl OrbitApp {
         let database = db::Database::new(db_path)?;
         Ok(Self {
             db: database,
+            db_path: db_path.to_string(),
             ssh: Mutex::new(ssh::SshManager::new()),
             pool: transport::SessionPool::new(),
+            agent_jobs: Mutex::new(agent::AgentJobRegistry::new()),
             last_error: Mutex::new(None),
         })
     }
