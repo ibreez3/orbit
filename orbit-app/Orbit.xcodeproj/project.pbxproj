@@ -22,6 +22,7 @@
 		1F0EFEC8EE51D6233E5C11F1 /* MonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08F1ADE58D311170A9C63C4E /* MonitorView.swift */; };
 		277D07614AF08EA716071858 /* SnippetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E598CB14BB36E079220CE3C /* SnippetEditorView.swift */; };
 		2F169B27AC1ECA61187A4C2C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C2A8FC0F7C6CFE7D9DDFC83E /* Sparkle */; };
+		3085B50CE6786AE1F5E4BA83 /* AgentSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A21435E63648162A342ADF1 /* AgentSocketServer.swift */; };
 		331DF8F0DDCD486E80DB9B10 /* DatabaseConnectionDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */; };
 		33335E4F882F977DFA66C647 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20936134E6681D18358932B7 /* Assets.xcassets */; };
 		398CF34E25811991B83CBDD5 /* AgentProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80FE439164215EE9A977B605 /* AgentProtocolTests.swift */; };
@@ -65,10 +66,12 @@
 		9DF32B7798E75EC9D6C65195 /* TitlebarInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69739963C8FD702843B08324 /* TitlebarInteraction.swift */; };
 		9E2B307605E80CF6DDFFEF8E /* TextEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */; };
 		A397E134F5726742E4EA6B6E /* DatabaseImportMappingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 829C6E0E378F6105FD7D4738 /* DatabaseImportMappingView.swift */; };
+		A6D02056F5B024D7C2462D45 /* AgentGatewayProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92D27F2350EE9429E6A6B91 /* AgentGatewayProtocols.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		B4660E88F677A56A4AA7258B /* AssetTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC744DC1B840951E08D4FD43 /* AssetTreeView.swift */; };
 		B94BCE8782A000F9C641CAC6 /* OrbitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */; };
 		BD8751AFDB26A85C91FA208D /* KeyBindingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9CDDD2DB620818FC465CA78 /* KeyBindingsTests.swift */; };
+		C03D2C884BD824DA8F99F395 /* AgentSocketTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5026EEA6A5439C14281183 /* AgentSocketTests.swift */; };
 		C4C7001A6CC61BDA9C32CC5F /* SnippetState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B501D9CF2A7FD9520D50F015 /* SnippetState.swift */; };
 		C7105A3C1958F5D3A894FEA7 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20E9630F023416DA2028BB98 /* MainView.swift */; };
 		C75233E8337EB7D1BD0614AE /* CredentialGroupDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */; };
@@ -87,6 +90,7 @@
 		DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */; };
 		DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1530B85453C445BFC0E5E860 /* DockerView.swift */; };
 		DAE7F6E609EA79B75390ABD6 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64825B472441C790427EFF55 /* AppState.swift */; };
+		E42E58E505E6C55B9F3D6361 /* AgentSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15318C78359712DC60075326 /* AgentSocketClient.swift */; };
 		E9882767636E763FCE2F6E83 /* ServerDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E812A16C099009B7BB010371 /* ServerDialog.swift */; };
 		EAA2BC8891E34F509510BC5B /* AgentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC10C70455E88FDBA4EB0887 /* AgentModels.swift */; };
 		EE85C664EE48A8EE1FC69A4E /* catppuccin-mocha.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = B60E1CC82880DBEDD60639C0 /* catppuccin-mocha.orbit-theme */; };
@@ -133,6 +137,7 @@
 		0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialGroupDialog.swift; sourceTree = "<group>"; };
 		1215EB4D1327CCE06E1D9C04 /* ThemeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeState.swift; sourceTree = "<group>"; };
 		1530B85453C445BFC0E5E860 /* DockerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockerView.swift; sourceTree = "<group>"; };
+		15318C78359712DC60075326 /* AgentSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSocketClient.swift; sourceTree = "<group>"; };
 		1645C6C0C81FDAFDC4902413 /* AgentPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPaths.swift; sourceTree = "<group>"; };
 		169765ADEA67B3C5FC437745 /* LocalTerminalSplitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTerminalSplitTests.swift; sourceTree = "<group>"; };
 		1A9069511C0713ABE4E1A1F7 /* TextEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextEditorView.swift; sourceTree = "<group>"; };
@@ -164,7 +169,9 @@
 		57DD037D568D1130F776EA29 /* QuickTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTerminal.swift; sourceTree = "<group>"; };
 		585377F6779F972D49C67F62 /* UIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIState.swift; sourceTree = "<group>"; };
 		592ABFA32AB4754E55D7B74E /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
+		5A21435E63648162A342ADF1 /* AgentSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSocketServer.swift; sourceTree = "<group>"; };
 		5A58E42EA49E82B92FA0F9F1 /* tokyo-night.orbit-theme */ = {isa = PBXFileReference; path = "tokyo-night.orbit-theme"; sourceTree = "<group>"; };
+		5D5026EEA6A5439C14281183 /* AgentSocketTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSocketTests.swift; sourceTree = "<group>"; };
 		5E598CB14BB36E079220CE3C /* SnippetEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetEditorView.swift; sourceTree = "<group>"; };
 		5FDB5491F8D4B2E882E5F3D1 /* OrbitBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitBridge.swift; sourceTree = "<group>"; };
 		608C4CB2CE31E59855408F44 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
@@ -210,6 +217,7 @@
 		E691E1A576C579A627A7BDDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E6AC453107209B6B7049D5CA /* AIState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIState.swift; sourceTree = "<group>"; };
 		E812A16C099009B7BB010371 /* ServerDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDialog.swift; sourceTree = "<group>"; };
+		E92D27F2350EE9429E6A6B91 /* AgentGatewayProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentGatewayProtocols.swift; sourceTree = "<group>"; };
 		E9CDDD2DB620818FC465CA78 /* KeyBindingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingsTests.swift; sourceTree = "<group>"; };
 		EEA24CFFC112167739509011 /* TabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabState.swift; sourceTree = "<group>"; };
 		F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateWorkspaceTests.swift; sourceTree = "<group>"; };
@@ -308,9 +316,12 @@
 		8747EB3F06038812F35B813D /* AgentKit */ = {
 			isa = PBXGroup;
 			children = (
+				E92D27F2350EE9429E6A6B91 /* AgentGatewayProtocols.swift */,
 				FC10C70455E88FDBA4EB0887 /* AgentModels.swift */,
 				1645C6C0C81FDAFDC4902413 /* AgentPaths.swift */,
 				7596C87C64855236124175B2 /* AgentProtocol.swift */,
+				15318C78359712DC60075326 /* AgentSocketClient.swift */,
+				5A21435E63648162A342ADF1 /* AgentSocketServer.swift */,
 			);
 			path = AgentKit;
 			sourceTree = "<group>";
@@ -319,6 +330,7 @@
 			isa = PBXGroup;
 			children = (
 				80FE439164215EE9A977B605 /* AgentProtocolTests.swift */,
+				5D5026EEA6A5439C14281183 /* AgentSocketTests.swift */,
 				F0BEDF031DAA75C49B859C94 /* AppStateWorkspaceTests.swift */,
 				B6213EF2076886C18A4C1642 /* AutoReconnectSettingsTests.swift */,
 				D52EE389BCD42153873ECFD0 /* DatabaseQueryPolicyTests.swift */,
@@ -637,6 +649,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				398CF34E25811991B83CBDD5 /* AgentProtocolTests.swift in Sources */,
+				C03D2C884BD824DA8F99F395 /* AgentSocketTests.swift in Sources */,
 				40F5DBD740966DF62EF019BA /* AppStateWorkspaceTests.swift in Sources */,
 				40B788AE679C5858964BCDA0 /* AutoReconnectSettingsTests.swift in Sources */,
 				87E0B5E52149ADF923FAEE93 /* DatabaseQueryPolicyTests.swift in Sources */,
@@ -665,9 +678,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A6D02056F5B024D7C2462D45 /* AgentGatewayProtocols.swift in Sources */,
 				EAA2BC8891E34F509510BC5B /* AgentModels.swift in Sources */,
 				5272BA7530980CE23A00C910 /* AgentPaths.swift in Sources */,
 				3ED37C1987CA409F4CEA8972 /* AgentProtocol.swift in Sources */,
+				E42E58E505E6C55B9F3D6361 /* AgentSocketClient.swift in Sources */,
+				3085B50CE6786AE1F5E4BA83 /* AgentSocketServer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
