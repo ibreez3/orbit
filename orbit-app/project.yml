@@ -26,6 +26,7 @@ schemes:
       targets:
         Orbit: all
         OrbitTests: [test]
+        OrbitMCP: [build]
     test:
       config: Debug
       targets:
@@ -60,6 +61,20 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         SWIFT_VERSION: "5.9"
 
+  OrbitMCP:
+    type: tool
+    platform: macOS
+    sources:
+      - path: OrbitMCP
+    dependencies:
+      - target: AgentKit
+    settings:
+      base:
+        PRODUCT_NAME: orbit-mcp
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.mcp
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        SWIFT_VERSION: "5.9"
+
   Orbit:
     type: application
     platform: macOS
@@ -72,6 +87,9 @@ targets:
       - package: Sparkle
         product: Sparkle
       - target: AgentKit
+      - target: OrbitMCP
+        link: false
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal
@@ -111,6 +129,14 @@ targets:
             - arm64
           ONLY_ACTIVE_ARCH: true
     MACOSX_DEPLOYMENT_TARGET: "13.0"
+    postBuildScripts:
+      - name: Embed Agent tools
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS"
+          cp "$BUILT_PRODUCTS_DIR/orbit-mcp" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/orbit-mcp"
+          chmod +x "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/orbit-mcp"
   OrbitTests:
     type: bundle.unit-test
     platform: macOS
