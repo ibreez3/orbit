@@ -52,7 +52,9 @@
 		51ED69E7B6B7C26ABC288A3E /* dark.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = E360B425AAB16860239DB977 /* dark.orbit-theme */; };
 		5272BA7530980CE23A00C910 /* AgentPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1645C6C0C81FDAFDC4902413 /* AgentPaths.swift */; };
 		534C5E86FFF0223C0D2D902D /* AgentApprovalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04806DF45728DE778BC3C5EB /* AgentApprovalView.swift */; };
+		55045A8BA497804073E4C8A2 /* AgentCommandGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F196F9F9B09A44298C536D /* AgentCommandGuard.swift */; };
 		573C30D09C828B68CADA36C0 /* AgentExposureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17F197E4C5C9382564289EB /* AgentExposureStore.swift */; };
+		5846F8EA304B10CAFDB973B0 /* AgentCommandGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50977BA1CA08845419B05632 /* AgentCommandGuardTests.swift */; };
 		5C8E4D6408CF585F21922EE5 /* SftpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49216EECC7DFB1EC893159AF /* SftpView.swift */; };
 		61576B4162B628D517DD81B5 /* dracula.orbit-theme in Resources */ = {isa = PBXBuildFile; fileRef = 3FADD919EE5ECC5150989E91 /* dracula.orbit-theme */; };
 		65E634D64926AEFC05F1E0EC /* ThemeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1215EB4D1327CCE06E1D9C04 /* ThemeState.swift */; };
@@ -225,6 +227,7 @@
 		495DCA72659439056D676B45 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		4B00536A20B44AB3A133B01C /* PaneNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneNavigationTests.swift; sourceTree = "<group>"; };
 		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		50977BA1CA08845419B05632 /* AgentCommandGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCommandGuardTests.swift; sourceTree = "<group>"; };
 		55E803F410398610C4BEAD1D /* WorkbenchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchModels.swift; sourceTree = "<group>"; };
 		57D81C98981B39C0E6992397 /* TerminalSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettingsTests.swift; sourceTree = "<group>"; };
 		57DD037D568D1130F776EA29 /* QuickTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTerminal.swift; sourceTree = "<group>"; };
@@ -255,6 +258,7 @@
 		94DB15AA26D20B36334209E7 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		95478DCB1F885FA5798B86BF /* ToolState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolState.swift; sourceTree = "<group>"; };
 		9FF3420E48A469CAC55C0629 /* AgentAuditStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAuditStore.swift; sourceTree = "<group>"; };
+		A6F196F9F9B09A44298C536D /* AgentCommandGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCommandGuard.swift; sourceTree = "<group>"; };
 		AA0E97AE18D6AF113D5ECCC8 /* Orbit.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Orbit.entitlements; sourceTree = "<group>"; };
 		AC744DC1B840951E08D4FD43 /* AssetTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetTreeView.swift; sourceTree = "<group>"; };
 		AD9E625B5011E96DB321FA8E /* InventoryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryState.swift; sourceTree = "<group>"; };
@@ -420,6 +424,7 @@
 			isa = PBXGroup;
 			children = (
 				E73D5A3FFE0153BFE57D3CC0 /* AgentCLI.swift */,
+				A6F196F9F9B09A44298C536D /* AgentCommandGuard.swift */,
 				C17F197E4C5C9382564289EB /* AgentExposureStore.swift */,
 				E92D27F2350EE9429E6A6B91 /* AgentGatewayProtocols.swift */,
 				2C6669732BFEEAD953FA5073 /* AgentMCP.swift */,
@@ -440,6 +445,7 @@
 			children = (
 				B8C383A72BDAECEBA2C71E94 /* AgentAuditStoreTests.swift */,
 				AF4F29BB5F1F92CF4B7328C9 /* AgentCLITests.swift */,
+				50977BA1CA08845419B05632 /* AgentCommandGuardTests.swift */,
 				D3BBE5388C54379A04E8087F /* AgentExecServiceTests.swift */,
 				7817C3A34BF04245FDD0A81E /* AgentExposureStoreTests.swift */,
 				8F33FD30E13335947C8C07EA /* AgentGatewayTests.swift */,
@@ -861,6 +867,7 @@
 			files = (
 				3FE7F21323586B62E256CE84 /* AgentAuditStoreTests.swift in Sources */,
 				2F7FBFB5075B2865B186E2EF /* AgentCLITests.swift in Sources */,
+				5846F8EA304B10CAFDB973B0 /* AgentCommandGuardTests.swift in Sources */,
 				746E9C3F866A6DAE61554509 /* AgentExecServiceTests.swift in Sources */,
 				A109EBCB2221F949146ED3DD /* AgentExposureStoreTests.swift in Sources */,
 				1B827A8396659F9C6D544346 /* AgentGatewayTests.swift in Sources */,
@@ -907,6 +914,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C7DE15179C37B50776E2784D /* AgentCLI.swift in Sources */,
+				55045A8BA497804073E4C8A2 /* AgentCommandGuard.swift in Sources */,
 				573C30D09C828B68CADA36C0 /* AgentExposureStore.swift in Sources */,
 				A6D02056F5B024D7C2462D45 /* AgentGatewayProtocols.swift in Sources */,
 				0945CD7E5639506981BB3909 /* AgentMCP.swift in Sources */,
