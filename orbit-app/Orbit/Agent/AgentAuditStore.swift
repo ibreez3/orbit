@@ -1,7 +1,7 @@
 import AgentKit
 import Foundation
 
-final class AgentAuditStore {
+final class AgentAuditStore: AgentAuditRecording {
     static let shared = AgentAuditStore(logURL: AgentPaths.auditLogURL)
 
     private let logURL: URL

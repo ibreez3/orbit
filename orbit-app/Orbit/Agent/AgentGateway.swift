@@ -105,6 +105,10 @@ final class AgentGateway {
         }
     }
 
+    func revokeSession(_ sessionId: String) {
+        sessions.revoke(sessionId: sessionId)
+    }
+
     func handle(_ request: AgentRequest) async -> AgentResponse {
         switch request.op {
         case .hello:

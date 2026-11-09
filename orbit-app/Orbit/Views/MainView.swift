@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 struct MainView: View {
@@ -87,6 +88,7 @@ struct MainView: View {
         .onAppear {
             installWorkspaceKeyMonitor()
             titlebarInteraction.install { workspaceWindowIdentity.windowNumber }
+            configureAgentGateway()
             if inventoryState.servers.isEmpty { appState.loadServers() }
             if inventoryState.credentialGroups.isEmpty { appState.loadCredentialGroups() }
             if inventoryState.databaseConnections.isEmpty { appState.loadDatabaseConnections() }
@@ -529,6 +531,28 @@ struct MainView: View {
     private func openWorkspaceEntryIfActive(_ entry: WorkspaceEntryPoint) {
         guard workspaceWindowIdentity.windowNumber == NSApp.keyWindow?.windowNumber else { return }
         appState.openWorkspaceEntry(entry)
+    }
+
+    private func configureAgentGateway() {
+        let service = AgentExecService(
+            transport: OrbitBridge.shared,
+            inventory: { appState.servers },
+            organization: { appState.serverOrganization },
+            exposure: AgentExposureStore.shared
+        )
+        AgentGateway.shared.configure(
+            execService: service,
+            approval: AgentApprovalController.shared,
+            audit: AgentAuditStore.shared
+        )
+        let enabled = UserDefaults.standard.object(forKey: "agentGatewayEnabled") as? Bool ?? true
+        if enabled {
+            do {
+                try AgentGateway.shared.start()
+            } catch {
+                print("[Orbit] Failed to start agent gateway: \(error)")
+            }
+        }
     }
 
     private func installWorkspaceKeyMonitor() {

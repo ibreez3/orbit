@@ -40,6 +40,16 @@ final class OrbitUITests: XCTestCase {
         XCTAssertFalse(palette.waitForExistence(timeout: 2))
     }
 
+    func testAgentSettingsExposeGatewayControls() {
+        let settings = openSettingsWindow()
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+
+        let tab = settings.buttons["AI Agent"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.click()
+        XCTAssertTrue(app.switches["agentGatewayEnabledToggle"].waitForExistence(timeout: 5))
+    }
+
     func testAddServerDialogLayoutAndValidation() {
         app.buttons["homeAddServerButton"].click()
 

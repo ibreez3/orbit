@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 struct ServerDialog: View {
@@ -164,6 +165,24 @@ struct ServerDialog: View {
             HStack(alignment: .top, spacing: 10) {
                 formLabel("标签")
                 tagsContent
+            }
+            if let serverId = targetServerId {
+                HStack(spacing: 10) {
+                    formLabel("AI 访问")
+                    Toggle("允许 AI Agent 使用此服务器", isOn: Binding(
+                        get: { AgentExposureStore.shared.isEnabled(serverId: serverId) },
+                        set: { enabled in
+                            AgentExposureStore.shared.setEnabled(enabled, serverId: serverId)
+                            AgentGateway.shared.applyServerExposureChange(
+                                serverId: serverId,
+                                enabled: enabled
+                            )
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .font(.system(size: 12))
+                    Spacer(minLength: 0)
+                }
             }
         }
     }

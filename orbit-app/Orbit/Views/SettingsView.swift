@@ -8,6 +8,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case keybindings = "快捷键"
     case keywords = "关键词高亮"
     case ai = "AI 助手"
+    case agent = "AI Agent"
     case connection = "连接"
     case monitor = "监控"
     case database = "数据库"
@@ -23,6 +24,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .keybindings:   return "keyboard"
         case .keywords:      return "text.word.spacing"
         case .ai:            return "sparkles"
+        case .agent:         return "cpu"
         case .connection:    return "network"
         case .monitor:       return "gauge.with.dots.needle.33percent"
         case .database:      return "cylinder"
@@ -83,6 +85,7 @@ struct SettingsView: View {
         case .keybindings:   KeybindingsPane()
         case .keywords:      KeywordsPane(appState: appState)
         case .ai:            AIPane(appState: appState)
+        case .agent:         AgentPane(appState: appState)
         case .connection:    ConnectionPane(appState: appState)
         case .monitor:       MonitorPane()
         case .database:      DatabasePane()
@@ -809,7 +812,7 @@ private struct SettingsHeader: View {
     }
 }
 
-private struct SettingsGroup<Content: View>: View {
+struct SettingsGroup<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
     init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
