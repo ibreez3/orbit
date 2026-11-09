@@ -2,18 +2,18 @@
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
   <channel>
-    <title>Orbit v0.0.11-pre</title>
+    <title>Orbit v0.0.11-pre.1</title>
     <link>https://github.com/ibreez3/orbit/releases</link>
     <description>Orbit macOS pre-release updates</description>
     <language>zh-CN</language>
     <item>
       <title>Orbit v0.0.5-pre.1</title>
-      <sparkle:releaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.11-pre</sparkle:releaseNotesLink>
-      <pubDate>Mon, 09 Nov 2026 10:33:17 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.11-pre/Orbit-v0.0.11-pre-AppleSilicon.dmg" sparkle:version="11" sparkle:shortVersionString="0.0.11-pre" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="qe04dOowbJSqlCLaUs0FpXzk06stEGvyvWtHEH/FC11Ie3IrD4Gc/LGTyzvO6qHjpxACsnnvikSwKatpvG1iDw==" length="15106145" type="application/x-apple-diskimage"></enclosure>
+      <sparkle:releaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.11-pre.1</sparkle:releaseNotesLink>
+      <pubDate>Mon, 09 Nov 2026 11:02:30 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.11-pre.1/Orbit-v0.0.11-pre.1-AppleSilicon.dmg" sparkle:version="12" sparkle:shortVersionString="0.0.11-pre.1" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="iARd5kjgl6zm7V2yi0/PEuEhHrhi8WQh+Aten4Z/kEtMKGOml+LF1xuWESQmrSKQZEAfBH2nfNeolIPfJT90DA==" length="15107490" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: ElrPX/E+VvM3qGgJPQ4TH1aJ3XT5KQcZRNnq5jj5+c0aW9fICP77Tbk3KLZjkeTqoMBVbG8iQ8hx8G6ORR7OBA==
-length: 1278
+edSignature: UHIvFGLu9anvfRpPb9/BgM304SYem9+zhjrVvattE6GJHjAdXLgkwXoxt/K0Wbgcnw/F88dzWrp3WvPKiz36Aw==
+length: 1288
 -->
