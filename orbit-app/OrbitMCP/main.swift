@@ -36,7 +36,10 @@ let input = FileHandle.standardInput
 let output = FileHandle.standardOutput
 
 while true {
-    let chunk = input.readData(ofLength: 4096)
+    // availableData returns as soon as any input is available. readData(ofLength:)
+    // waits for the full length (or EOF), which deadlocks MCP clients that keep
+    // stdin open while waiting for initialize.
+    let chunk = input.availableData
     if chunk.isEmpty { break }
     buffer.append(chunk)
     while let newline = buffer.firstIndex(of: 0x0A) {
