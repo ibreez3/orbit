@@ -193,7 +193,7 @@ jobs:
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Orbit $TAG" \
-              --prerelease \
+              --latest \
               --notes "Orbit macOS preview release."
           fi
           gh release upload "$TAG" "${{ steps.dmg.outputs.path }}" --repo "$GITHUB_REPOSITORY" --clobber
