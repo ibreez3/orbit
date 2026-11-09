@@ -27,7 +27,7 @@ public enum AgentCLI {
         stderr: (String) -> Void
     ) throws {
         guard let command = arguments.first else {
-            throw AgentCLIError.usage("Usage: orbit-cli <auth|servers|exec|job> ...")
+            throw AgentCLIError.usage("Usage: orbit-cli <auth|servers|exec|job|shell> ...")
         }
         let rest = Array(arguments.dropFirst())
         switch command {
@@ -39,6 +39,8 @@ public enum AgentCLI {
             try runExec(rest, client: client, sessions: sessions, stdout: stdout)
         case "job":
             try runJob(rest, client: client, sessions: sessions, stdout: stdout)
+        case "shell":
+            try runShell(rest, client: client, sessions: sessions, stdout: stdout)
         default:
             throw AgentCLIError.usage("Unknown command: \(command)")
         }
@@ -169,6 +171,59 @@ public enum AgentCLI {
 
         let result = try client.call(
             tool: AgentToolName.exec,
+            args: .object(argumentsObject),
+            session: session
+        )
+        stdout(result.jsonString ?? "{}")
+    }
+
+    private static func runShell(
+        _ arguments: [String],
+        client: AgentGatewayCalling,
+        sessions: AgentSessionFileStore,
+        stdout: (String) -> Void
+    ) throws {
+        guard let subcommand = arguments.first else {
+            throw AgentCLIError.usage("Usage: orbit-cli shell <open|exec|close> ...")
+        }
+        let parsed = parse(Array(arguments.dropFirst()))
+
+        var argumentsObject: [String: AgentJSONValue] = [:]
+        let tool: String
+        switch subcommand {
+        case "open":
+            guard let server = parsed.options["--server"], !server.isEmpty else {
+                throw AgentCLIError.usage("shell open requires --server")
+            }
+            argumentsObject["server"] = .string(server)
+            tool = AgentToolName.shellOpen
+        case "exec":
+            guard let shellId = parsed.options["--shell"], !shellId.isEmpty else {
+                throw AgentCLIError.usage("shell exec requires --shell <id>")
+            }
+            let command = parsed.positional.joined(separator: " ")
+            guard !command.isEmpty else {
+                throw AgentCLIError.usage("shell exec requires a command after --")
+            }
+            argumentsObject["shellId"] = .string(shellId)
+            argumentsObject["command"] = .string(command)
+            if let value = parsed.options["--timeout-ms"], let number = Double(value) {
+                argumentsObject["timeoutMs"] = .number(number)
+            }
+            tool = AgentToolName.shellExec
+        case "close":
+            guard let shellId = parsed.options["--shell"], !shellId.isEmpty else {
+                throw AgentCLIError.usage("shell close requires --shell <id>")
+            }
+            argumentsObject["shellId"] = .string(shellId)
+            tool = AgentToolName.shellClose
+        default:
+            throw AgentCLIError.usage("Unknown shell command: \(subcommand)")
+        }
+
+        let session = try resolveSession(parsed, sessions: sessions)
+        let result = try client.call(
+            tool: tool,
             args: .object(argumentsObject),
             session: session
         )

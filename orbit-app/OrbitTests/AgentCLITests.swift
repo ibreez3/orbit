@@ -101,6 +101,50 @@ final class AgentCLITests: XCTestCase {
         XCTAssertEqual(client.lastArgs?.objectValue?["jobId"]?.stringValue, "j")
     }
 
+    func testShellOpenExecCloseWritesJSON() throws {
+        let client = FakeGatewayClient()
+        let sessions = try makeSessions()
+        try saveSession(sessions)
+        var output: [String] = []
+
+        try AgentCLI.run(
+            arguments: ["shell", "open", "--server", "srv", "--session", "s"],
+            client: client,
+            sessions: sessions,
+            stdout: { output.append($0) },
+            stderr: { _ in }
+        )
+        XCTAssertTrue(output.joined().contains("shellId"))
+        XCTAssertEqual(client.lastTool, AgentToolName.shellOpen)
+        XCTAssertEqual(client.lastArgs?.objectValue?["server"]?.stringValue, "srv")
+
+        output.removeAll()
+        try AgentCLI.run(
+            arguments: [
+                "shell", "exec", "--shell", "shell-1", "--session", "s", "--", "echo", "hi"
+            ],
+            client: client,
+            sessions: sessions,
+            stdout: { output.append($0) },
+            stderr: { _ in }
+        )
+        XCTAssertTrue(output.joined().contains("output"))
+        XCTAssertEqual(client.lastTool, AgentToolName.shellExec)
+        XCTAssertEqual(client.lastArgs?.objectValue?["shellId"]?.stringValue, "shell-1")
+        XCTAssertEqual(client.lastArgs?.objectValue?["command"]?.stringValue, "echo hi")
+
+        output.removeAll()
+        try AgentCLI.run(
+            arguments: ["shell", "close", "--shell", "shell-1", "--session", "s"],
+            client: client,
+            sessions: sessions,
+            stdout: { output.append($0) },
+            stderr: { _ in }
+        )
+        XCTAssertEqual(client.lastTool, AgentToolName.shellClose)
+        XCTAssertEqual(client.lastArgs?.objectValue?["shellId"]?.stringValue, "shell-1")
+    }
+
     private func makeSessions() throws -> AgentSessionFileStore {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("cli-\(UUID().uuidString)", isDirectory: true)

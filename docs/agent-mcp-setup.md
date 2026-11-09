@@ -19,6 +19,7 @@ claude mcp add orbit -- /Applications/Orbit.app/Contents/MacOS/orbit-mcp
 - `orbit_list_servers`
 - `orbit_exec`
 - `orbit_job_status` / `orbit_job_output` / `orbit_job_cancel`
+- `orbit_shell_open` / `orbit_shell_exec` / `orbit_shell_close`
 - `orbit_approval_status`
 
 当前阶段只提供通用执行能力，不提供 `orbit_list_containers`、`orbit_docker_logs` 等专用工具。AI 直接执行：
@@ -58,9 +59,24 @@ export ORBIT_AGENT_SESSION=<sessionId>
 /Applications/Orbit.app/Contents/MacOS/orbit-cli job status --session <sessionId> --job <jobId>
 /Applications/Orbit.app/Contents/MacOS/orbit-cli job output --session <sessionId> --job <jobId> --cursor 0
 /Applications/Orbit.app/Contents/MacOS/orbit-cli job cancel --session <sessionId> --job <jobId>
+
+# 持久 shell（写能力，首次需要写授权；保持 cd/环境变量）
+/Applications/Orbit.app/Contents/MacOS/orbit-cli shell open --session <sessionId> --server <服务器名>
+/Applications/Orbit.app/Contents/MacOS/orbit-cli shell exec --session <sessionId> --shell <shellId> -- "pwd; ls"
+/Applications/Orbit.app/Contents/MacOS/orbit-cli shell exec --session <sessionId> --shell <shellId> -- "docker exec -it <container> sh"
+/Applications/Orbit.app/Contents/MacOS/orbit-cli shell close --session <sessionId> --shell <shellId>
 ```
 
 `orbit_exec` 在 `waitMs` 内没有结束时返回 `jobId`。MCP 客户端用 `orbit_job_status` 查看状态，用 `orbit_job_output` 从 `cursor` 开始读取增量输出，用 `orbit_job_cancel` 终止任务。CLI 调用可以传入 `--wait-ms` 控制等待时间。
+
+## 持久 shell
+
+一次性排查优先用 `orbit_exec`（读操作无需确认）。需要保持 `cd`、环境变量，或进入容器交互式 shell 时，才打开持久 shell：
+
+1. `orbit_shell_open` / `orbit-cli shell open` 需要该服务器的写授权；首次会弹一次面板，本会话内该服务器后续 shell 不再询问。
+2. `orbit_shell_exec` / `orbit-cli shell exec` 会等待命令完成标记，最多 50 秒；超时返回 `shell_timeout`，命令可能仍在运行。此时应关闭 shell，或改用一次性 job。
+3. `orbit_shell_close` / `orbit-cli shell close` 关闭 channel；会话撤销、服务器从 AI 暴露中关闭或 Orbit 退出时也会自动关闭。
+4. 进入容器：先打开 shell，再执行 `docker exec -it <container> sh`；后续 `shell exec` 命令会进入该容器 shell，关闭 shell 即退出。
 
 ## 授权模型
 
@@ -84,3 +100,5 @@ export ORBIT_AGENT_SESSION=<sessionId>
 - **没有服务器**：检查服务器的“允许 AI 访问”开关，以及服务器是否已保存。
 - **会话过期**：重新执行 `orbit-cli auth` 或重新调用工具触发接入审批。
 - **Claude Code 工具超时**：所有调用约 55 秒内返回；长命令会返回 job id，通过 `orbit_job_status` / `orbit_job_output` 轮询。
+- **shell 超时**：`orbit_shell_exec` 最多等待 50 秒；命令可能仍在运行，关闭 shell 或改用 `orbit_exec` 的 job 语义。
+- **shell 不存在**：会话撤销、服务器从 AI 暴露中关闭或 Orbit 退出都会关闭 shell；重新打开即可。

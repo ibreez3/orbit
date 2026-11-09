@@ -24,12 +24,16 @@ public struct AgentShellSentinel: Sendable {
     public func consume(buffer: inout String) -> AgentShellCommandResult? {
         let markerPrefix = "__ORBIT_DONE_\(uuid)__"
         var lineStart = buffer.startIndex
-        while let newline = buffer[lineStart...].firstIndex(of: "\n") {
+        // A PTY normally produces CRLF. Swift treats "\r\n" as one Character,
+        // so searching only for "\n" would never find its line boundaries.
+        while let newline = buffer[lineStart...].firstIndex(where: {
+            $0 == "\n" || $0 == "\r\n"
+        }) {
             let line = buffer[lineStart..<newline]
             if line.hasPrefix(markerPrefix),
                let exitCode = Int32(line.dropFirst(markerPrefix.count)) {
                 var output = String(buffer[..<lineStart])
-                if output.hasSuffix("\n") {
+                if output.hasSuffix("\r\n") || output.hasSuffix("\n") {
                     output.removeLast()
                 }
                 buffer = String(buffer[buffer.index(after: newline)...])

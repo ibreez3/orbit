@@ -173,6 +173,41 @@ final class AgentGatewayTests: XCTestCase {
         XCTAssertEqual(shells.closed, [shellId])
     }
 
+    func testDisablingServerClosesItsShells() async throws {
+        let shells = FakeShellManager()
+        let gateway = makeGateway(
+            approver: FakeApprover(result: true),
+            servers: [.fixture(id: "srv")],
+            shellManager: shells
+        )
+        let session = try await approveSession(gateway)
+        let open = await gateway.handle(callRequest(
+            id: "1",
+            session: session,
+            tool: AgentToolName.shellOpen,
+            args: ["server": .string("srv")]
+        ))
+        guard case .object(let object)? = open.result,
+              let shellId = object["shellId"]?.stringValue else {
+            return XCTFail("expected shellId, got \(String(describing: open))")
+        }
+
+        gateway.applyServerExposureChange(serverId: "srv", enabled: false)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(shells.closeAllServerIds, ["srv"])
+
+        let exec = await gateway.handle(callRequest(
+            id: "2",
+            session: session,
+            tool: AgentToolName.shellExec,
+            args: [
+                "shellId": .string(shellId),
+                "command": .string("echo hi")
+            ]
+        ))
+        XCTAssertNotNil(exec.error)
+    }
+
     func testExpiredSessionClosesItsShells() async throws {
         let clock = MutableClock()
         let sessions = AgentSessionStore(

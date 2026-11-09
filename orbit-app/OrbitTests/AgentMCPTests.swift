@@ -108,6 +108,12 @@ final class FakeGatewayClient: AgentGatewayCalling {
             return .object(["chunk": .string(""), "nextCursor": .number(0), "eof": .bool(false)])
         case AgentToolName.jobCancel:
             return .object(["status": .string("cancelled")])
+        case AgentToolName.shellOpen:
+            return .object(["shellId": .string("shell-1")])
+        case AgentToolName.shellExec:
+            return .object(["output": .string("hi"), "exitCode": .number(0)])
+        case AgentToolName.shellClose:
+            return .object(["status": .string("closed")])
         default:
             return .object(["servers": .array([])])
         }
