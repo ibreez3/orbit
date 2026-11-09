@@ -40,6 +40,32 @@ final class OrbitUITests: XCTestCase {
         XCTAssertFalse(palette.waitForExistence(timeout: 2))
     }
 
+    func testAddServerDialogLayoutAndValidation() {
+        app.buttons["homeAddServerButton"].click()
+
+        let name = app.textFields["serverNameField"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["serverHostField"].exists)
+        XCTAssertTrue(app.textFields["serverUsernameField"].exists)
+        XCTAssertTrue(app.secureTextFields["serverPasswordField"].exists)
+        XCTAssertTrue(app.buttons["serverTestButton"].exists)
+        XCTAssertTrue(app.buttons["serverCancelButton"].exists)
+
+        let save = app.buttons["serverSaveButton"]
+        XCTAssertTrue(save.exists)
+        XCTAssertFalse(save.isEnabled)
+
+        paste("Dialog Test", into: name)
+        paste("192.168.1.10", into: app.textFields["serverHostField"])
+        paste("tester", into: app.textFields["serverUsernameField"])
+
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: save)
+        waitForExpectations(timeout: 5)
+
+        app.buttons["serverCancelButton"].click()
+        XCTAssertTrue(name.waitForNonExistence(timeout: 5))
+    }
+
     func testDoubleClickTitlebarTogglesZoom() {
         let window = app.windows["Orbit"]
         XCTAssertTrue(window.waitForExistence(timeout: 10))
@@ -161,6 +187,8 @@ final class OrbitUITests: XCTestCase {
         let recording = app.staticTexts["keybindingRecordingStatus"]
         let overlayAppeared = recording.waitForExistence(timeout: 2)
         XCTAssertTrue(overlayAppeared, "clicking a keybinding row should start recording; \(rowInfo)")
+        app.activate()
+        usleep(200_000)
         app.typeKey("j", modifierFlags: .command)
         sleep(1)
         let updatedRow = app.buttons["keybinding-commandPalette"]
@@ -174,6 +202,8 @@ final class OrbitUITests: XCTestCase {
         app.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(settings.waitForNonExistence(timeout: 5))
 
+        app.activate()
+        usleep(200_000)
         app.typeKey("j", modifierFlags: .command)
         XCTAssertTrue(
             app.textFields["commandPaletteSearchField"].waitForExistence(timeout: 5),

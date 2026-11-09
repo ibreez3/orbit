@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [v0.0.10-pre] - 2026-11-09
+
+### Changed
+- Redesigned the Add Server dialog around a consistent two-column form: aligned labels and fields, grouped basic/connection/authentication sections, segmented pickers for jump host and authentication source/method, inline tag chips, and a clear test/cancel/save footer.
+- The dialog now expands for private-key authentication so the key editor and passphrase stay visible, and it supports Return to save and Escape to cancel.
+
 ## [v0.0.9-pre] - 2026-11-09
 
 ### Changed
