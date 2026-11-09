@@ -103,7 +103,7 @@ public enum AgentErrorCode: String, Codable, Sendable {
     case shellTimeout = "shell_timeout"
 }
 
-public struct AgentErrorBody: Codable, Equatable, Sendable {
+public struct AgentErrorBody: Codable, Equatable, Sendable, Error {
     public var code: AgentErrorCode
     public var message: String
 

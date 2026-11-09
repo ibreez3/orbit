@@ -29,6 +29,7 @@ final class AgentGateway {
     private var execService: AgentCommandExecuting?
     private var approval: AgentApprovalPresenting?
     private var audit: AgentAuditRecording?
+    private var shellManager: AgentShellManaging?
     private var socketServer: AgentSocketServer?
     private var pendingAdmissions: [String: PendingAdmission] = [:]
     private var pendingWrites: [String: PendingWrite] = [:]
@@ -48,7 +49,8 @@ final class AgentGateway {
         sessions: AgentSessionStore = AgentSessionStore(),
         audit: AgentAuditRecording,
         approvalWait: TimeInterval = 5,
-        socketPath: String = AgentPaths.socketPath
+        socketPath: String = AgentPaths.socketPath,
+        shellManager: AgentShellManaging? = nil
     ) {
         self.execService = execService
         self.approval = approval
@@ -56,18 +58,28 @@ final class AgentGateway {
         self.audit = audit
         self.approvalWait = approvalWait
         self.socketPath = socketPath
+        self.shellManager = shellManager
     }
 
     func configure(
         execService: AgentCommandExecuting,
         approval: AgentApprovalPresenting,
-        audit: AgentAuditRecording
+        audit: AgentAuditRecording,
+        shellManager: AgentShellManaging? = nil
     ) {
         lock.lock()
         self.execService = execService
         self.approval = approval
         self.audit = audit
+        let previous = self.shellManager
+        let manager = shellManager
+            ?? previous
+            ?? AgentShellManager(transport: OrbitBridge.shared, sessions: sessions)
+        self.shellManager = manager
         lock.unlock()
+        if let previous, previous !== manager {
+            Task { await previous.closeAll() }
+        }
     }
 
     var hasActiveSessions: Bool {
@@ -107,6 +119,7 @@ final class AgentGateway {
         lock.lock()
         let server = socketServer
         let exec = execService
+        let shells = shellManager
         let jobs = Array(jobOwners.keys)
         socketServer = nil
         pendingAdmissions.removeAll()
@@ -117,6 +130,7 @@ final class AgentGateway {
         server?.stop()
         sessions.revokeAll()
         cancelJobs(jobs, using: exec)
+        Task { await shells?.closeAll() }
     }
 
     func applyServerExposureChange(serverId: String, enabled: Bool) {
@@ -127,6 +141,7 @@ final class AgentGateway {
             disabledServers.insert(serverId)
         }
         let exec = execService
+        let shells = shellManager
         let jobs = jobServers
             .filter { $0.value == serverId }
             .map(\.key)
@@ -139,12 +154,14 @@ final class AgentGateway {
         sessions.revokeServer(serverId: serverId)
         if !enabled {
             cancelJobs(jobs, using: exec)
+            Task { await shells?.closeAll(serverId: serverId) }
         }
     }
 
     func revokeSession(_ sessionId: String) {
         lock.lock()
         let exec = execService
+        let shells = shellManager
         let jobs = jobOwners
             .filter { $0.value == sessionId }
             .map(\.key)
@@ -155,6 +172,7 @@ final class AgentGateway {
         lock.unlock()
         sessions.revoke(sessionId: sessionId)
         cancelJobs(jobs, using: exec)
+        Task { await shells?.closeAll(sessionId: sessionId) }
     }
 
     private func cancelJobs(_ jobs: [String], using exec: AgentCommandExecuting?) {
@@ -311,6 +329,19 @@ final class AgentGateway {
         case .unauthorized:
             return errorResponse(request.id, .unauthorized, "Invalid agent session token")
         case .expired:
+            let shells = currentShellManager()
+            lock.lock()
+            let exec = execService
+            let jobs = jobOwners
+                .filter { $0.value == sessionId }
+                .map(\.key)
+            for jobId in jobs {
+                jobOwners.removeValue(forKey: jobId)
+                jobServers.removeValue(forKey: jobId)
+            }
+            lock.unlock()
+            cancelJobs(jobs, using: exec)
+            Task { await shells?.closeAll(sessionId: sessionId) }
             return errorResponse(request.id, .sessionExpired, "The agent session expired")
         }
         sessions.touch(sessionId)
@@ -339,6 +370,12 @@ final class AgentGateway {
             }
         case AgentToolName.exec:
             return await handleExec(request, execService: execService, sessionId: sessionId)
+        case AgentToolName.shellOpen:
+            return await handleShellOpen(request, execService: execService, sessionId: sessionId)
+        case AgentToolName.shellExec:
+            return await handleShellExec(request, sessionId: sessionId)
+        case AgentToolName.shellClose:
+            return await handleShellClose(request, sessionId: sessionId)
         case AgentToolName.approvalStatus:
             return handleWriteApprovalStatus(request, sessionId: sessionId)
         case AgentToolName.jobStatus:
@@ -361,23 +398,15 @@ final class AgentGateway {
             return errorResponse(request.id, .invalidRequest, "Invalid orbit_exec arguments")
         }
 
-        let directory = AgentServerDirectory(servers: execService.listServers())
         let server: AgentServerSummary
-        switch directory.resolve(parsed.serverQuery) {
-        case .resolved(let resolved):
+        switch resolveServer(parsed.serverQuery, execService: execService) {
+        case .success(let resolved):
             server = resolved
-        case .notFound:
-            return errorResponse(request.id, .serverNotFound, "Server not found: \(parsed.serverQuery)")
-        case .notExposed:
-            return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
-        case .ambiguous:
-            return errorResponse(request.id, .invalidRequest, "Server name is ambiguous; use the server id")
+        case .failure(let error):
+            return AgentResponse(id: request.id, ok: false, result: nil, error: error)
         }
 
-        lock.lock()
-        let isDisabled = disabledServers.contains(server.id)
-        lock.unlock()
-        if isDisabled {
+        if isServerDisabled(server.id) {
             return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
         }
 
@@ -441,6 +470,187 @@ final class AgentGateway {
         } catch {
             return errorResponse(request.id, .invalidRequest, error.localizedDescription)
         }
+    }
+
+    private func handleShellOpen(
+        _ request: AgentRequest,
+        execService: AgentCommandExecuting,
+        sessionId: String
+    ) async -> AgentResponse {
+        guard let manager = currentShellManager() else {
+            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+        }
+        guard let serverQuery = request.args?.objectValue?["server"]?.stringValue,
+              !serverQuery.isEmpty else {
+            return errorResponse(request.id, .invalidRequest, "orbit_shell_open requires a server")
+        }
+
+        let server: AgentServerSummary
+        switch resolveServer(serverQuery, execService: execService) {
+        case .success(let resolved):
+            server = resolved
+        case .failure(let error):
+            return AgentResponse(id: request.id, ok: false, result: nil, error: error)
+        }
+        if isServerDisabled(server.id) {
+            return errorResponse(request.id, .serverNotExposed, "Server is not exposed to AI agents")
+        }
+
+        if !sessions.hasWriteGrant(sessionId: sessionId, serverId: server.id) {
+            switch await requestWriteApproval(
+                sessionId: sessionId,
+                server: server,
+                command: "open shell"
+            ) {
+            case .approved:
+                break
+            case .pending(let requestId):
+                return ok(request.id, .object([
+                    "status": .string("pending_approval"),
+                    "requestId": .string(requestId),
+                    "message": .string("Approve shell access in Orbit, then retry the same call.")
+                ]))
+            case .denied(let error):
+                return AgentResponse(id: request.id, ok: false, result: nil, error: error)
+            }
+        }
+
+        do {
+            let shellId = try await manager.open(serverId: server.id, sessionId: sessionId)
+            record(AgentAuditEvent(
+                type: "agent.shell.opened",
+                sessionId: sessionId,
+                agent: sessions.agentName(sessionId: sessionId),
+                serverId: server.id,
+                command: "open shell",
+                mode: "write",
+                result: "opened"
+            ))
+            return ok(request.id, .object([
+                "shellId": .string(shellId),
+                "serverId": .string(server.id),
+                "serverName": .string(server.name)
+            ]))
+        } catch let shellError as AgentShellError {
+            return errorResponse(request.id, shellError.code, shellError.errorDescription ?? "Shell error")
+        } catch {
+            return errorResponse(request.id, .orbitUnavailable, error.localizedDescription)
+        }
+    }
+
+    private func handleShellExec(
+        _ request: AgentRequest,
+        sessionId: String
+    ) async -> AgentResponse {
+        guard let manager = currentShellManager() else {
+            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+        }
+        guard let object = request.args?.objectValue,
+              let shellId = object["shellId"]?.stringValue,
+              let command = object["command"]?.stringValue,
+              !command.isEmpty else {
+            return errorResponse(request.id, .invalidRequest, "orbit_shell_exec requires shellId and command")
+        }
+        guard let owner = manager.owner(shellId: shellId),
+              owner.sessionId == sessionId else {
+            return errorResponse(request.id, .unauthorized, "Unknown shell for this session")
+        }
+        guard sessions.hasWriteGrant(sessionId: sessionId, serverId: owner.serverId) else {
+            return errorResponse(request.id, .writeGrantRequired, "Write access for this server was revoked")
+        }
+
+        let timeoutMs = max(0, object["timeoutMs"]?.numberValue ?? 50_000)
+        let timeout = min(max(timeoutMs / 1000, 0.001), 50)
+        do {
+            let result = try await manager.exec(
+                shellId: shellId,
+                command: command,
+                timeout: timeout
+            )
+            record(AgentAuditEvent(
+                type: "agent.shell.exec",
+                sessionId: sessionId,
+                serverId: owner.serverId,
+                tool: AgentToolName.shellExec,
+                command: command,
+                mode: "write",
+                exitCode: result.exitCode,
+                result: "completed"
+            ))
+            return ok(request.id, .object([
+                "output": .string(result.output),
+                "exitCode": .number(Double(result.exitCode))
+            ]))
+        } catch let shellError as AgentShellError {
+            return errorResponse(request.id, shellError.code, shellError.errorDescription ?? "Shell error")
+        } catch {
+            return errorResponse(request.id, .invalidRequest, error.localizedDescription)
+        }
+    }
+
+    private func handleShellClose(
+        _ request: AgentRequest,
+        sessionId: String
+    ) async -> AgentResponse {
+        guard let manager = currentShellManager() else {
+            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+        }
+        guard let shellId = request.args?.objectValue?["shellId"]?.stringValue else {
+            return errorResponse(request.id, .invalidRequest, "orbit_shell_close requires shellId")
+        }
+        guard let owner = manager.owner(shellId: shellId),
+              owner.sessionId == sessionId else {
+            return errorResponse(request.id, .unauthorized, "Unknown shell for this session")
+        }
+
+        await manager.close(shellId: shellId)
+        record(AgentAuditEvent(
+            type: "agent.shell.closed",
+            sessionId: sessionId,
+            serverId: owner.serverId,
+            command: "close shell",
+            mode: "write",
+            result: "closed"
+        ))
+        return ok(request.id, .object(["status": .string("closed")]))
+    }
+
+    private func resolveServer(
+        _ query: String,
+        execService: AgentCommandExecuting
+    ) -> Result<AgentServerSummary, AgentErrorBody> {
+        let directory = AgentServerDirectory(servers: execService.listServers())
+        switch directory.resolve(query) {
+        case .resolved(let server):
+            return .success(server)
+        case .notFound:
+            return .failure(AgentErrorBody(
+                code: .serverNotFound,
+                message: "Server not found: \(query)"
+            ))
+        case .notExposed:
+            return .failure(AgentErrorBody(
+                code: .serverNotExposed,
+                message: "Server is not exposed to AI agents"
+            ))
+        case .ambiguous:
+            return .failure(AgentErrorBody(
+                code: .invalidRequest,
+                message: "Server name is ambiguous; use the server id"
+            ))
+        }
+    }
+
+    private func isServerDisabled(_ serverId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return disabledServers.contains(serverId)
+    }
+
+    private func currentShellManager() -> AgentShellManaging? {
+        lock.lock()
+        defer { lock.unlock() }
+        return shellManager
     }
 
     private func requestWriteApproval(
@@ -656,10 +866,12 @@ final class AgentGateway {
         guard sessions.validate(credential) == .valid else {
             return errorResponse(request.id, .unauthorized, "Invalid agent session token")
         }
+        let shells = currentShellManager()
         sessions.revoke(sessionId: sessionId)
         lock.lock()
         jobOwners = jobOwners.filter { $0.value != sessionId }
         lock.unlock()
+        Task { await shells?.closeAll(sessionId: sessionId) }
         record(AgentAuditEvent(
             type: "agent.session.revoked",
             sessionId: sessionId,
@@ -737,6 +949,25 @@ enum AgentGatewayError: LocalizedError {
         switch self {
         case .notConfigured:
             return "Orbit agent gateway is not configured"
+        }
+    }
+}
+
+private extension AgentShellError {
+    var code: AgentErrorCode {
+        switch self {
+        case .writeRequired:
+            return .writeGrantRequired
+        case .shellNotFound:
+            return .shellNotFound
+        case .busy:
+            return .invalidRequest
+        case .timeout:
+            return .shellTimeout
+        case .closed:
+            return .shellNotFound
+        case .transport:
+            return .orbitUnavailable
         }
     }
 }

@@ -13,6 +13,9 @@ final class AgentMCPTests: XCTestCase {
         let names = toolNames(response)
         XCTAssertTrue(names.contains(AgentToolName.listServers))
         XCTAssertTrue(names.contains(AgentToolName.exec))
+        XCTAssertTrue(names.contains(AgentToolName.shellOpen))
+        XCTAssertTrue(names.contains(AgentToolName.shellExec))
+        XCTAssertTrue(names.contains(AgentToolName.shellClose))
         XCTAssertFalse(names.contains("orbit_list_containers"))
         XCTAssertFalse(names.contains("orbit_docker_logs"))
     }

@@ -126,6 +126,46 @@ public enum AgentToolCatalog {
             ])
         ),
         MCPToolDefinition(
+            name: AgentToolName.shellOpen,
+            description: "Open a persistent SSH shell on an exposed server. Requires the one-time per-session write approval for that server.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "server": .object(["type": .string("string")])
+                ]),
+                "required": .array([.string("server")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.shellExec,
+            description: "Run a command in a persistent orbit_shell_open shell and wait for its completion marker. Use this when cd, environment variables, or interactive container shells must persist.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "shellId": .object(["type": .string("string")]),
+                    "command": .object(["type": .string("string")]),
+                    "timeoutMs": .object([
+                        "type": .string("integer"),
+                        "minimum": .number(1),
+                        "maximum": .number(50_000)
+                    ])
+                ]),
+                "required": .array([.string("shellId"), .string("command")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.shellClose,
+            description: "Close a persistent agent shell.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object(["shellId": .object(["type": .string("string")])]),
+                "required": .array([.string("shellId")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
             name: AgentToolName.jobStatus,
             description: "Get the status of a long-running orbit_exec job.",
             inputSchema: .object([
