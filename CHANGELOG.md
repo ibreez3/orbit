@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [v0.0.11] - 2026-11-10
+
+### Added
+- Local AI Agent gateway: `orbit-mcp` (MCP bridge) and `orbit-cli` let Claude Code, Codex, and other local agents use selected servers without receiving SSH credentials.
+- Per-server AI exposure, session admission approval, a read/write command guard, session-scoped write grants, session revocation, job polling with incremental output, persistent shells, and an audit log.
+- AI Agent settings pane showing gateway status, exposed servers, active sessions, and recent activity.
+- `docs/agent-mcp-setup.md` with setup instructions for Claude Code, Codex, and CLI-only agents.
+
+### Fixed
+- MCP stdio initialization no longer stalls before the first tool call.
+
 ## [v0.0.10-pre] - 2026-11-09
 
 ### Changed
