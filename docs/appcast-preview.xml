@@ -1,19 +1,41 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
---><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
-    <title>Orbit v0.0.11</title>
+    <title>Orbit Updates</title>
     <link>https://github.com/ibreez3/orbit/releases</link>
-    <description>Orbit macOS pre-release updates</description>
+    <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit v0.0.5-pre.1</title>
-      <sparkle:releaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.11</sparkle:releaseNotesLink>
-      <pubDate>Tue, 10 Nov 2026 00:51:21 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.11/Orbit-v0.0.11-AppleSilicon.dmg" sparkle:version="12" sparkle:shortVersionString="0.0.11" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="2lvRVUEg2lOJ4OzC3ZZkktVkrCd5a26IDYWEM6N9r/FGQK6XePRJ/iZaxU/dL+D8L483W/Nd9YRHza/EXRq8Bw==" length="15077190" type="application/x-apple-diskimage"></enclosure>
+      <title>Orbit 0.0.12-pre</title>
+      <description sparkle:format="markdown"><![CDATA[### 新增
+
+- 独立的「关于 Orbit」窗口：展示当前版本、更新状态、上次检查时间、自动检查开关和更新说明。
+- 启用自动检查时，启动 Orbit 会立即检查更新；下载和安装仍需用户确认。
+
+### 变更
+
+- 只有稳定版 `vX.Y.Z` 更新默认 appcast；预览版使用独立的 `docs/appcast-preview.xml`，不影响稳定版用户。
+- 稳定版 release notes 必须非空，并以 Markdown 嵌入 appcast。
+- 启用 Sparkle 签名 feed 与更新包解压前校验。
+
+### 修复
+
+- 拒绝重复或倒退的 build 号，防止 appcast 回滚（同一 tag 重跑除外）。
+- 修复默认检查间隔导致短时使用收不到更新提示的问题。
+- 修复无更新回调被误判为失败的问题。
+- 修复关于窗口和 AI Agent 授权窗口的位置与尺寸。
+
+### 安装
+
+- 预览版：本次可通过本地预览通道自动更新，或手动下载 DMG。
+- 旧版本（≤ v0.0.8）因公钥轮换仍需手动安装一次。]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.12-pre</sparkle:fullReleaseNotesLink>
+      <pubDate>Tue, 10 Nov 2026 14:07:53 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.12-pre/Orbit-v0.0.12-pre-AppleSilicon.dmg" sparkle:version="13" sparkle:shortVersionString="0.0.12-pre" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="cDCeTV2ffr+KZkoMNqO+xpPH7Jv1ZvTJkfxJqK0s07EZsEc9y0B5iusXroZykpdbGPNqrp5ARa1Lwhl8wXyQBQ==" length="15181725" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: AuE5DhmWf7TgvS5DUy0/7Ra5w+BrzfdkCso/zdLoTqf/XEoV9JN5PlyathfDVC/xvKMfhiTVoQ0YRBJy5zQMBQ==
-length: 1258
+edSignature: ZqLzuzgbu4uueHsbgIAdvikA/evH1AvrKLAlaGqmnpdHHeeSyyEv3rBLCGoZQWxsLipRN2RTl/Rsa+qTUCftCQ==
+length: 2299
 -->
