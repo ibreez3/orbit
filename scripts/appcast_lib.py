@@ -6,6 +6,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 
 STABLE_TAG_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+PREVIEW_TAG_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?")
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 
@@ -14,6 +15,15 @@ def parse_stable_tag(tag: str) -> tuple[int, int, int]:
     if not match:
         raise ValueError(f"Expected stable tag vX.Y.Z, got {tag!r}")
     return tuple(int(part) for part in match.groups())
+
+
+def parse_release_tag(tag: str, allow_preview: bool = False) -> tuple[int, int, int]:
+    pattern = PREVIEW_TAG_RE if allow_preview else STABLE_TAG_RE
+    match = pattern.fullmatch(tag)
+    if not match:
+        expected = "vX.Y.Z or vX.Y.Z-suffix" if allow_preview else "vX.Y.Z"
+        raise ValueError(f"Expected tag {expected}, got {tag!r}")
+    return tuple(int(part) for part in match.groups()[:3])
 
 
 def sanitize_notes(markdown: str) -> str:
@@ -75,8 +85,8 @@ def parse_existing_appcast(path) -> dict:
 
 
 def validate_release(*, existing, tag, version, build, notes, url, signature, length,
-                     allow_empty_notes=False) -> None:
-    parse_stable_tag(tag)
+                     allow_empty_notes=False, allow_preview=False) -> None:
+    parse_release_tag(tag, allow_preview=allow_preview)
     if version != tag[1:]:
         raise ValueError("Version must match the stable tag")
     build_number = _positive_integer(build, "Build")
@@ -96,8 +106,9 @@ def validate_release(*, existing, tag, version, build, notes, url, signature, le
 
 
 def render_appcast(*, tag, version, build, url, signature, length, notes,
-                   full_notes_url, pub_date, minimum_system_version="13.0") -> str:
-    parse_stable_tag(tag)
+                   full_notes_url, pub_date, minimum_system_version="13.0",
+                   allow_preview=False) -> str:
+    parse_release_tag(tag, allow_preview=allow_preview)
     if urlsplit(full_notes_url).scheme != "https" or not urlsplit(full_notes_url).netloc:
         raise ValueError("Full release notes URL must be HTTPS")
     attributes = dict(
@@ -127,7 +138,8 @@ def render_appcast(*, tag, version, build, url, signature, length, notes,
 '''
 
 
-def verify_appcast(path, *, tag, version, build, require_signature=False) -> None:
+def verify_appcast(path, *, tag, version, build, require_signature=False,
+                   allow_preview=False) -> None:
     root, suffix = _read_xml(path)
     items = root.findall("channel/item")
     if len(items) != 1 or root.findtext("channel/title") != "Orbit Updates":
@@ -155,7 +167,7 @@ def verify_appcast(path, *, tag, version, build, require_signature=False) -> Non
     validate_release(
         existing={}, tag=tag, version=version, build=build, notes=description.text or "",
         url=enclosure.get("url", ""), signature=enclosure.get(f"{{{SPARKLE_NS}}}edSignature", ""),
-        length=enclosure.get("length", ""),
+        length=enclosure.get("length", ""), allow_preview=allow_preview,
     )
     if require_signature and not re.search(
         r"<!--\s*sparkle-signatures:\s*edSignature:\s*\S+\s+length:\s*[0-9]+\s*-->", suffix

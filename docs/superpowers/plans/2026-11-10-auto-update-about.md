@@ -1559,3 +1559,4 @@ Expected: stdout 输出合法 XML，包含 `<description sparkle:format="markdow
   ```
 - 版本提升到 `0.0.12` / build `13`；发布 tag `v0.0.12-pre`。
 - 本地 Release 构建验证：`CFBundleShortVersionString=0.0.12`、`CFBundleVersion=13`、`SURequireSignedFeed=true`；Swift 单测 163/163，Python 12/12。
+- 首次 `v0.0.12-pre` 工作流在 appcast 步骤失败：脚本只接受稳定 tag。已增加 `--allow-preview`，并让工作流在切到 develop 后使用最新的 appcast 工具；通过 `workflow_dispatch` 重跑该 tag 的 appcast 更新，无需重新发版。

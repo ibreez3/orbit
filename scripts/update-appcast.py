@@ -16,6 +16,7 @@ def main():
         parser.add_argument("--" + name, required=name in ("tag", "version", "build"))
     parser.add_argument("--minimum-system-version", default="13.0")
     parser.add_argument("--allow-empty-notes", action="store_true")
+    parser.add_argument("--allow-preview", action="store_true")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--check", action="store_true")
     modes.add_argument("--dry-run", action="store_true")
@@ -26,7 +27,8 @@ def main():
         if args.verify:
             path = args.appcast if args.verify is True else args.verify
             verify_appcast(path, tag=args.tag, version=args.version, build=args.build,
-                           require_signature=args.require_signature)
+                           require_signature=args.require_signature,
+                           allow_preview=args.allow_preview)
             return
         if args.require_signature:
             parser.error("--require-signature requires --verify")
@@ -38,12 +40,14 @@ def main():
         notes = Path(args.notes_file).read_text(encoding="utf-8")
         release = dict(tag=args.tag, version=args.version, build=args.build,
                        url=args.url, signature=args.signature, length=args.length, notes=notes)
-        validate_release(existing=existing, allow_empty_notes=args.allow_empty_notes, **release)
+        validate_release(existing=existing, allow_empty_notes=args.allow_empty_notes,
+                         allow_preview=args.allow_preview, **release)
         pub_date = existing.get("pub_date") if existing.get("tag") == args.tag else None
         xml = render_appcast(
             **release, full_notes_url=args.full_notes_url,
             pub_date=pub_date or format_datetime(datetime.now(timezone.utc)),
             minimum_system_version=args.minimum_system_version,
+            allow_preview=args.allow_preview,
         )
         if args.check:
             return

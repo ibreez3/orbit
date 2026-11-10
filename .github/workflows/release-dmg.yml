@@ -314,30 +314,33 @@ jobs:
           SPARKLE_LENGTH="${{ steps.sparkle.outputs.length }}"
           if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
             APPCAST_PATH="docs/appcast.xml"
+            PREVIEW_FLAG=""
           else
             APPCAST_PATH="docs/appcast-preview.xml"
+            PREVIEW_FLAG="--allow-preview"
           fi
           mkdir -p "$RUNNER_TEMP/orbit-appcast-tools"
-          cp scripts/appcast_lib.py scripts/update-appcast.py "$RUNNER_TEMP/orbit-appcast-tools/"
 
           # 构建过程可能改写 tracked 的 Cargo.lock / cbindgen 头文件 / Xcode 工程；
           # 强制丢弃这些改动，避免切换 develop 时被脏工作树阻塞。
           git fetch origin develop
           git switch --discard-changes develop
           git pull --ff-only origin develop
+          # 用 develop 上最新的 appcast 工具，确保发布脚本的修复能用于已发布的 tag。
+          cp scripts/appcast_lib.py scripts/update-appcast.py "$RUNNER_TEMP/orbit-appcast-tools/"
           # 旧 feed 可能来自上一把签名密钥；验签失败只告警，不能阻断密钥轮换。
           if ! printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "$APPCAST_PATH"; then
             echo "::warning::Existing appcast does not verify with the current Sparkle key (possible key rotation); regenerating with the current key."
           fi
 
           python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" \
-            --appcast "$APPCAST_PATH" \
+            --appcast "$APPCAST_PATH" $PREVIEW_FLAG \
             --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" \
             --url "$URL" --signature "$SPARKLE_SIGNATURE" --length "$SPARKLE_LENGTH" \
             --notes-file "$RUNNER_TEMP/orbit-release-notes.md" \
             --full-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
           python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify "$APPCAST_PATH" \
-            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION"
+            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" $PREVIEW_FLAG
 
       - name: Sign and push appcast
         if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
@@ -347,8 +350,10 @@ jobs:
           SIGN_UPDATE="${{ steps.sparkle.outputs.sign_update }}"
           if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
             APPCAST_PATH="docs/appcast.xml"
+            PREVIEW_FLAG=""
           else
             APPCAST_PATH="docs/appcast-preview.xml"
+            PREVIEW_FLAG="--allow-preview"
           fi
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - "$APPCAST_PATH"
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "$APPCAST_PATH"
@@ -358,7 +363,7 @@ jobs:
           APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
           BUILD_VERSION="$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist")"
           python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify "$APPCAST_PATH" \
-            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" --require-signature
+            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" --require-signature $PREVIEW_FLAG
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

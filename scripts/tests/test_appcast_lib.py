@@ -46,6 +46,26 @@ class AppcastTests(unittest.TestCase):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 parse_stable_tag(tag)
 
+    def test_preview_tags_allowed_when_requested(self):
+        release = dict(
+            tag="v0.0.12-pre", version="0.0.12-pre", build="13",
+            url="https://github.com/ibreez3/orbit/releases/download/v0.0.12-pre/Orbit.dmg",
+            signature="TEST_SIGNATURE", length="123456", notes="### 新增\n- 预览",
+        )
+        validate_release(existing={"build": 12, "tag": "v0.0.11"},
+                         allow_preview=True, **release)
+        with self.assertRaises(ValueError):
+            validate_release(existing={}, **release)
+
+        rendered = dict(
+            **release,
+            full_notes_url="https://github.com/ibreez3/orbit/releases/tag/v0.0.12-pre",
+            pub_date="Tue, 10 Nov 2026 00:51:21 +0000",
+        )
+        self.path.write_text(render_appcast(allow_preview=True, **rendered), encoding="utf-8")
+        verify_appcast(self.path, tag="v0.0.12-pre", version="0.0.12-pre", build="13",
+                       allow_preview=True)
+
     def test_monotonic_build_and_same_tag_rerun(self):
         validate_release(existing={"build": 12, "tag": "v0.0.11"}, **self.release)
         validate_release(existing={"build": 13, "tag": "v0.0.12"}, **self.release)
