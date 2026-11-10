@@ -36,5 +36,9 @@
 	<string>https://raw.githubusercontent.com/ibreez3/orbit/develop/docs/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>KKV9nwM4SemCZDc2S8KqGGGPa5SzX51x1NG7v7KNUdI=</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

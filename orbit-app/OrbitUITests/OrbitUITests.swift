@@ -16,10 +16,12 @@ final class OrbitUITests: XCTestCase {
         agentSupportDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("a-\(UUID().uuidString.prefix(6))", isDirectory: true)
         app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
         app.launchEnvironment["ORBIT_DB_PATH"] = temporaryDirectory
             .appendingPathComponent("orbit.db")
             .path
         app.launchEnvironment["ORBIT_AGENT_SUPPORT_DIR"] = agentSupportDirectory.path
+        app.launchEnvironment["ORBIT_DISABLE_UPDATE_CHECKS"] = "1"
         app.launch()
         app.activate()
         XCTAssertTrue(app.buttons["homeLocalTerminalButton"].waitForExistence(timeout: 10))
@@ -33,6 +35,39 @@ final class OrbitUITests: XCTestCase {
         if let agentSupportDirectory {
             try? FileManager.default.removeItem(at: agentSupportDirectory)
         }
+    }
+
+    func testAboutWindowShowsVersionAndStatus() {
+        let appMenu = app.menuBars.menuBarItems["Orbit"]
+        XCTAssertTrue(appMenu.waitForExistence(timeout: 5))
+        appMenu.click()
+
+        let aboutItem = app.menuItems["关于 Orbit"]
+        XCTAssertTrue(aboutItem.waitForExistence(timeout: 5))
+        aboutItem.click()
+
+        let about = app.windows["关于 Orbit"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+
+        let version = app.staticTexts["aboutVersionLabel"]
+        XCTAssertTrue(version.waitForExistence(timeout: 5))
+        XCTAssertTrue(textValue(version).contains("版本"))
+
+        let status = app.staticTexts["aboutUpdateStatusLabel"]
+        XCTAssertTrue(status.exists)
+        XCTAssertEqual(textValue(status), "更新检查已在测试模式下禁用")
+
+        let toggle = app.switches["aboutAutoCheckToggle"]
+        XCTAssertTrue(toggle.exists)
+        XCTAssertFalse(toggle.isEnabled)
+
+        let check = app.buttons["aboutCheckForUpdatesButton"]
+        XCTAssertTrue(check.exists)
+        XCTAssertFalse(check.isEnabled)
+        XCTAssertTrue(app.staticTexts["aboutLastCheckLabel"].exists)
+
+        app.typeKey("w", modifierFlags: [.command])
+        XCTAssertFalse(about.waitForExistence(timeout: 2))
     }
 
     func testHomepageAndCommandPalette() {
