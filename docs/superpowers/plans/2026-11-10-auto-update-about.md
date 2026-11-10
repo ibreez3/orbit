@@ -1534,3 +1534,15 @@ Expected: stdout 输出合法 XML，包含 `<description sparkle:format="markdow
 - “12 个工作流场景”没有提交到仓库的测试 harness，当前可复现的只有单元测试与手工验证记录。
 
 未验证：真实 GitHub Actions 发布、正式密钥轮换、真实跨版本下载安装/重启、活动 AI 会话下的安装退出。
+
+## 7. UI 定位与尺寸修复（2026-11-10）
+
+用户反馈关于窗口过大、下方留白，且关于窗口与 AI Agent 授权窗口没有相对主窗口居中。
+
+- About 窗口改为内容自适应高度：去掉外层固定 480×640 和 `ScrollView` 拉伸，更新说明单独限高滚动；实测窗口为 440×352，不再有底部大块留白。
+- 新增 `NSWindow.centerOverMainWindow()`，About 窗口和 AI Agent 授权面板都改为相对当前主窗口居中；没有主窗口时回退屏幕居中，并限制在屏幕可见区域内。
+- 关于窗口按钮的 disabled 条件补上 `canCheckForUpdates`，避免 Sparkle 会话进行中点击无反馈。
+- 新增 `WindowPositioningTests` 覆盖居中与边界钳制。
+- UI 测试增加断言：About 窗口中心与主窗口中心一致（误差 40pt），高度小于 420pt。
+
+验证：Swift 单测 163/163、关于窗口 UI 测试 1/1、Release 构建与签名校验通过。

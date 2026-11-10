@@ -86,7 +86,7 @@ final class AgentApprovalController: NSObject, AgentApprovalPresenting {
         panel.isReleasedWhenClosed = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.center()
+        panel.centerOverMainWindow()
         self.panel = panel
 
         let workItem = DispatchWorkItem { [weak self] in

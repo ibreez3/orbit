@@ -38,6 +38,10 @@ final class OrbitUITests: XCTestCase {
     }
 
     func testAboutWindowShowsVersionAndStatus() {
+        let mainWindow = app.windows.firstMatch
+        XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
+        let mainFrame = mainWindow.frame
+
         let appMenu = app.menuBars.menuBarItems["Orbit"]
         XCTAssertTrue(appMenu.waitForExistence(timeout: 5))
         appMenu.click()
@@ -48,6 +52,9 @@ final class OrbitUITests: XCTestCase {
 
         let about = app.windows["关于 Orbit"]
         XCTAssertTrue(about.waitForExistence(timeout: 10))
+        XCTAssertEqual(about.frame.midX, mainFrame.midX, accuracy: 40)
+        XCTAssertEqual(about.frame.midY, mainFrame.midY, accuracy: 40)
+        XCTAssertLessThan(about.frame.height, 420)
 
         let version = app.staticTexts["aboutVersionLabel"]
         XCTAssertTrue(version.waitForExistence(timeout: 5))
