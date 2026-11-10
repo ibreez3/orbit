@@ -310,5 +310,16 @@ impl SftpManager {
 }
 
 fn shell_encode(s: &str) -> String {
-    s.replace('\'', "'\\''").replace('%', "%%")
+    s.replace('\'', "'\\''")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_encode;
+
+    #[test]
+    fn shell_encode_preserves_percent_in_content() {
+        assert_eq!(shell_encode("100% done"), "100% done");
+        assert_eq!(shell_encode("it's"), "it'\\''s");
+    }
 }

@@ -2,17 +2,17 @@ import SwiftUI
 
 struct SessionToolDockView: View {
     @EnvironmentObject var toolState: ToolState
-    @EnvironmentObject var tabState: TabState
     @EnvironmentObject var inventoryState: InventoryState
+    @EnvironmentObject var aiState: AIState
     let appState: AppState
 
     var body: some View {
         VStack(spacing: 8) {
-            dockButton(.ai, symbol: "sparkles", title: "AI")
-            dockButton(.sftp, symbol: "folder", title: "SFTP")
-            dockButton(.monitor, symbol: "waveform.path.ecg", title: "Monitor")
-            dockButton(.snippets, symbol: "text.insert", title: "Snippets")
-            dockButton(.logs, symbol: "list.bullet.rectangle", title: "Logs")
+            dockButton(.ai, symbol: "sparkles", title: "AI 助手")
+            dockButton(.sftp, symbol: "folder", title: "文件管理")
+            dockButton(.monitor, symbol: "waveform.path.ecg", title: "监控")
+            dockButton(.snippets, symbol: "text.insert", title: "命令片段")
+            dockButton(.logs, symbol: "list.bullet.rectangle", title: "日志")
 
             Button(action: openDockerTab) {
                 Image(systemName: "shippingbox")
@@ -23,6 +23,7 @@ struct SessionToolDockView: View {
             .disabled(activeServer() == nil)
             .foregroundStyle(activeServer() == nil ? Color.secondary.opacity(0.35) : Color.secondary)
             .help(activeServer() == nil ? "选择远端服务器后可用 Docker" : "Docker")
+            .accessibilityLabel("Docker")
 
             Button(action: openDatabaseTab) {
                 Image(systemName: "cylinder.split.1x2")
@@ -31,7 +32,8 @@ struct SessionToolDockView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Database")
+            .help("数据库")
+            .accessibilityLabel("数据库")
 
             Spacer()
 
@@ -42,7 +44,9 @@ struct SessionToolDockView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Settings")
+            .help("设置")
+            .accessibilityLabel("设置")
+            .accessibilityIdentifier("dock-settings")
         }
         .padding(.vertical, 10)
         .frame(width: 52)
@@ -70,6 +74,8 @@ struct SessionToolDockView: View {
         .disabled(disabledReason != nil)
         .foregroundStyle(disabledReason == nil ? (isActive ? Color.accentColor : Color.secondary) : Color.secondary.opacity(0.35))
         .help(disabledReason ?? title)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("dock-\(tool.rawValue)")
     }
 
     private func activeServer() -> Server? {
@@ -83,12 +89,6 @@ struct SessionToolDockView: View {
     }
 
     private func openDatabaseTab() {
-        let id = "database-\(Int(Date().timeIntervalSince1970 * 1000))"
-        let context = appState.activeSessionContext
-        let serverId = context.serverId ?? "database"
-        let serverName = context.serverName ?? "Database"
-        let tab = TabItem(id: id, type: .database, serverId: serverId, serverName: serverName, title: "Database")
-        tabState.tabs.append(tab)
-        appState.requestActivateTab(id)
+        appState.openDatabaseWorkspace()
     }
 }

@@ -29,7 +29,7 @@ make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
 3. 运行本地验证，例如 `make build-app` 和 Rust 测试。
 4. 提交到 `develop` 并推送分支。
 5. 创建并推送 release tag。
-6. 创建 GitHub prerelease，只填写 release notes。
+6. 创建 GitHub Release 并标记为 Latest（不要勾选 prerelease，否则仓库首页的 Release 区域不会显示预览版本），只填写 release notes。
 7. 交给 `Release DMG` GitHub Action 构建、验证并上传 Apple Silicon DMG。
 
 不要把本地构建的 DMG 上传到 GitHub Releases。本地 DMG 仅用于冒烟验证。

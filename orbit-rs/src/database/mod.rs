@@ -94,13 +94,30 @@ impl DatabaseManager {
                     return Err(anyhow!("read-only database query rejected write statement"));
                 }
                 let server = db.get_server(&connection.ssh_server_id)?;
-                SqliteRemote::execute(pool, &server, db, &connection.sqlite_path, &request.sql)
+                SqliteRemote::execute(
+                    pool,
+                    &server,
+                    db,
+                    &connection.sqlite_path,
+                    &request.sql,
+                    request.timeout_ms,
+                )
             }
             "mysql" => with_driver_connection(db, &connection, |connection| {
-                MysqlEngine::execute(connection, &request.sql, request.read_only)
+                MysqlEngine::execute(
+                    connection,
+                    &request.sql,
+                    request.read_only,
+                    request.timeout_ms,
+                )
             }),
             "postgres" => with_driver_connection(db, &connection, |connection| {
-                PostgresEngine::execute(connection, &request.sql, request.read_only)
+                PostgresEngine::execute(
+                    connection,
+                    &request.sql,
+                    request.read_only,
+                    request.timeout_ms,
+                )
             }),
             engine => Err(anyhow!("unsupported database engine: {}", engine)),
         }
@@ -134,6 +151,7 @@ impl DatabaseManager {
                         db,
                         &connection.sqlite_path,
                         &sql,
+                        30_000,
                     )?;
                     let rows = parse_sqlite_output(
                         &format!("backup SQLite table {}", table.name),

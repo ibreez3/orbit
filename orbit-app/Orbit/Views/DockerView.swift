@@ -415,15 +415,16 @@ struct DockerView: View {
     }
 
     private func refresh() {
+        guard let serverId = tab.serverId else { return }
         loading = true
         error = nil
 
         Task {
             do {
-                let loadedContainers = try await appState.bridge.listDockerContainersAsync(serverId: tab.serverId)
+                let loadedContainers = try await appState.bridge.listDockerContainersAsync(serverId: serverId)
                 var loadedStats: [DockerContainerStats] = []
                 do {
-                    loadedStats = try await appState.bridge.getDockerStatsAsync(serverId: tab.serverId)
+                    loadedStats = try await appState.bridge.getDockerStatsAsync(serverId: serverId)
                 } catch {
                     loadedStats = []
                 }
@@ -451,10 +452,11 @@ struct DockerView: View {
     }
 
     private func loadLogs(_ container: DockerContainer) {
+        guard let serverId = tab.serverId else { return }
         loadingLogs = true
         Task {
             do {
-                let result = try await appState.bridge.getDockerLogsAsync(serverId: tab.serverId, containerId: container.id, tail: 200)
+                let result = try await appState.bridge.getDockerLogsAsync(serverId: serverId, containerId: container.id, tail: 200)
                 await MainActor.run {
                     logs = result
                     loadingLogs = false
@@ -479,11 +481,12 @@ struct DockerView: View {
             openFollowLogs(container)
             return
         }
+        guard let serverId = tab.serverId else { return }
 
         runningAction = action
         Task {
             do {
-                _ = try await appState.bridge.dockerActionAsync(serverId: tab.serverId, containerId: container.id, action: action)
+                _ = try await appState.bridge.dockerActionAsync(serverId: serverId, containerId: container.id, action: action)
                 await MainActor.run {
                     runningAction = nil
                     refresh()

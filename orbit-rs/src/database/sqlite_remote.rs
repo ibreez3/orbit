@@ -237,6 +237,7 @@ impl SqliteRemote {
         db: &Database,
         sqlite_path: &str,
         sql: &str,
+        timeout_ms: u32,
     ) -> Result<String> {
         let command = if is_write_statement(sql) {
             SqliteRemoteCommand::write(sqlite_path, sql)
@@ -244,7 +245,14 @@ impl SqliteRemote {
             SqliteRemoteCommand::read(sqlite_path, sql)
         }
         .to_shell();
-        ssh::SshManager::exec_command_checked(pool, server, db, &command, "execute SQLite command")
+        ssh::SshManager::exec_command_output_with_timeout(
+            pool,
+            server,
+            db,
+            &command,
+            timeout_ms,
+        )?
+        .into_success_stdout("execute SQLite command")
     }
 
     pub fn execute_script(
@@ -264,10 +272,11 @@ impl SqliteRemote {
         db: &Database,
         sqlite_path: &str,
         sql: &str,
+        timeout_ms: u32,
     ) -> Result<DatabaseQueryResult> {
         let started = Instant::now();
         let write_statement = is_write_statement(sql);
-        let output = Self::execute_raw(pool, server, db, sqlite_path, sql)?;
+        let output = Self::execute_raw(pool, server, db, sqlite_path, sql, timeout_ms)?;
         let elapsed_ms = started.elapsed().as_millis() as u64;
 
         if write_statement {

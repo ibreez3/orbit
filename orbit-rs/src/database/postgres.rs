@@ -32,6 +32,7 @@ impl PostgresEngine {
         connection: &DatabaseConnection,
         sql: &str,
         read_only: bool,
+        timeout_ms: u32,
     ) -> Result<DatabaseQueryResult> {
         if read_only && is_write_statement(sql) {
             return Err(anyhow!("read-only database query rejected write statement"));
@@ -39,6 +40,12 @@ impl PostgresEngine {
 
         let started = Instant::now();
         let mut client = Self::connect(connection)?;
+        if timeout_ms > 0 {
+            client.batch_execute(&format!(
+                "SET statement_timeout = {}",
+                timeout_ms.max(1)
+            ))?;
+        }
         if is_write_statement(sql) {
             let affected = client.execute(sql, &[])?;
             return Ok(DatabaseQueryResult::empty_message(

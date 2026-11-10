@@ -9,7 +9,7 @@ use serde::Serialize;
 use tracing::{debug, info, warn};
 
 use crate::db::Database;
-use crate::models::Server;
+use crate::models::{Server, TemporaryConnectionInput};
 use crate::transport;
 
 #[derive(Serialize, Clone)]
@@ -20,6 +20,77 @@ pub struct TrafficStats {
 
 pub type DataCallback = Box<dyn Fn(&str, &[u8]) + Send + Sync>;
 pub type ClosedCallback = Box<dyn Fn(&str) + Send + Sync>;
+pub type SessionPoolKey = Option<String>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporarySessionDescriptor {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_type: String,
+    pub credential_group_id: Option<String>,
+    pub jump_server_id: Option<String>,
+}
+
+impl TemporarySessionDescriptor {
+    #[allow(dead_code)]
+    pub fn new(
+        host: impl Into<String>,
+        port: u16,
+        username: impl Into<String>,
+        auth_type: impl Into<String>,
+        credential_group_id: Option<String>,
+        jump_server_id: Option<String>,
+    ) -> Self {
+        Self {
+            host: host.into(),
+            port,
+            username: username.into(),
+            auth_type: auth_type.into(),
+            credential_group_id,
+            jump_server_id,
+        }
+    }
+
+    pub fn from_input(input: &TemporaryConnectionInput) -> Self {
+        Self::new(
+            input.host.trim(),
+            input.port,
+            input.username.trim(),
+            input.auth_type.clone(),
+            input.credential_group_id().map(str::to_owned),
+            input.jump_server_id().map(str::to_owned),
+        )
+    }
+
+    pub fn matches(&self, input: &TemporaryConnectionInput) -> bool {
+        self == &Self::from_input(input)
+    }
+}
+
+fn promotable_descriptor<'a>(
+    pool_key: Option<&str>,
+    temporary: Option<&'a TemporarySessionDescriptor>,
+) -> Result<&'a TemporarySessionDescriptor> {
+    if pool_key.is_some() {
+        return Err(anyhow!("已保存服务器会话不能通过临时提升接口保存"));
+    }
+    temporary.ok_or_else(|| anyhow!("会话不是可提升的临时会话"))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DisconnectDisposition {
+    Pool,
+    Close,
+}
+
+fn disconnect_disposition(pool_key: Option<&str>) -> DisconnectDisposition {
+    if pool_key.is_some() {
+        DisconnectDisposition::Pool
+    } else {
+        DisconnectDisposition::Close
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SshCommandOutput {
@@ -64,12 +135,18 @@ struct SharedSession {
     guard: transport::SessionGuard,
     channels: HashMap<String, ActiveChannel>,
     session_lock: Arc<std::sync::Mutex<()>>,
-    server_id: String,
+    pool_key: SessionPoolKey,
+    temporary: Option<TemporarySessionDescriptor>,
 }
 
 struct IdleSession {
     guard: transport::SessionGuard,
     session_lock: Arc<std::sync::Mutex<()>>,
+}
+
+fn notify_channel_closed(channel_id: &str, running: &AtomicBool, closed_cb: &ClosedCallback) {
+    running.store(false, Ordering::Release);
+    closed_cb(channel_id);
 }
 
 pub(crate) fn spawn_channel_reader(
@@ -119,8 +196,7 @@ pub(crate) fn spawn_channel_reader(
                 }
                 Ok(_) => {
                     debug!(session_id = %sid, "SSH channel 正常关闭");
-                    closed_cb(&sid);
-                    run.store(false, Ordering::Relaxed);
+                    notify_channel_closed(&sid, &run, &closed_cb);
                     break;
                 }
                 Err(e) => {
@@ -130,8 +206,7 @@ pub(crate) fn spawn_channel_reader(
                         continue;
                     }
                     warn!(session_id = %sid, error = %e, "SSH channel 读取错误");
-                    closed_cb(&sid);
-                    run.store(false, Ordering::Relaxed);
+                    notify_channel_closed(&sid, &run, &closed_cb);
                     break;
                 }
             }
@@ -167,7 +242,8 @@ impl SshManager {
     pub(crate) fn register_session(
         &mut self,
         session_id: &str,
-        server_id: &str,
+        pool_key: Option<String>,
+        temporary: Option<TemporarySessionDescriptor>,
         guard: transport::SessionGuard,
         active_channel: ActiveChannel,
         session_lock: Arc<std::sync::Mutex<()>>,
@@ -182,7 +258,8 @@ impl SshManager {
                     .into_iter()
                     .collect(),
                 session_lock,
-                server_id: server_id.to_string(),
+                pool_key,
+                temporary,
             },
         );
     }
@@ -206,6 +283,16 @@ impl SshManager {
             channel_to_session: HashMap::new(),
             idle_pool: HashMap::new(),
             port_forwards: HashMap::new(),
+        }
+    }
+
+    /// Applies a keepalive change to every live terminal session.
+    pub fn set_keepalive_all(&mut self, seconds: u32) {
+        for shared in self.sessions.values_mut() {
+            let _ = transport::apply_keepalive(&mut shared.guard.session, seconds);
+        }
+        for idle in self.idle_pool.values_mut().flatten() {
+            let _ = transport::apply_keepalive(&mut idle.guard.session, seconds);
         }
     }
 
@@ -235,18 +322,13 @@ impl SshManager {
             session_lock.clone(),
         )?;
 
-        self.channel_to_session
-            .insert(session_id.to_string(), session_id.to_string());
-        self.sessions.insert(
-            session_id.to_string(),
-            SharedSession {
-                guard,
-                channels: [(session_id.to_string(), active_channel)]
-                    .into_iter()
-                    .collect(),
-                session_lock,
-                server_id: server.id.clone(),
-            },
+        self.register_session(
+            session_id,
+            Some(server.id.clone()),
+            None,
+            guard,
+            active_channel,
+            session_lock,
         );
         Ok(())
     }
@@ -395,6 +477,25 @@ impl SshManager {
         })
     }
 
+    pub fn temporary_descriptor(&self, channel_id: &str) -> Result<TemporarySessionDescriptor> {
+        let session_key = self
+            .channel_to_session
+            .get(channel_id)
+            .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
+        let shared = self
+            .sessions
+            .get(session_key)
+            .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
+        let channel = shared
+            .channels
+            .get(channel_id)
+            .ok_or_else(|| anyhow!("临时会话不存在或已关闭"))?;
+        if !channel.running.load(Ordering::Acquire) {
+            return Err(anyhow!("临时会话不存在或已关闭"));
+        }
+        Ok(promotable_descriptor(shared.pool_key.as_deref(), shared.temporary.as_ref())?.clone())
+    }
+
     pub fn disconnect(&mut self, channel_id: &str) -> Result<()> {
         let Some(session_key) = self.channel_to_session.get(channel_id).cloned() else {
             return Ok(());
@@ -415,15 +516,25 @@ impl SshManager {
 
         if should_pool_session {
             if let Some(shared) = self.sessions.remove(&session_key) {
-                let server_id = shared.server_id;
-                self.idle_pool
-                    .entry(server_id)
-                    .or_default()
-                    .push(IdleSession {
-                        guard: shared.guard,
-                        session_lock: shared.session_lock,
-                    });
-                info!(channel_id, "SSH 连接已归还连接池");
+                match disconnect_disposition(shared.pool_key.as_deref()) {
+                    DisconnectDisposition::Pool => {
+                        let pool_key = shared.pool_key.expect("pool key checked above");
+                        self.idle_pool
+                            .entry(pool_key)
+                            .or_default()
+                            .push(IdleSession {
+                                guard: shared.guard,
+                                session_lock: shared.session_lock,
+                            });
+                        info!(channel_id, "SSH 连接已归还连接池");
+                    }
+                    DisconnectDisposition::Close => {
+                        shared.guard.session.set_blocking(true);
+                        let _ = shared.guard.session.disconnect(None, "bye", None);
+                        info!(channel_id, "非池化 SSH 连接已关闭");
+                    }
+                }
+                drop(shared.temporary);
             }
         }
         Ok(())
@@ -489,24 +600,44 @@ impl SshManager {
         db: &Database,
         command: &str,
     ) -> Result<SshCommandOutput> {
-        debug!(server = %server.name, command, "执行远程命令并检查退出状态");
+        Self::exec_command_output_with_timeout(pool, server, db, command, 30_000)
+    }
+
+    /// Executes a remote command with an explicit read timeout.
+    ///
+    /// When the timeout elapses the SSH channel is dropped, which makes the
+    /// remote sshd terminate the command's process group.
+    pub fn exec_command_output_with_timeout(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        command: &str,
+        timeout_ms: u32,
+    ) -> Result<SshCommandOutput> {
+        debug!(server = %server.name, command, timeout_ms, "执行远程命令并检查退出状态");
         let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let mut channel = session.channel_session()?;
             channel.exec(command)?;
-            session.set_timeout(30_000);
+            session.set_timeout(timeout_ms.max(1));
 
             let mut stdout = String::new();
             let stdout_result = channel.read_to_string(&mut stdout);
+            if let Err(error) = stdout_result {
+                session.set_timeout(0);
+                return Err(error.into());
+            }
             let mut stderr = String::new();
             let mut stderr_stream = channel.stderr();
             let stderr_result = stderr_stream.read_to_string(&mut stderr);
+            if let Err(error) = stderr_result {
+                session.set_timeout(0);
+                return Err(error.into());
+            }
             let wait_result = channel.wait_close();
             let exit_status_result = channel.exit_status();
             session.set_timeout(0);
 
-            stdout_result?;
-            stderr_result?;
             wait_result?;
             Ok(SshCommandOutput {
                 stdout,
@@ -530,6 +661,48 @@ impl Drop for SshManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_session_is_poolable_but_temporary_session_is_not() {
+        assert_eq!(
+            disconnect_disposition(Some("server-1")),
+            DisconnectDisposition::Pool
+        );
+        assert_eq!(disconnect_disposition(None), DisconnectDisposition::Close);
+    }
+
+    #[test]
+    fn temporary_descriptor_contains_no_secret_fields() {
+        let descriptor =
+            TemporarySessionDescriptor::new("host", 22, "alice", "password", None, None);
+        let debug = format!("{descriptor:?}");
+        assert!(!debug.contains("password_value"));
+        assert!(!debug.contains("private_key"));
+    }
+
+    #[test]
+    fn temporary_promotion_descriptor_requires_non_poolable_temporary_state() {
+        let descriptor =
+            TemporarySessionDescriptor::new("host", 22, "alice", "password", None, None);
+        assert!(promotable_descriptor(None, Some(&descriptor)).is_ok());
+        assert!(promotable_descriptor(Some("saved-1"), Some(&descriptor)).is_err());
+        assert!(promotable_descriptor(None, None).is_err());
+    }
+
+    #[test]
+    fn temporary_promotion_close_callback_observes_stopped_channel() {
+        let running = Arc::new(AtomicBool::new(true));
+        let observed_running = Arc::new(AtomicBool::new(true));
+        let callback_running = running.clone();
+        let callback_observation = observed_running.clone();
+        let closed_cb: ClosedCallback = Box::new(move |_| {
+            callback_observation.store(callback_running.load(Ordering::Acquire), Ordering::Relaxed);
+        });
+
+        notify_channel_closed("temporary-session", &running, &closed_cb);
+
+        assert!(!observed_running.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn checked_command_output_rejects_nonzero_exit_with_stderr() {

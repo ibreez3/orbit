@@ -6,9 +6,9 @@ class AppState: ObservableObject {
     private static let encoder = JSONEncoder()
 
     let tabState = TabState()
-    let uiState = UIState()
+    let uiState: UIState
     let themeState = ThemeState()
-    let inventoryState = InventoryState()
+    let inventoryState: InventoryState
     let snippetState = SnippetState()
     let toolState = ToolState()
     let aiState = AIState()
@@ -16,9 +16,11 @@ class AppState: ObservableObject {
     let sftpDrawer = SftpDrawerState()
 
     private var pendingQuitTabId: String? = nil
+    private var autoReconnectTasks: [String: Task<Void, Never>] = [:]
 
     @Published var databaseConnectionDialogOpen: Bool = false
     @Published private var databasePanelInvalidationTokens: [String: Int] = [:]
+    @Published private(set) var serverOrganization = ServerOrganizationSnapshot.empty
 
     var tabs: [TabItem] {
         get { tabState.tabs }
@@ -70,6 +72,11 @@ class AppState: ObservableObject {
         set { uiState.assetTreeWidth = newValue }
     }
 
+    var assetTreeCollapsed: Bool {
+        get { uiState.assetTreeCollapsed }
+        set { uiState.assetTreeCollapsed = newValue }
+    }
+
     var assetTreeSearchQuery: String {
         get { uiState.assetTreeSearchQuery }
         set { uiState.assetTreeSearchQuery = newValue }
@@ -102,6 +109,8 @@ class AppState: ObservableObject {
     }
 
     let bridge = OrbitBridge.shared
+    let workspaceBridge: any ServerWorkspaceBridge
+    private let sidebarDefaults: UserDefaults
     let textEditorWC = TextEditorWindowController()
 
     // MARK: - Inventory forwarding
@@ -261,7 +270,7 @@ class AppState: ObservableObject {
             )
         }
 
-        if tab.serverId == "local" {
+        if case .local = tab.connectionTarget {
             return ActiveSessionContext(
                 kind: .localShell,
                 tabId: tab.id,
@@ -273,6 +282,24 @@ class AppState: ObservableObject {
                 username: NSUserName(),
                 port: nil,
                 connectionStatus: focusedSessionId == nil ? .disconnected : .connected,
+                workingDirectory: nil,
+                capabilities: [.ai, .logs, .snippets]
+            )
+        }
+
+        if case .temporary(let tabId) = tab.connectionTarget {
+            let draft = temporaryDraft(for: tabId)
+            return ActiveSessionContext(
+                kind: .terminal,
+                tabId: tab.id,
+                paneId: focusedSessionId,
+                sessionId: focusedSessionId,
+                serverId: nil,
+                serverName: tab.serverName,
+                host: draft?.host,
+                username: draft?.username,
+                port: draft?.port,
+                connectionStatus: focusedSessionId == nil ? .connecting : .connected,
                 workingDirectory: nil,
                 capabilities: [.ai, .logs, .snippets]
             )
@@ -304,9 +331,17 @@ class AppState: ObservableObject {
         )
     }
 
-    init() {
+    init(
+        workspaceBridge: any ServerWorkspaceBridge = OrbitBridge.shared,
+        sidebarDefaults: UserDefaults = .standard
+    ) {
+        self.workspaceBridge = workspaceBridge
+        self.sidebarDefaults = sidebarDefaults
+        self.uiState = UIState(defaults: sidebarDefaults)
+        self.inventoryState = InventoryState(bridge: workspaceBridge)
         ThemeManager.shared.loadThemes()
         loadServers()
+        loadServerOrganization()
         loadCredentialGroups()
         loadDatabaseConnections()
         loadDatabaseBackupRecords()
@@ -322,12 +357,26 @@ class AppState: ObservableObject {
     func loadServers() {
         Task {
             do {
-                let result = try bridge.listServers()
+                let result = try workspaceBridge.listServers()
                 await MainActor.run { self.servers = result }
             } catch {
                 await MainActor.run {
                     alertTitle = "加载失败"
                     alertMessage = "无法加载服务器列表: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func loadServerOrganization() {
+        Task {
+            do {
+                let result = try await workspaceBridge.listServerOrganizationAsync()
+                await MainActor.run { self.serverOrganization = result }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "加载失败"
+                    alertMessage = "无法加载服务器目录与标签: \(error.localizedDescription)"
                 }
             }
         }
@@ -350,7 +399,7 @@ class AppState: ObservableObject {
     func addServer(_ input: ServerInput) {
         Task {
             do {
-                let server = try bridge.addServer(input: input)
+                let server = try workspaceBridge.addServer(input: input)
                 await MainActor.run { servers.append(server) }
             } catch {
                 await MainActor.run {
@@ -364,7 +413,7 @@ class AppState: ObservableObject {
     func updateServer(id: String, input: ServerInput) {
         Task {
             do {
-                let server = try bridge.updateServer(id: id, input: input)
+                let server = try workspaceBridge.updateServer(id: id, input: input)
                 await MainActor.run { servers = servers.map { $0.id == id ? server : $0 } }
             } catch {
                 await MainActor.run {
@@ -402,6 +451,192 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    func setServerPinned(_ server: Server, isPinned: Bool) {
+        Task {
+            do {
+                let updated = try await workspaceBridge.setServerPinAsync(
+                    serverId: server.id,
+                    isPinned: isPinned,
+                    pinOrder: nil
+                )
+                await MainActor.run {
+                    servers = servers.map { $0.id == updated.id ? updated : $0 }
+                }
+            } catch {
+                await MainActor.run {
+                    alertTitle = "更新失败"
+                    alertMessage = "无法更新服务器置顶状态: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func moveServer(_ server: Server, toFolderId folderId: String?) {
+        let projection = ServerTreeProjection(snapshot: serverOrganization, servers: servers)
+        guard projection.canMoveServer(toFolderId: folderId) else {
+            alertTitle = "移动失败"
+            alertMessage = "目标目录不存在或层级无效"
+            return
+        }
+        Task {
+            do {
+                try await workspaceBridge.moveServerAsync(serverId: server.id, folderId: folderId)
+                loadServers()
+                loadServerOrganization()
+            } catch {
+                await MainActor.run {
+                    alertTitle = "移动失败"
+                    alertMessage = "无法移动服务器: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func createServerFolder(name: String, parentId: String?) {
+        Task {
+            do {
+                _ = try await workspaceBridge.createServerFolderAsync(
+                    input: FolderInput(name: name, parent_id: parentId, sort_order: nil)
+                )
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "创建失败", error: error)
+            }
+        }
+    }
+
+    func renameServerFolder(_ folder: ServerFolder, name: String) {
+        Task {
+            do {
+                _ = try await workspaceBridge.renameServerFolderAsync(
+                    id: folder.id,
+                    input: FolderInput(name: name, parent_id: folder.parent_id, sort_order: folder.sort_order)
+                )
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "重命名失败", error: error)
+            }
+        }
+    }
+
+    func moveServerFolder(_ folder: ServerFolder, toParentId parentId: String?) {
+        let projection = ServerTreeProjection(snapshot: serverOrganization, servers: servers)
+        guard projection.canMoveFolder(folder.id, toParentId: parentId) else {
+            alertTitle = "移动失败"
+            alertMessage = "不能移动到自身、后代目录，或生成超过三级的目录"
+            return
+        }
+        let siblingOrder = serverOrganization.folders
+            .filter { $0.parent_id == parentId && $0.id != folder.id }
+            .map(\.sort_order)
+            .max()
+            .map { $0 + 1 } ?? 0
+        Task {
+            do {
+                _ = try await workspaceBridge.moveServerFolderAsync(
+                    id: folder.id,
+                    input: FolderMoveInput(parent_id: parentId, sort_order: siblingOrder)
+                )
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "移动失败", error: error)
+            }
+        }
+    }
+
+    func reorderServerFolder(_ folder: ServerFolder, direction: Int) {
+        let siblings = serverOrganization.folders
+            .filter { $0.parent_id == folder.parent_id }
+        let moves = ServerFolderOrdering.reorderedMoves(
+            folders: siblings,
+            movingId: folder.id,
+            direction: direction
+        )
+        guard !moves.isEmpty else { return }
+        Task {
+            do {
+                for move in moves {
+                    _ = try await workspaceBridge.moveServerFolderAsync(
+                        id: move.folderId,
+                        input: FolderMoveInput(parent_id: move.parentId, sort_order: move.sortOrder)
+                    )
+                }
+                loadServerOrganization()
+            } catch {
+                loadServerOrganization()
+                await showServerOrganizationError(title: "排序失败", error: error)
+            }
+        }
+    }
+
+    func deleteServerFolder(_ folder: ServerFolder, destinationFolderId: String?, deleteServers: Bool) {
+        Task {
+            do {
+                try await workspaceBridge.deleteServerFolderAsync(
+                    id: folder.id,
+                    input: FolderDeleteInput(
+                        destination_folder_id: destinationFolderId,
+                        delete_servers: deleteServers
+                    )
+                )
+                loadServers()
+                loadServerOrganization()
+            } catch {
+                await showServerOrganizationError(title: "删除失败", error: error)
+            }
+        }
+    }
+
+    func createServerTag(name: String) async throws -> ServerTag {
+        let tag = try await workspaceBridge.createServerTagAsync(name: name)
+        let snapshot = try await workspaceBridge.listServerOrganizationAsync()
+        await MainActor.run { serverOrganization = snapshot }
+        return tag
+    }
+
+    func saveServer(_ input: ServerInput, tagIds: [String], editingId: String?) async throws -> Server {
+        let saved: Server
+        if let editingId {
+            saved = try workspaceBridge.updateServer(id: editingId, input: input)
+        } else {
+            saved = try workspaceBridge.addServer(input: input)
+        }
+
+        do {
+            try await workspaceBridge.moveServerAsync(serverId: saved.id, folderId: input.folder_id)
+            try await workspaceBridge.setServerTagsAsync(serverId: saved.id, tagIds: tagIds)
+            let refreshedServers = try workspaceBridge.listServers()
+            let snapshot = try await workspaceBridge.listServerOrganizationAsync()
+            await MainActor.run {
+                servers = refreshedServers
+                serverOrganization = snapshot
+            }
+            return refreshedServers.first(where: { $0.id == saved.id }) ?? saved
+        } catch {
+            let refreshedServers = try? workspaceBridge.listServers()
+            let refreshedOrganization = try? await workspaceBridge.listServerOrganizationAsync()
+            await MainActor.run {
+                if let refreshedServers { servers = refreshedServers }
+                if let refreshedOrganization { serverOrganization = refreshedOrganization }
+            }
+            throw ServerSaveFailure(serverId: saved.id, message: error.localizedDescription)
+        }
+    }
+
+    @MainActor
+    private func showServerOrganizationError(title: String, error: Error) {
+        alertTitle = title
+        alertMessage = error.localizedDescription
+    }
+
+    func selectServerSystemView(_ view: ServerSystemView) {
+        uiState.assetTreeSearchQuery = ""
+        uiState.selectedServerTagId = nil
+        uiState.selectedServerSystemView = view
+        uiState.assetTreeCollapsed = false
+        saveAssetTreePresentation()
     }
 
     func addCg(_ input: CredentialGroupInput) {
@@ -550,6 +785,29 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    func openDatabaseWorkspace() {
+        if tabState.activeTab?.type == .database { return }
+
+        let activeServerId: String?
+        if let tab = tabState.activeTab, case .saved(let serverId) = tab.connectionTarget {
+            activeServerId = serverId
+        } else {
+            activeServerId = nil
+        }
+
+        let connections = inventoryState.databaseConnections
+        if let activeServerId,
+           let matching = connections.first(where: { $0.ssh_server_id == activeServerId }) {
+            openDatabaseConnection(matching)
+            return
+        }
+        if connections.count == 1, let only = connections.first {
+            openDatabaseConnection(only)
+            return
+        }
+        openDatabaseConnectionDialog()
     }
 
     func openDatabaseConnectionDialog(_ connection: DatabaseConnection? = nil) {
@@ -751,9 +1009,369 @@ class AppState: ObservableObject {
 
     func addLocalTerminalTab() {
         let id = "local-\(Int(Date().timeIntervalSince1970 * 1000))"
-        let tab = TabItem(id: id, type: .terminal, serverId: "local", serverName: "本地", title: "本地终端")
+        let tab = TabItem(
+            id: id,
+            type: .terminal,
+            serverId: nil,
+            connectionTarget: .local,
+            serverName: "本地",
+            title: "本地终端"
+        )
         tabs.append(tab)
         requestActivateTab(id)
+    }
+
+    @discardableResult
+    func addTemporaryTerminalTab(
+        draft: TemporaryConnectionDraft,
+        sessionId: String? = nil
+    ) -> String {
+        let id = "temporary-\(UUID().uuidString)"
+        let name = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = name.isEmpty ? draft.host : name
+        let tab = TabItem(
+            id: id,
+            type: .terminal,
+            serverId: nil,
+            connectionTarget: .temporary(tabId: id),
+            serverName: displayName,
+            title: "SSH: \(displayName)",
+            sessionId: sessionId,
+            focusedChannelId: sessionId
+        )
+        tabState.temporaryDrafts[id] = draft
+        tabState.temporaryTabTokens[id] = UUID()
+        tabs.append(tab)
+        requestActivateTab(id)
+        return id
+    }
+
+    func temporaryDraft(for tabId: String) -> TemporaryConnectionDraft? {
+        tabState.temporaryDrafts[tabId]
+    }
+
+    func temporaryPromotionFailure(for tabId: String) -> TemporaryPromotionFailure? {
+        tabState.temporaryPromotionFailures[tabId]
+    }
+
+    @MainActor
+    @discardableResult
+    func promoteTemporaryTab(
+        tabId: String,
+        sessionId: String
+    ) async throws -> TemporaryPromotionOutcome {
+        guard !tabState.temporaryPromotionTabIds.contains(tabId) else {
+            throw WorkspaceError.promotionInProgress
+        }
+        guard let draft = temporaryDraft(for: tabId),
+              let tabToken = tabState.temporaryTabTokens[tabId],
+              let tab = tabState.tab(id: tabId),
+              tab.connectionTarget == .temporary(tabId: tabId) else {
+            throw WorkspaceError.missingTemporaryDraft
+        }
+        guard tab.sessionId == sessionId else {
+            throw WorkspaceError.staleTemporarySession
+        }
+
+        tabState.temporaryPromotionTabIds.insert(tabId)
+        defer { tabState.temporaryPromotionTabIds.remove(tabId) }
+
+        let server = try await workspaceBridge.promoteTemporaryServerAsync(
+            sessionId: sessionId,
+            input: draft.promotionInput
+        )
+
+        refreshServerInventory(with: server)
+
+        guard tabState.temporaryTabTokens[tabId] == tabToken else {
+            return .persistedAfterTabClosed(serverId: server.id)
+        }
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }),
+              tabs[tabIndex].connectionTarget == .temporary(tabId: tabId),
+              tabs[tabIndex].sessionId == sessionId,
+              temporaryDraft(for: tabId) == draft else {
+            return .persistedWithoutRebinding(serverId: server.id)
+        }
+        tabs[tabIndex].serverId = server.id
+        tabs[tabIndex].connectionTarget = .saved(serverId: server.id)
+        tabs[tabIndex].serverName = server.name
+        tabs[tabIndex].title = "SSH: \(server.name)"
+        clearTemporaryDraft(tabId: tabId)
+        return .promoted(serverId: server.id)
+    }
+
+    @MainActor
+    func retryTemporaryPromotion(tabId: String) async {
+        guard var failure = temporaryPromotionFailure(for: tabId),
+              !failure.isRetrying,
+              let tab = tabState.tab(id: tabId),
+              tab.connectionTarget == .temporary(tabId: tabId),
+              tab.sessionId == failure.sessionId,
+              temporaryDraft(for: tabId) != nil else {
+            return
+        }
+
+        failure.isRetrying = true
+        tabState.temporaryPromotionFailures[tabId] = failure
+        do {
+            let outcome = try await promoteTemporaryTab(
+                tabId: tabId,
+                sessionId: failure.sessionId
+            )
+            switch outcome {
+            case .promoted:
+                tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            case .persistedAfterTabClosed:
+                tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            case .persistedWithoutRebinding:
+                tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            }
+        } catch {
+            recordTemporaryPromotionFailure(
+                error,
+                tabId: tabId,
+                sessionId: failure.sessionId
+            )
+        }
+    }
+
+    func dismissTemporaryPromotionFailure(tabId: String) {
+        tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+    }
+
+    private func refreshServerInventory(with server: Server) {
+        if let serverIndex = servers.firstIndex(where: { $0.id == server.id }) {
+            servers[serverIndex] = server
+        } else {
+            servers.append(server)
+        }
+        loadServers()
+        loadServerOrganization()
+    }
+
+    @discardableResult
+    func openWorkspaceEntry(_ entry: WorkspaceEntryPoint) -> Bool {
+        guard uiState.temporaryConnectionDraft == nil else { return false }
+
+        switch entry {
+        case .quickConnect:
+            uiState.spotlightOpen = false
+            uiState.spotlightQuery = ""
+            uiState.serverQuickConnectInputFocused = true
+            uiState.serverQuickConnectResultsVisible = !uiState.serverQuickConnectQuery.isEmpty
+        case .commandPalette:
+            uiState.serverQuickConnectResultsVisible = false
+            uiState.serverQuickConnectInputFocused = false
+            uiState.spotlightQuery = ""
+            uiState.spotlightOpen = true
+        }
+        return true
+    }
+
+    func focusServerQuickConnect() {
+        openWorkspaceEntry(.quickConnect)
+    }
+
+    func closeServerQuickConnect(clearQuery: Bool = true) {
+        uiState.serverQuickConnectResultsVisible = false
+        uiState.serverQuickConnectInputFocused = false
+        if clearQuery {
+            uiState.serverQuickConnectQuery = ""
+        }
+        restoreActiveTerminalFocus()
+    }
+
+    func presentTemporaryConnectionPanel(address: ParsedServerAddress) {
+        uiState.spotlightOpen = false
+        uiState.spotlightQuery = ""
+        uiState.temporaryConnectionToken = UUID()
+        uiState.temporaryConnectionDraft = TemporaryConnectionDraft(
+            host: address.host,
+            port: address.port,
+            username: address.username ?? "",
+            authType: "password"
+        )
+        uiState.serverQuickConnectResultsVisible = false
+        uiState.serverQuickConnectInputFocused = false
+    }
+
+    func dismissTemporaryConnectionPanel(returnToSearch: Bool = true) {
+        uiState.temporaryConnectionToken = nil
+        if var draft = uiState.temporaryConnectionDraft {
+            draft.clearSecrets()
+            uiState.temporaryConnectionDraft = draft
+        }
+        uiState.temporaryConnectionDraft = nil
+        uiState.serverQuickConnectResultsVisible = returnToSearch
+            && !uiState.serverQuickConnectQuery.isEmpty
+        uiState.serverQuickConnectInputFocused = returnToSearch
+        if !returnToSearch {
+            uiState.serverQuickConnectQuery = ""
+            restoreActiveTerminalFocus()
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    func submitTemporaryConnection() -> Task<Void, Never>? {
+        guard let token = uiState.temporaryConnectionToken,
+              var draft = uiState.temporaryConnectionDraft,
+              !draft.isConnecting else { return nil }
+
+        if let validationError = temporaryConnectionValidationError(draft) {
+            draft.validationError = validationError
+            draft.connectionError = nil
+            uiState.temporaryConnectionDraft = draft
+            return nil
+        }
+
+        draft.validationError = nil
+        draft.connectionError = nil
+        draft.isConnecting = true
+        uiState.temporaryConnectionDraft = draft
+        let submittedDraft = draft
+
+        return Task {
+            do {
+                let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
+                    input: submittedDraft.connectionInput
+                )
+                guard uiState.temporaryConnectionToken == token,
+                      uiState.temporaryConnectionDraft != nil else {
+                    await discardSSHSession(sessionId)
+                    return
+                }
+
+                var tabDraft = submittedDraft
+                tabDraft.isConnecting = false
+                tabDraft.validationError = nil
+                tabDraft.connectionError = nil
+                let tabId = addTemporaryTerminalTab(
+                    draft: tabDraft,
+                    sessionId: sessionId
+                )
+                dismissTemporaryConnectionPanel(returnToSearch: false)
+                restoreActiveTerminalFocus()
+
+                if tabDraft.saveToAssets {
+                    do {
+                        _ = try await promoteTemporaryTab(
+                            tabId: tabId,
+                            sessionId: sessionId
+                        )
+                    } catch {
+                        recordTemporaryPromotionFailure(
+                            error,
+                            tabId: tabId,
+                            sessionId: sessionId
+                        )
+                    }
+                }
+
+            } catch {
+                guard uiState.temporaryConnectionToken == token,
+                      var currentDraft = uiState.temporaryConnectionDraft else { return }
+                currentDraft.isConnecting = false
+                currentDraft.connectionError = error.localizedDescription
+                uiState.temporaryConnectionDraft = currentDraft
+            }
+        }
+    }
+
+    @MainActor
+    private func recordTemporaryPromotionFailure(
+        _ error: Error,
+        tabId: String,
+        sessionId: String
+    ) {
+        guard let tab = tabState.tab(id: tabId),
+              tab.connectionTarget == .temporary(tabId: tabId),
+              tab.sessionId == sessionId,
+              temporaryDraft(for: tabId) != nil else {
+            tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+            return
+        }
+        tabState.temporaryPromotionFailures[tabId] = TemporaryPromotionFailure(
+            sessionId: sessionId,
+            message: "服务器已连接，但保存失败: \(error.localizedDescription)"
+        )
+    }
+
+    var workspacePresentationState: WorkspacePresentationState {
+        WorkspacePresentationState(
+            commandPaletteOpen: uiState.spotlightOpen,
+            temporaryConnectionOpen: uiState.temporaryConnectionDraft != nil,
+            quickConnectResultsVisible: uiState.serverQuickConnectResultsVisible,
+            quickConnectFocused: uiState.serverQuickConnectInputFocused,
+            toolOverlayOpen: activeTool != nil && activeTool?.tool != .ai
+        )
+    }
+
+    @discardableResult
+    func dismissHighestWorkspaceLayer() -> WorkspacePresentationLayer? {
+        guard let layer = workspacePresentationState.highestLayer else { return nil }
+
+        switch layer {
+        case .commandPalette:
+            closeSpotlight()
+        case .temporaryConnection:
+            dismissTemporaryConnectionPanel()
+        case .quickConnectResults:
+            uiState.serverQuickConnectResultsVisible = false
+        case .quickConnectFocus:
+            uiState.serverQuickConnectInputFocused = false
+            restoreActiveTerminalFocus()
+        case .toolOverlay:
+            closeOverlayTool()
+        }
+        return layer
+    }
+
+    @discardableResult
+    func handleEscape() -> Bool {
+        dismissHighestWorkspaceLayer() != nil
+    }
+
+    func restoreActiveTerminalFocus() {
+        guard let activeTabId,
+              let tab = tabs.first(where: { $0.id == activeTabId }),
+              tab.type == .terminal,
+              let sessionId = tab.focusedChannelId ?? tab.sessionId,
+              let terminalView = OrbitBridge.shared.terminalView(for: sessionId) as? OrbitTerminalView else {
+            return
+        }
+        terminalView.window?.makeFirstResponder(terminalView)
+    }
+
+    private func temporaryConnectionValidationError(_ draft: TemporaryConnectionDraft) -> String? {
+        if draft.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请输入主机地址"
+        }
+        if draft.port == 0 {
+            return "端口必须在 1 到 65535 之间"
+        }
+        if draft.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请输入用户名"
+        }
+        if draft.credentialGroupId == nil {
+            if draft.authType == "password",
+               draft.password.isEmpty {
+                return "请输入密码"
+            }
+            if draft.authType == "key" {
+                if draft.keySource == "file", draft.keyFilePath.isEmpty {
+                    return "请选择私钥文件"
+                }
+                if draft.keySource != "file", draft.privateKey.isEmpty {
+                    return "请输入私钥内容"
+                }
+            }
+        }
+        if draft.saveToAssets,
+           draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "请输入服务器名称"
+        }
+        return nil
     }
 
     func addTab(server: Server, type: TabType) {
@@ -776,7 +1394,6 @@ class AppState: ObservableObject {
             tab.paneTree = nil
         }
         tabs.append(tab)
-        trackRecentServer(server.id)
         requestActivateTab(id)
     }
 
@@ -792,7 +1409,6 @@ class AppState: ObservableObject {
         )
         tab.paneTree = nil
         tabs.append(tab)
-        trackRecentServer(server.id)
         requestActivateTab(id)
     }
 
@@ -957,6 +1573,9 @@ class AppState: ObservableObject {
             }
         }
         if tool == .ai {
+            if !aiState.aiConfig.enabled {
+                return "AI 助手未启用（可在设置中开启）"
+            }
             if (context.kind == .terminal || context.kind == .localShell) && context.sessionId == nil {
                 return "终端会话建立后可使用 AI"
             }
@@ -965,6 +1584,14 @@ class AppState: ObservableObject {
             return disabledReason(for: tool, context: context)
         }
         return nil
+    }
+
+    var canUsePersistedServerTools: Bool {
+        guard let activeTab = tabState.activeTab else { return false }
+        if case .saved = activeTab.connectionTarget {
+            return true
+        }
+        return false
     }
 
     private func capability(for tool: SessionTool) -> SessionCapabilities {
@@ -1025,11 +1652,22 @@ class AppState: ObservableObject {
             return
         }
 
+        if case .local = tab.connectionTarget {
+            attachLocalSplit(
+                tabId: tab.id,
+                existingChannelId: existingChannelId,
+                direction: direction
+            )
+            return
+        }
+
         let tabId = tab.id
         Task {
             let newChannelId: String
             do {
-                newChannelId = try await bridge.spawnChannelAsync(existingSessionId: existingChannelId)
+                newChannelId = try await workspaceBridge.spawnChannelAsync(
+                    existingSessionId: existingChannelId
+                )
             } catch {
                 await MainActor.run {
                     alertTitle = "分屏失败"
@@ -1038,8 +1676,11 @@ class AppState: ObservableObject {
                 return
             }
 
-            await MainActor.run {
-                guard let idx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+            let attached = await MainActor.run {
+                guard let idx = tabs.firstIndex(where: { $0.id == tabId }),
+                      tabOwnsChannel(tabs[idx], channelId: existingChannelId) else {
+                    return false
+                }
                 let newSplitId = UUID().uuidString
                 let newLeaf = PaneNode.leaf(channelId: newChannelId)
 
@@ -1052,6 +1693,12 @@ class AppState: ObservableObject {
                                                  first: .leaf(channelId: existingChannelId), second: newLeaf)
                 }
                 requestFocusPane(tabId: tabId, paneId: newChannelId)
+                return true
+            }
+
+            guard attached else {
+                await discardSSHSession(newChannelId)
+                return
             }
 
             // Focus the new terminal after SwiftUI creates it
@@ -1062,6 +1709,44 @@ class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Local terminals are backed by per-pane `LocalShell` processes rather
+    /// than SSH channels, so splitting one never goes through the Rust bridge.
+    private func attachLocalSplit(
+        tabId: String,
+        existingChannelId: String,
+        direction: SplitDirection
+    ) {
+        guard let idx = tabs.firstIndex(where: { $0.id == tabId }),
+              tabOwnsChannel(tabs[idx], channelId: existingChannelId) else { return }
+
+        let newChannelId = "local-\(UUID().uuidString)"
+        let newSplitId = UUID().uuidString
+        let newLeaf = PaneNode.leaf(channelId: newChannelId)
+
+        if let tree = tabs[idx].paneTree {
+            tabs[idx].paneTree = tree.replacingLeaf(channelId: existingChannelId, with:
+                .split(id: newSplitId, direction: direction, ratio: 0.5,
+                       first: .leaf(channelId: existingChannelId), second: newLeaf))
+        } else {
+            tabs[idx].paneTree = .split(id: newSplitId, direction: direction, ratio: 0.5,
+                                         first: .leaf(channelId: existingChannelId), second: newLeaf)
+        }
+        requestFocusPane(tabId: tabId, paneId: newChannelId)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if let tv = OrbitBridge.shared.terminalView(for: newChannelId) as? OrbitTerminalView {
+                tv.window?.makeFirstResponder(tv)
+            }
+        }
+    }
+
+    private func tabOwnsChannel(_ tab: TabItem, channelId: String) -> Bool {
+        if let tree = tab.paneTree {
+            return tree.contains(channelId)
+        }
+        return tab.sessionId == channelId
     }
 
     func closeCurrentPane() {
@@ -1075,9 +1760,20 @@ class AppState: ObservableObject {
             return
         }
 
+        let isLocal: Bool
+        if case .local = tab.connectionTarget {
+            isLocal = true
+        } else {
+            isLocal = false
+        }
+        if isLocal {
+            stopLocalShell(channelId: focused)
+        }
         bridge.removeSSHHandlers(sessionId: focused)
         bridge.removeTerminalView(sessionId: focused)
-        Task { try? await bridge.disconnectSSHAsync(sessionId: focused) }
+        if !isLocal {
+            Task { try? await bridge.disconnectSSHAsync(sessionId: focused) }
+        }
 
         if let newTree = tree.removing(channelId: focused) {
             if case .leaf(let remaining) = newTree {
@@ -1110,8 +1806,21 @@ class AppState: ObservableObject {
               let tree = tabs[tabIdx].paneTree,
               let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
               let next = tree.findAdjacent(channelId: focused, forward: forward) else { return }
-        requestFocusPane(tabId: active, paneId: next)
-        if let tv = OrbitBridge.shared.terminalView(for: next) as? OrbitTerminalView {
+        focusPane(tabId: active, channelId: next)
+    }
+
+    func navigatePane(direction: PaneNavigationDirection) {
+        guard let active = activeTabId,
+              let tabIdx = tabs.firstIndex(where: { $0.id == active }),
+              let tree = tabs[tabIdx].paneTree,
+              let focused = tabs[tabIdx].focusedChannelId ?? tabs[tabIdx].sessionId,
+              let next = tree.neighbor(of: focused, direction: direction) else { return }
+        focusPane(tabId: active, channelId: next)
+    }
+
+    private func focusPane(tabId: String, channelId: String) {
+        requestFocusPane(tabId: tabId, paneId: channelId)
+        if let tv = OrbitBridge.shared.terminalView(for: channelId) as? OrbitTerminalView {
             tv.window?.makeFirstResponder(tv)
         }
     }
@@ -1140,15 +1849,32 @@ class AppState: ObservableObject {
         } else {
             channelIds = []
         }
+        let isLocal: Bool
+        if case .local = tab.connectionTarget {
+            isLocal = true
+        } else {
+            isLocal = false
+        }
         for channelId in channelIds {
+            if isLocal {
+                stopLocalShell(channelId: channelId)
+            }
             bridge.removeSSHHandlers(sessionId: channelId)
             bridge.removeTerminalView(sessionId: channelId)
         }
+        guard !isLocal else { return }
         Task.detached {
             for channelId in channelIds {
                 try? self.bridge.disconnectSSH(sessionId: channelId)
             }
         }
+    }
+
+    private func stopLocalShell(channelId: String) {
+        guard let terminalView = bridge.terminalView(for: channelId) as? OrbitTerminalView,
+              let shell = terminalView.localShell else { return }
+        shell.stop()
+        terminalView.localShell = nil
     }
 
     func removeTab(_ id: String) {
@@ -1179,6 +1905,7 @@ class AppState: ObservableObject {
     }
 
     func confirmQuit() {
+        cancelAutoReconnects()
         if let tabId = pendingQuitTabId {
             performRemoveTab(tabId)
         }
@@ -1193,12 +1920,14 @@ class AppState: ObservableObject {
     }
 
     private func performRemoveTab(_ id: String) {
+        cancelAutoReconnect(tabId: id)
         let removedIndex = tabs.firstIndex(where: { $0.id == id }) ?? 0
         if let tab = tabs.first(where: { $0.id == id }) {
             disconnectAllChannels(tab: tab)
         }
         dockerPanelSnapshots.removeValue(forKey: id)
         databasePanelSnapshots.removeValue(forKey: id)
+        clearTemporaryDraft(tabId: id)
         tabs.removeAll { $0.id == id }
         if activeTabId == id {
             closeSessionScopedTools()
@@ -1218,18 +1947,134 @@ class AppState: ObservableObject {
         }
     }
 
-    func connectSSH(tabId: String, serverId: String) {
-        Task {
-            do {
-                let sessionId = try await bridge.connectSSHAsync(serverId: serverId)
-                await MainActor.run { updateTabSessionId(tabId, sessionId: sessionId) }
-            } catch {
+    @MainActor
+    @discardableResult
+    func installSSHSession(
+        tabId: String,
+        expectedTarget: ServerConnectionTarget,
+        sessionId: String,
+        dataHandler: @escaping (Data) -> Void,
+        closedHandler: @escaping () -> Void
+    ) async -> Bool {
+        guard let tab = tabState.tab(id: tabId),
+              tab.type == .terminal,
+              tab.connectionTarget == expectedTarget,
+              tab.sessionId == nil else {
+            await discardSSHSession(sessionId)
+            return false
+        }
+        updateTabSessionId(tabId, sessionId: sessionId)
+        bridge.setSSHHandlers(
+            sessionId: sessionId,
+            dataHandler: dataHandler,
+            closedHandler: closedHandler
+        )
+        let installed = tabState.tab(id: tabId)?.connectionTarget == expectedTarget
+            && tabState.tab(id: tabId)?.sessionId == sessionId
+        if !installed {
+            await discardSSHSession(sessionId)
+        }
+        return installed
+    }
+
+    @MainActor
+    private func discardSSHSession(_ sessionId: String) async {
+        bridge.removeSSHHandlers(sessionId: sessionId)
+        bridge.removeTerminalView(sessionId: sessionId)
+        try? await workspaceBridge.disconnectSSHAsync(sessionId: sessionId)
+    }
+
+    func connectSSH(for connectionTarget: ServerConnectionTarget) async throws -> String {
+        switch connectionTarget {
+        case .saved(let serverId):
+            return try await bridge.connectSSHAsync(serverId: serverId)
+        case .temporary(let tabId):
+            guard let draft = temporaryDraft(for: tabId) else {
+                throw WorkspaceError.missingTemporaryDraft
+            }
+            return try await workspaceBridge.connectTemporarySSHAsync(input: draft.connectionInput)
+        case .local:
+            throw WorkspaceError.localConnectionHandledSeparately
+        }
+    }
+
+    /// Connects a saved server to an existing tab.
+    /// - Returns: `true` when the session was installed on the expected tab.
+    @discardableResult
+    func connectSSH(
+        tabId: String,
+        serverId: String,
+        suppressFailureAlert: Bool = false
+    ) async -> Bool {
+        do {
+            let sessionId = try await workspaceBridge.connectSSHAsync(serverId: serverId)
+            let expectedTarget = ServerConnectionTarget.saved(serverId: serverId)
+            let installed = await MainActor.run {
+                guard let tab = tabState.tab(id: tabId),
+                      tab.type == .terminal,
+                      tab.connectionTarget == expectedTarget,
+                      tab.sessionId == nil else { return false }
+                updateTabSessionId(tabId, sessionId: sessionId)
+                return true
+            }
+            if !installed {
+                await discardSSHSession(sessionId)
+            }
+            return installed
+        } catch {
+            if !suppressFailureAlert {
                 await MainActor.run {
                     alertTitle = "连接失败"
                     alertMessage = "\(error.localizedDescription)"
                 }
             }
+            return false
         }
+    }
+
+    /// Connects a temporary draft to an existing tab.
+    /// - Returns: `true` when the session was installed on the expected tab.
+    @discardableResult
+    func connectTemporarySSH(
+        tabId: String,
+        suppressFailureAlert: Bool = false
+    ) async -> Bool {
+        guard let draft = temporaryDraft(for: tabId) else { return false }
+        let expectedTarget = ServerConnectionTarget.temporary(tabId: tabId)
+        do {
+            let sessionId = try await workspaceBridge.connectTemporarySSHAsync(
+                input: draft.connectionInput
+            )
+            let installed = await MainActor.run {
+                guard let tab = tabState.tab(id: tabId),
+                      tab.type == .terminal,
+                      tab.connectionTarget == expectedTarget,
+                      tab.sessionId == nil else { return false }
+                updateTabSessionId(tabId, sessionId: sessionId)
+                return true
+            }
+            if !installed {
+                await discardSSHSession(sessionId)
+            }
+            return installed
+        } catch {
+            if !suppressFailureAlert {
+                await MainActor.run {
+                    alertTitle = "连接失败"
+                    alertMessage = error.localizedDescription
+                }
+            }
+            return false
+        }
+    }
+
+    private func clearTemporaryDraft(tabId: String) {
+        tabState.temporaryTabTokens.removeValue(forKey: tabId)
+        tabState.temporaryPromotionFailures.removeValue(forKey: tabId)
+        guard var draft = tabState.temporaryDrafts[tabId] else { return }
+        draft.clearSecrets()
+        tabState.temporaryDrafts[tabId] = draft
+        tabState.temporaryDrafts.removeValue(forKey: tabId)
     }
 
     func openDialog(server: Server? = nil, defaults: ServerInput? = nil) {
@@ -1299,14 +2144,71 @@ class AppState: ObservableObject {
                 removeTab(tab.id)
             }
         } else {
-            // Single pane: close the whole tab
-            removeTab(tab.id)
+            // Single pane: keep the tab so the user keeps their scrollback,
+            // then reconnect automatically when that preference is enabled.
+            tabs[tabIdx].sessionId = nil
+            tabs[tabIdx].focusedChannelId = nil
+            tabs[tabIdx].paneTree = nil
+            tabs[tabIdx].sessionGeneration &+= 1
+            if tab.id == activeTabId {
+                closeSessionScopedTools()
+            }
+            if shouldAutoReconnect(tab) {
+                scheduleAutoReconnect(tabId: tab.id)
+            }
         }
     }
 
+    // MARK: - Auto reconnect
+
+    var isAutoReconnectEnabled: Bool {
+        UserDefaults.standard.object(forKey: "sshReconnectEnabled") as? Bool ?? true
+    }
+
+    var autoReconnectInterval: TimeInterval {
+        let stored = UserDefaults.standard.object(forKey: "sshReconnectInterval") as? Double ?? 3
+        return max(1, min(30, stored))
+    }
+
+    private func shouldAutoReconnect(_ tab: TabItem) -> Bool {
+        guard isAutoReconnectEnabled, pendingQuitTabId == nil else { return false }
+        switch tab.connectionTarget {
+        case .saved, .temporary:
+            return true
+        case .local:
+            return false
+        }
+    }
+
+    private func scheduleAutoReconnect(tabId: String) {
+        guard autoReconnectTasks[tabId] == nil else { return }
+        guard let tab = tabs.first(where: { $0.id == tabId }), shouldAutoReconnect(tab) else {
+            return
+        }
+        let interval = autoReconnectInterval
+        autoReconnectTasks[tabId] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            await MainActor.run {
+                self.autoReconnectTasks.removeValue(forKey: tabId)
+                guard let tab = self.tabs.first(where: { $0.id == tabId }),
+                      self.shouldAutoReconnect(tab) else { return }
+                self.reconnectTab(tabId, isAutoReconnect: true)
+            }
+        }
+    }
+
+    func cancelAutoReconnect(tabId: String) {
+        autoReconnectTasks.removeValue(forKey: tabId)?.cancel()
+    }
+
+    func cancelAutoReconnects() {
+        autoReconnectTasks.values.forEach { $0.cancel() }
+        autoReconnectTasks.removeAll()
+    }
+
     func openSpotlight() {
-        spotlightQuery = ""
-        spotlightOpen = true
+        openWorkspaceEntry(.commandPalette)
     }
 
     func closeSpotlight() {
@@ -1325,25 +2227,68 @@ class AppState: ObservableObject {
         UserDefaults.standard.set(newTheme.rawValue, forKey: "theme")
     }
 
-    func reconnectTab(_ tabId: String) {
+    func reconnectTab(_ tabId: String, isAutoReconnect: Bool = false) {
         guard let tabIdx = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         let tab = tabs[tabIdx]
         guard tab.type == .terminal else { return }
-
-        // Clear old session state
-        if let oldSid = tab.sessionId {
-            bridge.removeSSHHandlers(sessionId: oldSid)
-            bridge.removeTerminalView(sessionId: oldSid)
+        if !isAutoReconnect {
+            cancelAutoReconnect(tabId: tabId)
         }
-        tabs[tabIdx].sessionId = nil
+
+        var sessionIds = Set<String>()
+        if let oldSid = tab.sessionId { sessionIds.insert(oldSid) }
+        if let focused = tab.focusedChannelId { sessionIds.insert(focused) }
+        if let paneTree = tab.paneTree { sessionIds.formUnion(paneTree.channelIds) }
+
+        for sessionId in sessionIds {
+            bridge.removeSSHHandlers(sessionId: sessionId)
+            bridge.removeTerminalView(sessionId: sessionId)
+        }
         if tabId == activeTabId, tabs[tabIdx].focusedChannelId != nil {
             closeSessionScopedTools()
         }
+        tabs[tabIdx].sessionId = nil
         tabs[tabIdx].focusedChannelId = nil
         tabs[tabIdx].paneTree = nil
+        tabs[tabIdx].sessionGeneration &+= 1
 
-        // Reconnect
-        connectSSH(tabId: tabId, serverId: tab.serverId)
+        var isLocal = false
+        if case .local = tab.connectionTarget { isLocal = true }
+        if !isLocal, !sessionIds.isEmpty {
+            Task {
+                for sessionId in sessionIds {
+                    try? await workspaceBridge.disconnectSSHAsync(sessionId: sessionId)
+                }
+            }
+        }
+
+        let target = tab.connectionTarget
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let connected: Bool
+            switch target {
+            case .saved(let serverId):
+                connected = await self.connectSSH(
+                    tabId: tabId,
+                    serverId: serverId,
+                    suppressFailureAlert: isAutoReconnect
+                )
+            case .temporary:
+                connected = await self.connectTemporarySSH(
+                    tabId: tabId,
+                    suppressFailureAlert: isAutoReconnect
+                )
+            case .local:
+                connected = false
+            }
+            if isAutoReconnect {
+                if connected {
+                    self.cancelAutoReconnect(tabId: tabId)
+                } else {
+                    self.scheduleAutoReconnect(tabId: tabId)
+                }
+            }
+        }
     }
 
     // MARK: - Command Snippets
@@ -1532,10 +2477,29 @@ class AppState: ObservableObject {
     }
 
     func toggleAIPanel() {
+        if aiPanelOpen {
+            toggleAIDrawerForCurrentContext()
+            return
+        }
+        guard aiState.aiConfig.enabled else {
+            alertTitle = "AI 助手未启用"
+            alertMessage = "请先在 设置 > AI 助手 中启用 AI 面板。"
+            return
+        }
         toggleAIDrawerForCurrentContext()
     }
 
+    /// Closes the AI drawer when the setting is turned off.
+    func applyAIEnabledSetting() {
+        guard !aiState.aiConfig.enabled else { return }
+        aiPanelOpen = false
+        if activeTool?.tool == .ai {
+            activeTool = nil
+        }
+    }
+
     func submitAIQuestion(_ question: String) {
+        guard aiState.aiConfig.enabled else { return }
         let serverId = currentServerId
         let tabId = currentActiveTabId
 
@@ -1576,7 +2540,14 @@ class AppState: ObservableObject {
     var currentServerId: String {
         if let activeId = activeTabId,
            let tab = tabs.first(where: { $0.id == activeId }) {
-            return tab.serverId
+            switch tab.connectionTarget {
+            case .saved(let serverId):
+                return serverId
+            case .temporary(let tabId):
+                return "temporary:\(tabId)"
+            case .local:
+                return "local"
+            }
         }
         return Self.standaloneServerId
     }
@@ -1809,12 +2780,18 @@ class AppState: ObservableObject {
     // MARK: - Asset Tree & Recent Servers
 
     func loadAssetTreeWidth() {
-        let w = UserDefaults.standard.double(forKey: "assetTreeWidth")
-        if w >= 160 && w <= 350 { assetTreeWidth = w }
+        let presentation = SidebarPresentation.restore(from: sidebarDefaults)
+        assetTreeWidth = presentation.width
+        assetTreeCollapsed = presentation.collapsed
     }
 
     func saveAssetTreeWidth(_ width: CGFloat) {
-        UserDefaults.standard.set(Double(width), forKey: "assetTreeWidth")
+        assetTreeWidth = SidebarPresentation.clampedWidth(width)
+        saveAssetTreePresentation()
+    }
+
+    func saveAssetTreePresentation() {
+        SidebarPresentation(collapsed: assetTreeCollapsed, width: assetTreeWidth).save(to: sidebarDefaults)
     }
 
     func loadRecentServers() {
@@ -1895,22 +2872,6 @@ class AppState: ObservableObject {
         savePortForwardRules()
     }
 
-    func saveRecentServers() {
-        do {
-            let data = try Self.encoder.encode(recentServers)
-            UserDefaults.standard.set(data, forKey: "recentServers")
-        } catch {
-            print("[Orbit] Failed to save recent servers: \(error)")
-        }
-    }
-
-    func trackRecentServer(_ serverId: String) {
-        recentServers.removeAll { $0 == serverId }
-        recentServers.insert(serverId, at: 0)
-        if recentServers.count > 6 { recentServers = Array(recentServers.prefix(6)) }
-        saveRecentServers()
-    }
-
     func updateServerGroupName(oldName: String, newName: String) {
         let targets = servers.filter { ($0.group_name.isEmpty ? "默认" : $0.group_name) == oldName }
         for server in targets {
@@ -1931,5 +2892,69 @@ class AppState: ObservableObject {
             )
             updateServer(id: server.id, input: input)
         }
+    }
+}
+
+enum WorkspaceError: LocalizedError, Equatable {
+    case missingTemporaryDraft
+    case localConnectionHandledSeparately
+    case promotionInProgress
+    case staleTemporarySession
+
+    var errorDescription: String? {
+        switch self {
+        case .missingTemporaryDraft:
+            return "临时连接草稿不存在"
+        case .localConnectionHandledSeparately:
+            return "本地终端由本地 Shell 建立连接"
+        case .promotionInProgress:
+            return "该临时连接正在保存"
+        case .staleTemporarySession:
+            return "临时连接会话已变更"
+        }
+    }
+}
+
+enum TemporaryPromotionOutcome: Equatable {
+    case promoted(serverId: String)
+    case persistedAfterTabClosed(serverId: String)
+    case persistedWithoutRebinding(serverId: String)
+}
+
+extension TemporaryConnectionDraft {
+    var connectionInput: TemporaryConnectionInput {
+        let credentialId = credentialGroupId?.nonempty
+        let usesCredentialGroup = credentialId != nil
+        let usesPassword = !usesCredentialGroup && authType == "password"
+        let usesKey = !usesCredentialGroup && authType == "key"
+
+        return TemporaryConnectionInput(
+            host: host,
+            port: port,
+            username: username,
+            auth_type: authType,
+            password: usesPassword ? password.nonempty : nil,
+            private_key: usesKey && keySource == "content" ? privateKey.nonempty : nil,
+            key_source: usesKey ? keySource.nonempty : nil,
+            key_file_path: usesKey && keySource == "file" ? keyFilePath.nonempty : nil,
+            key_passphrase: usesKey ? keyPassphrase.nonempty : nil,
+            credential_group_id: credentialId,
+            jump_server_id: jumpServerId?.nonempty
+        )
+    }
+
+    var promotionInput: PromoteTemporaryServerInput {
+        PromoteTemporaryServerInput(
+            connection: connectionInput,
+            name: displayName.trimmingCharacters(in: .whitespacesAndNewlines).nonempty ?? host,
+            folder_id: folderId?.nonempty,
+            tag_ids: tagIds
+        )
+    }
+}
+
+private extension String {
+    var nonempty: String? {
+        isEmpty ? nil : self
     }
 }

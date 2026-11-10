@@ -14,11 +14,15 @@ use crate::database::{DatabaseConnectionInput, DatabaseManager, DatabaseStore};
 use crate::docker;
 use crate::models::*;
 use crate::monitor;
+use crate::server_organization::{
+    FolderDeleteInput, FolderInput, FolderMoveInput, ServerMoveInput, ServerPinInput,
+    ServerTagsInput,
+};
 use crate::sftp;
 use crate::sftp::SftpManager;
 use crate::ssh;
 use crate::{init_logging, OrbitApp};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub type OrbitDataCallback = extern "C" fn(*const c_char, *const u8, usize, *mut c_void);
 pub type OrbitClosedCallback = extern "C" fn(*const c_char, *mut c_void);
@@ -124,6 +128,337 @@ pub extern "C" fn orbit_delete_server(app: *mut OrbitApp, id: *const c_char) -> 
         Ok(_) => 0,
         Err(_) => -3,
     }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_list_server_organization(
+    app: *mut OrbitApp,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if out_json.is_null() {
+        app.set_error("服务器组织列表输出指针为空");
+        return -1;
+    }
+    server_organization_json_result(
+        app,
+        out_json,
+        "读取服务器组织",
+        app.db.server_organization(),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_create_server_folder(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_json.is_null() {
+        app.set_error("创建服务器文件夹参数为空");
+        return -1;
+    }
+    let input = match parse_json_input_with_error::<FolderInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析创建服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "创建服务器文件夹",
+        app.db.create_server_folder(&input),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_rename_server_folder(
+    app: *mut OrbitApp,
+    folder_id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if folder_id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("重命名服务器文件夹参数为空");
+        return -1;
+    }
+    let folder_id = match cstr_to_str(folder_id, "文件夹 ID") {
+        Ok(folder_id) => folder_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<FolderInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析重命名服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "重命名服务器文件夹",
+        app.db.rename_server_folder(folder_id, &input),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_move_server_folder(
+    app: *mut OrbitApp,
+    folder_id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if folder_id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("移动服务器文件夹参数为空");
+        return -1;
+    }
+    let folder_id = match cstr_to_str(folder_id, "文件夹 ID") {
+        Ok(folder_id) => folder_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<FolderMoveInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析移动服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "移动服务器文件夹",
+        app.db
+            .move_server_folder(folder_id, input.parent_id.as_deref(), input.sort_order),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_delete_server_folder(
+    app: *mut OrbitApp,
+    folder_id: *const c_char,
+    json_input: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if folder_id.is_null() || json_input.is_null() {
+        app.set_error("删除服务器文件夹参数为空");
+        return -1;
+    }
+    let folder_id = match cstr_to_str(folder_id, "文件夹 ID") {
+        Ok(folder_id) => folder_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<FolderDeleteInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析删除服务器文件夹 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_status_result(
+        app,
+        "删除服务器文件夹",
+        app.db.delete_server_folder(
+            folder_id,
+            input.destination_folder_id.as_deref(),
+            input.delete_servers,
+        ),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_create_server_tag(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_json.is_null() {
+        app.set_error("创建服务器标签参数为空");
+        return -1;
+    }
+    let name = match parse_json_input_with_error::<String>(json_input) {
+        Ok(name) => name,
+        Err(error) => {
+            app.set_error(format!("解析创建服务器标签 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "创建服务器标签",
+        app.db.create_server_tag(&name),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_delete_server_tag(app: *mut OrbitApp, tag_id: *const c_char) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if tag_id.is_null() {
+        app.set_error("删除服务器标签参数为空");
+        return -1;
+    }
+    let tag_id = match cstr_to_str(tag_id, "标签 ID") {
+        Ok(tag_id) => tag_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    server_organization_status_result(app, "删除服务器标签", app.db.delete_server_tag(tag_id))
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_set_server_tags(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    json_input: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if server_id.is_null() || json_input.is_null() {
+        app.set_error("设置服务器标签参数为空");
+        return -1;
+    }
+    let server_id = match cstr_to_str(server_id, "服务器 ID") {
+        Ok(server_id) => server_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<ServerTagsInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析设置服务器标签 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_status_result(
+        app,
+        "设置服务器标签",
+        app.db.set_server_tags(server_id, &input.tag_ids),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_move_server(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    json_input: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if server_id.is_null() || json_input.is_null() {
+        app.set_error("移动服务器参数为空");
+        return -1;
+    }
+    let server_id = match cstr_to_str(server_id, "服务器 ID") {
+        Ok(server_id) => server_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<ServerMoveInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析移动服务器 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_status_result(
+        app,
+        "移动服务器",
+        app.db.move_server(server_id, input.folder_id.as_deref()),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_set_server_pin(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    json_input: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if server_id.is_null() || json_input.is_null() || out_json.is_null() {
+        app.set_error("设置服务器置顶参数为空");
+        return -1;
+    }
+    let server_id = match cstr_to_str(server_id, "服务器 ID") {
+        Ok(server_id) => server_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<ServerPinInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析设置服务器置顶 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    server_organization_json_result(
+        app,
+        out_json,
+        "设置服务器置顶",
+        app.db
+            .set_server_pin(server_id, input.is_pinned, input.pin_order),
+    )
 }
 
 #[no_mangle]
@@ -494,6 +829,13 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
         key_passphrase: input.key_passphrase.clone().unwrap_or_default(),
         credential_group_id: input.credential_group_id.clone().unwrap_or_default(),
         jump_server_id: input.jump_server_id.clone().unwrap_or_default(),
+        folder_id: input.folder_id.clone(),
+        is_pinned: false,
+        pin_order: None,
+        last_connected_at: None,
+        last_attempted_at: None,
+        last_connection_result: None,
+        last_connection_error: None,
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -507,6 +849,156 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
         }
         Err(_) => 0,
     }
+}
+
+fn record_connection_attempt(app: &OrbitApp, server_id: &str) {
+    if let Err(error) = app.db.mark_connection_attempt(server_id) {
+        warn!(server_id, error = %error, "记录 SSH 连接尝试失败");
+    }
+}
+
+fn record_connection_success(app: &OrbitApp, server_id: &str) {
+    if let Err(error) = app.db.mark_connection_success(server_id) {
+        warn!(server_id, error = %error, "记录 SSH 连接成功失败");
+    }
+}
+
+fn record_connection_failure(
+    app: &OrbitApp,
+    server_id: &str,
+    error: impl std::fmt::Display,
+) -> String {
+    let summary = crate::db::sanitize_connection_error(&error.to_string());
+    if let Err(write_error) = app.db.mark_connection_failure(server_id, &summary) {
+        warn!(server_id, error = %write_error, "记录 SSH 连接失败失败");
+    }
+    summary
+}
+
+fn fail_connection(
+    app: &OrbitApp,
+    server_id: &str,
+    status: i32,
+    error: impl std::fmt::Display,
+) -> i32 {
+    app.set_error(record_connection_failure(app, server_id, error));
+    status
+}
+
+fn open_server_terminal_channel(
+    guard: &crate::transport::SessionGuard,
+    session_lock: &Arc<std::sync::Mutex<()>>,
+) -> anyhow::Result<ssh2::Channel> {
+    let _lock = session_lock
+        .lock()
+        .map_err(|error| anyhow::anyhow!("SSH session lock failed: {}", error))?;
+    guard.session.set_blocking(true);
+    let channel_result = (|| {
+        let mut channel = guard
+            .session
+            .channel_session()
+            .map_err(|error| anyhow::anyhow!("创建 SSH channel 失败: {}", error))?;
+        let _ = channel.setenv("LANG", "en_US.UTF-8");
+        let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
+        channel
+            .request_pty("xterm-256color", None, None)
+            .map_err(|error| anyhow::anyhow!("请求远端 PTY 失败: {}", error))?;
+        channel
+            .shell()
+            .map_err(|error| anyhow::anyhow!("启动远端 shell 失败: {}", error))?;
+        Ok(channel)
+    })();
+    guard.session.set_blocking(false);
+    channel_result
+}
+
+fn connect_server_session(
+    app: &OrbitApp,
+    server: Server,
+    pool_key: Option<String>,
+    temporary: Option<ssh::TemporarySessionDescriptor>,
+    data_cb: OrbitDataCallback,
+    closed_cb: OrbitClosedCallback,
+    userdata: *mut c_void,
+) -> anyhow::Result<String> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let reused = match pool_key.as_deref() {
+        Some(pool_key) => {
+            let mut manager = app
+                .ssh
+                .lock()
+                .map_err(|error| anyhow::anyhow!("SSH 会话管理器锁定失败: {}", error))?;
+            manager.take_idle_session(pool_key)
+        }
+        None => None,
+    };
+
+    let reusable_channel = reused.and_then(|(guard, session_lock)| {
+        match open_server_terminal_channel(&guard, &session_lock) {
+            Ok(channel) => Some((guard, session_lock, channel)),
+            Err(error) => {
+                info!(
+                    pool_key = pool_key.as_deref().unwrap_or_default(),
+                    error = %error,
+                    "空闲连接已失效，创建新连接"
+                );
+                None
+            }
+        }
+    });
+
+    let (guard, session_lock, channel) = match reusable_channel {
+        Some(reused) => reused,
+        None => {
+            let guard = crate::transport::create_session(&server, &app.db)?;
+            let session_lock = Arc::new(std::sync::Mutex::new(()));
+            let channel = open_server_terminal_channel(&guard, &session_lock)?;
+            (guard, session_lock, channel)
+        }
+    };
+
+    let userdata = userdata as usize;
+    let ffi_data_cb: ssh::DataCallback = Box::new(move |session_id: &str, data: &[u8]| {
+        let c_session_id = match CString::new(session_id) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        data_cb(
+            c_session_id.as_ptr(),
+            data.as_ptr(),
+            data.len(),
+            userdata as *mut c_void,
+        );
+    });
+    let ffi_closed_cb: ssh::ClosedCallback = Box::new(move |session_id: &str| {
+        let c_session_id = match CString::new(session_id) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        closed_cb(c_session_id.as_ptr(), userdata as *mut c_void);
+    });
+    let active_channel = ssh::spawn_channel_reader(
+        &session_id,
+        channel,
+        ffi_data_cb,
+        ffi_closed_cb,
+        session_lock.clone(),
+    )?;
+
+    let mut manager = app
+        .ssh
+        .lock()
+        .map_err(|error| anyhow::anyhow!("SSH 会话管理器锁定失败: {}", error))?;
+    manager.register_session(
+        &session_id,
+        pool_key,
+        temporary,
+        guard,
+        active_channel,
+        session_lock,
+    );
+    info!(session_id, server = %server.name, "SSH 终端连接成功");
+    Ok(session_id)
 }
 
 #[no_mangle]
@@ -530,167 +1022,145 @@ pub extern "C" fn orbit_connect_ssh(
             return -2;
         }
     };
+    record_connection_attempt(app, sid_str);
     let server = match app.db.get_server(sid_str) {
         Ok(s) => s,
         Err(e) => {
-            app.set_error(format!("服务器配置不存在或读取失败: {}", e));
+            return fail_connection(
+                app,
+                sid_str,
+                -3,
+                format!("服务器配置不存在或读取失败: {}", e),
+            );
+        }
+    };
+    let pool_key = Some(server.id.clone());
+    match connect_server_session(app, server, pool_key, None, data_cb, closed_cb, userdata) {
+        Ok(session_id) => {
+            let c_session_id = CString::new(session_id).unwrap_or_default();
+            unsafe { *out_session_id = c_session_id.into_raw() };
+            record_connection_success(app, sid_str);
+            0
+        }
+        Err(error) => fail_connection(app, sid_str, -5, error),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_connect_ssh_temporary(
+    app: *mut OrbitApp,
+    json_input: *const c_char,
+    data_cb: OrbitDataCallback,
+    closed_cb: OrbitClosedCallback,
+    userdata: *mut c_void,
+    out_session_id: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if json_input.is_null() || out_session_id.is_null() {
+        app.set_error("临时 SSH 连接参数为空");
+        return -1;
+    }
+    let input = match parse_json_input_with_error::<TemporaryConnectionInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析临时 SSH 连接 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+    if let Err(error) = app.db.validate_temporary_connection(&input) {
+        app.set_error(format!("临时 SSH 连接参数无效: {}", error));
+        return -3;
+    }
+
+    let descriptor = ssh::TemporarySessionDescriptor::from_input(&input);
+    let runtime_id = format!("temporary:{}", uuid::Uuid::new_v4());
+    let server = input.to_temporary_server(runtime_id);
+    match connect_server_session(
+        app,
+        server,
+        None,
+        Some(descriptor),
+        data_cb,
+        closed_cb,
+        userdata,
+    ) {
+        Ok(session_id) => {
+            let c_session_id = CString::new(session_id).unwrap_or_default();
+            unsafe { *out_session_id = c_session_id.into_raw() };
+            0
+        }
+        Err(error) => {
+            app.set_error(crate::db::sanitize_connection_error(&error.to_string()));
+            -4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_promote_temporary_server(
+    app: *mut OrbitApp,
+    session_id: *const c_char,
+    json_input: *const c_char,
+    out_server_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    if session_id.is_null() || json_input.is_null() || out_server_json.is_null() {
+        app.set_error("临时服务器提升参数为空");
+        return -1;
+    }
+    let session_id = match cstr_to_str(session_id, "临时会话 ID") {
+        Ok(session_id) => session_id,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -2;
+        }
+    };
+    let input = match parse_json_input_with_error::<PromoteTemporaryServerInput>(json_input) {
+        Ok(input) => input,
+        Err(error) => {
+            app.set_error(format!("解析临时服务器提升 JSON 失败: {}", error));
+            return -2;
+        }
+    };
+
+    let manager = match app.ssh.lock() {
+        Ok(manager) => manager,
+        Err(error) => {
+            app.set_error(format!("SSH 会话管理器锁定失败: {}", error));
             return -3;
         }
     };
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let sid_for_cb = session_id.clone();
-    let ud = userdata as usize;
-
-    // --- Try to reuse idle connection from pool ---
-    let reused = {
-        let mut mgr = match app.ssh.lock() {
-            Ok(m) => m,
-            Err(_) => return -4,
-        };
-        mgr.take_idle_session(sid_str)
+    let descriptor = match manager.temporary_descriptor(session_id) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            app.set_error(error.to_string());
+            return -3;
+        }
     };
+    let result = app.db.promote_temporary_server(&descriptor, &input);
+    drop(manager);
 
-    if let Some((guard, session_lock)) = reused {
-        let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
-            let c_sid = match CString::new(sid) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
-        });
-
-        let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
-            let c_sid = match CString::new(sid) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            closed_cb(c_sid.as_ptr(), ud as *mut c_void);
-        });
-
-        let channel_result = {
-            let _lock = match session_lock.lock() {
-                Ok(l) => l,
-                Err(_) => return -6,
-            };
-            guard.session.set_blocking(true);
-            let result: anyhow::Result<ssh2::Channel> = (|| {
-                let mut channel = guard.session.channel_session()?;
-                channel.setenv("LANG", "en_US.UTF-8")?;
-                channel.setenv("LC_ALL", "en_US.UTF-8")?;
-                channel.request_pty("xterm-256color", None, None)?;
-                channel.shell()?;
-                Ok(channel)
-            })();
-            guard.session.set_blocking(false);
-            drop(_lock);
-            result
-        };
-
-        match channel_result {
-            Ok(channel) => {
-                match ssh::spawn_channel_reader(
-                    &session_id,
-                    channel,
-                    data_cb,
-                    closed_cb,
-                    session_lock.clone(),
-                ) {
-                    Ok(active_channel) => {
-                        let mut mgr = match app.ssh.lock() {
-                            Ok(m) => m,
-                            Err(_) => return -4,
-                        };
-                        mgr.register_session(
-                            &session_id,
-                            sid_str,
-                            guard,
-                            active_channel,
-                            session_lock,
-                        );
-                        let c_id = CString::new(sid_for_cb).unwrap_or_default();
-                        unsafe { *out_session_id = c_id.into_raw() };
-                        return 0;
-                    }
-                    Err(_) => {}
-                }
+    match result {
+        Ok(server) => {
+            let code = json_to_out(&server, out_server_json);
+            if code != 0 {
+                app.set_error("序列化已保存服务器失败");
             }
-            Err(_) => {
-                info!(server_id = sid_str, "空闲连接已失效，创建新连接");
-            }
+            code
         }
-        // Reuse failed — guard dropped, stale connection cleaned up. Fall through.
+        Err(error) => {
+            app.set_error(crate::db::sanitize_connection_error(&error.to_string()));
+            -4
+        }
     }
-
-    // --- No idle session → create new connection ---
-    let guard = match crate::transport::create_session(&server, &app.db) {
-        Ok(g) => g,
-        Err(e) => {
-            app.set_error(format!("{}", e));
-            return -5;
-        }
-    };
-
-    let mut channel: ssh2::Channel = match guard.session.channel_session() {
-        Ok(ch) => ch,
-        Err(e) => {
-            app.set_error(format!("创建 SSH channel 失败: {}", e));
-            return -6;
-        }
-    };
-    let _ = channel.setenv("LANG", "en_US.UTF-8");
-    let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
-    if channel.request_pty("xterm-256color", None, None).is_err() {
-        app.set_error("请求远端 PTY 失败");
-        return -7;
-    }
-    if channel.shell().is_err() {
-        app.set_error("启动远端 shell 失败");
-        return -8;
-    }
-    guard.session.set_blocking(false);
-
-    let data_cb: ssh::DataCallback = Box::new(move |sid: &str, data: &[u8]| {
-        let c_sid = match CString::new(sid) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        data_cb(c_sid.as_ptr(), data.as_ptr(), data.len(), ud as *mut c_void);
-    });
-
-    let closed_cb: ssh::ClosedCallback = Box::new(move |sid: &str| {
-        let c_sid = match CString::new(sid) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        closed_cb(c_sid.as_ptr(), ud as *mut c_void);
-    });
-
-    let session_lock = std::sync::Arc::new(std::sync::Mutex::new(()));
-    let active_channel = match ssh::spawn_channel_reader(
-        &session_id,
-        channel,
-        data_cb,
-        closed_cb,
-        session_lock.clone(),
-    ) {
-        Ok(ac) => ac,
-        Err(e) => {
-            app.set_error(format!("启动 SSH 读取线程失败: {}", e));
-            return -9;
-        }
-    };
-
-    let mut mgr = match app.ssh.lock() {
-        Ok(m) => m,
-        Err(e) => {
-            app.set_error(format!("SSH 会话管理器锁定失败: {}", e));
-            return -4;
-        }
-    };
-    mgr.register_session(&session_id, sid_str, guard, active_channel, session_lock);
-    let c_id = CString::new(sid_for_cb).unwrap_or_default();
-    unsafe { *out_session_id = c_id.into_raw() };
-    0
 }
 
 #[no_mangle]
@@ -1409,6 +1879,25 @@ pub extern "C" fn orbit_shutdown_pool(app: *mut OrbitApp) {
     }
 }
 
+/// Updates SSH connection preferences and applies keepalive to live sessions.
+#[no_mangle]
+pub extern "C" fn orbit_set_connection_settings(
+    app: *mut OrbitApp,
+    timeout_seconds: u32,
+    keepalive_seconds: u32,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let settings = crate::transport::set_connection_settings(timeout_seconds, keepalive_seconds);
+    if let Ok(mut manager) = app.ssh.lock() {
+        manager.set_keepalive_all(settings.keepalive_seconds);
+    }
+    app.pool.set_keepalive(settings.keepalive_seconds);
+    0
+}
+
 #[no_mangle]
 pub extern "C" fn orbit_exec_command(
     app: *mut OrbitApp,
@@ -1459,6 +1948,147 @@ pub extern "C" fn orbit_exec_command(
             0
         }
         Err(_) => -5,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_exec(
+    app: *mut OrbitApp,
+    server_id: *const c_char,
+    command: *const c_char,
+    timeout_ms: u32,
+    wait_ms: u32,
+    max_output_bytes: u32,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || server_id.is_null() || command.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    app.clear_error();
+    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let cmd = match unsafe { CStr::from_ptr(command) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return -2,
+    };
+    let server = match app.db.get_server(sid) {
+        Ok(server) => server,
+        Err(_) => return -3,
+    };
+
+    let max_bytes = if max_output_bytes == 0 {
+        262_144
+    } else {
+        max_output_bytes as usize
+    };
+
+    let (job_id, job) = crate::agent::start_agent_job(
+        server.clone(),
+        app.db_path.clone(),
+        cmd.to_string(),
+        timeout_ms,
+        max_bytes,
+    );
+    if let Ok(mut jobs) = app.agent_jobs.lock() {
+        jobs.insert(job.clone());
+    }
+
+    if job.wait_for_finish(wait_ms) {
+        let mut result = job.completed_output(&server.id);
+        result.job_id = Some(job_id);
+        json_to_out(&result, out_json)
+    } else {
+        let status = job.status_dto();
+        let result = crate::agent::AgentExecOutput {
+            status: "running".to_string(),
+            server_id: server.id.clone(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: -1,
+            duration_ms: status.duration_ms,
+            truncated: false,
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            job_id: Some(job_id),
+            mode: "read".to_string(),
+            escalated: false,
+        };
+        json_to_out(&result, out_json)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_job_status(
+    app: *mut OrbitApp,
+    job_id: *const c_char,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || job_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let job_id = match unsafe { CStr::from_ptr(job_id) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return -2,
+    };
+    let job = match app.agent_jobs.lock() {
+        Ok(jobs) => jobs.get(job_id),
+        Err(_) => None,
+    };
+    match job {
+        Some(job) => json_to_out(&job.status_dto(), out_json),
+        None => -3,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_job_output(
+    app: *mut OrbitApp,
+    job_id: *const c_char,
+    cursor: u64,
+    out_json: *mut *mut c_char,
+) -> i32 {
+    if app.is_null() || job_id.is_null() || out_json.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let job_id = match unsafe { CStr::from_ptr(job_id) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return -2,
+    };
+    let job = match app.agent_jobs.lock() {
+        Ok(jobs) => jobs.get(job_id),
+        Err(_) => None,
+    };
+    match job {
+        Some(job) => json_to_out(&job.output_dto(cursor as usize), out_json),
+        None => -3,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_agent_job_cancel(app: *mut OrbitApp, job_id: *const c_char) -> i32 {
+    if app.is_null() || job_id.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let job_id = match unsafe { CStr::from_ptr(job_id) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return -2,
+    };
+    let job = match app.agent_jobs.lock() {
+        Ok(jobs) => jobs.get(job_id),
+        Err(_) => None,
+    };
+    match job {
+        Some(job) => {
+            job.cancel();
+            0
+        }
+        None => -3,
     }
 }
 
@@ -1893,6 +2523,7 @@ pub extern "C" fn orbit_import_config(
                 key_passphrase: Some(server.key_passphrase.clone()),
                 credential_group_id: Some(credential_group_id),
                 jump_server_id: Some(jump_server_id),
+                folder_id: server.folder_id.clone(),
             };
 
             if let Some(existing_id) = existing_by_host.get(&host_key) {
@@ -1973,6 +2604,41 @@ fn database_json_operation<T: serde::Serialize>(
     }
 }
 
+fn server_organization_json_result<T: serde::Serialize>(
+    app: &OrbitApp,
+    out_json: *mut *mut c_char,
+    action: &str,
+    result: anyhow::Result<T>,
+) -> i32 {
+    match result {
+        Ok(value) => {
+            let code = json_to_out(&value, out_json);
+            if code != 0 {
+                app.set_error(format!("序列化{}结果失败", action));
+            }
+            code
+        }
+        Err(error) => {
+            app.set_error(format!("{}失败: {}", action, error));
+            -3
+        }
+    }
+}
+
+fn server_organization_status_result(
+    app: &OrbitApp,
+    action: &str,
+    result: anyhow::Result<()>,
+) -> i32 {
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            app.set_error(format!("{}失败: {}", action, error));
+            -3
+        }
+    }
+}
+
 fn json_to_out<T: serde::Serialize>(value: &T, out: *mut *mut c_char) -> i32 {
     match serde_json::to_string(value) {
         Ok(json) => {
@@ -1981,5 +2647,288 @@ fn json_to_out<T: serde::Serialize>(value: &T, out: *mut *mut c_char) -> i32 {
             0
         }
         Err(_) => -99,
+    }
+}
+
+#[cfg(test)]
+mod real_server_ffi_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    extern "C" fn collect_data(
+        _session_id: *const c_char,
+        data: *const u8,
+        data_len: usize,
+        userdata: *mut c_void,
+    ) {
+        if data.is_null() || userdata.is_null() {
+            return;
+        }
+        let buffer = unsafe { &*(userdata as *const Mutex<Vec<u8>>) };
+        let bytes = unsafe { std::slice::from_raw_parts(data, data_len) };
+        buffer.lock().unwrap().extend_from_slice(bytes);
+    }
+
+    extern "C" fn ignore_closed(_session_id: *const c_char, _userdata: *mut c_void) {}
+
+    fn last_error(app: *mut OrbitApp) -> String {
+        let mut out: *mut c_char = ptr::null_mut();
+        if orbit_get_last_error(app, &mut out) != 0 || out.is_null() {
+            return String::new();
+        }
+        let message = unsafe { CStr::from_ptr(out).to_string_lossy().into_owned() };
+        orbit_free_string(out);
+        message
+    }
+
+    fn wait_until(buffer: &Mutex<Vec<u8>>, timeout: Duration, condition: impl Fn(&str) -> bool) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < timeout {
+            let text = String::from_utf8_lossy(&buffer.lock().unwrap()).into_owned();
+            if condition(&text) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    fn server_input(host: &str, user: &str, password: &str) -> ServerInput {
+        ServerInput {
+            name: "real-server".into(),
+            host: host.into(),
+            port: Some(22),
+            group_name: None,
+            auth_type: Some("password".into()),
+            username: user.into(),
+            password: Some(password.into()),
+            private_key: None,
+            key_source: None,
+            key_file_path: None,
+            key_passphrase: None,
+            credential_group_id: None,
+            jump_server_id: None,
+            folder_id: None,
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn real_server_terminal_and_promotion_ffi() {
+        let host = std::env::var("ORBIT_TEST_HOST").expect("ORBIT_TEST_HOST");
+        let user = std::env::var("ORBIT_TEST_USER").expect("ORBIT_TEST_USER");
+        let password = std::env::var("ORBIT_TEST_PASSWORD").expect("ORBIT_TEST_PASSWORD");
+
+        let app = Box::into_raw(Box::new(OrbitApp::new(":memory:").unwrap()));
+        let buffer = Box::into_raw(Box::new(Mutex::new(Vec::new())));
+        let userdata = buffer as *mut c_void;
+
+        let saved = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, &password))
+            .unwrap();
+        let saved_id = CString::new(saved.id.clone()).unwrap();
+        let mut session_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_connect_ssh(
+            app,
+            saved_id.as_ptr(),
+            collect_data,
+            ignore_closed,
+            userdata,
+            &mut session_out,
+        );
+        assert_eq!(rc, 0, "connect failed: {}", last_error(app));
+        assert!(!session_out.is_null());
+        let session_id = unsafe { CStr::from_ptr(session_out).to_string_lossy().into_owned() };
+        assert!(
+            wait_until(unsafe { &*buffer }, Duration::from_secs(10), |text| !text.is_empty()),
+            "terminal produced no output"
+        );
+
+        let connected = unsafe { &*app }.db.get_server(&saved.id).unwrap();
+        assert_eq!(connected.last_connection_result.as_deref(), Some("success"));
+        assert!(connected.last_connected_at.is_some());
+
+        let command = CString::new("echo $((40+2))\r").unwrap();
+        let session_id_c = CString::new(session_id.clone()).unwrap();
+        let write_rc = orbit_write_ssh(
+            app,
+            session_id_c.as_ptr(),
+            command.as_ptr() as *const u8,
+            command.as_bytes().len(),
+        );
+        assert_eq!(write_rc, 0, "write failed: {}", last_error(app));
+        assert!(
+            wait_until(unsafe { &*buffer }, Duration::from_secs(10), |text| {
+                text.contains("42")
+            }),
+            "terminal did not execute command"
+        );
+
+        orbit_disconnect_ssh(app, session_id_c.as_ptr());
+        orbit_free_string(session_out);
+
+        let temporary_input = TemporaryConnectionInput {
+            host: host.clone(),
+            port: 22,
+            username: user.clone(),
+            auth_type: "password".into(),
+            password: Some(password.clone()),
+            private_key: None,
+            key_source: None,
+            key_file_path: None,
+            key_passphrase: None,
+            credential_group_id: None,
+            jump_server_id: None,
+        };
+        let temporary_json = serde_json::to_string(&temporary_input).unwrap();
+        let temporary_json_c = CString::new(temporary_json).unwrap();
+        let mut temporary_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_connect_ssh_temporary(
+            app,
+            temporary_json_c.as_ptr(),
+            collect_data,
+            ignore_closed,
+            userdata,
+            &mut temporary_out,
+        );
+        assert_eq!(rc, 0, "temporary connect failed: {}", last_error(app));
+        let temporary_session =
+            unsafe { CStr::from_ptr(temporary_out).to_string_lossy().into_owned() };
+        assert!(wait_until(unsafe { &*buffer }, Duration::from_secs(10), |text| {
+            !text.is_empty()
+        }));
+
+        let promotion = PromoteTemporaryServerInput {
+            connection: temporary_input,
+            name: "Real Promoted".into(),
+            folder_id: None,
+            tag_ids: Vec::new(),
+        };
+        let promotion_json = CString::new(serde_json::to_string(&promotion).unwrap()).unwrap();
+        let temporary_session_c = CString::new(temporary_session.clone()).unwrap();
+        let mut promoted_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_promote_temporary_server(
+            app,
+            temporary_session_c.as_ptr(),
+            promotion_json.as_ptr(),
+            &mut promoted_out,
+        );
+        assert_eq!(rc, 0, "promotion failed: {}", last_error(app));
+        let promoted_json = unsafe { CStr::from_ptr(promoted_out).to_string_lossy().into_owned() };
+        orbit_free_string(promoted_out);
+        let promoted: crate::models::Server = serde_json::from_str(&promoted_json).unwrap();
+        assert_eq!(promoted.name, "Real Promoted");
+        let stored = unsafe { &*app }.db.get_server(&promoted.id).unwrap();
+        assert_eq!(stored.password, password);
+        assert_eq!(stored.last_connection_result.as_deref(), Some("success"));
+
+        orbit_disconnect_ssh(app, temporary_session_c.as_ptr());
+        orbit_free_string(temporary_out);
+
+        let bad = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, "ORBIT_WRONG_PASSWORD"))
+            .unwrap();
+        let bad_id = CString::new(bad.id.clone()).unwrap();
+        let mut bad_session: *mut c_char = ptr::null_mut();
+        let rc = orbit_connect_ssh(
+            app,
+            bad_id.as_ptr(),
+            collect_data,
+            ignore_closed,
+            userdata,
+            &mut bad_session,
+        );
+        assert_ne!(rc, 0, "wrong password unexpectedly connected");
+        let error = last_error(app);
+        assert!(!error.contains("ORBIT_WRONG_PASSWORD"), "secret leaked: {error}");
+        let failed = unsafe { &*app }.db.get_server(&bad.id).unwrap();
+        assert_eq!(failed.last_connection_result.as_deref(), Some("failed"));
+        assert!(failed.last_attempted_at.is_some());
+        assert!(failed
+            .last_connection_error
+            .as_deref()
+            .is_some_and(|message| !message.contains("ORBIT_WRONG_PASSWORD")));
+
+        orbit_app_free(app);
+        unsafe { drop(Box::from_raw(buffer)) };
+        println!("real server FFI smoke test passed");
+    }
+
+    #[test]
+    #[ignore]
+    fn agent_exec_captures_stdout_stderr_and_exit_code() {
+        let host = std::env::var("ORBIT_TEST_HOST").expect("ORBIT_TEST_HOST");
+        let user = std::env::var("ORBIT_TEST_USER").expect("ORBIT_TEST_USER");
+        let password = std::env::var("ORBIT_TEST_PASSWORD").expect("ORBIT_TEST_PASSWORD");
+
+        let app = Box::into_raw(Box::new(OrbitApp::new(":memory:").unwrap()));
+        let saved = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, &password))
+            .unwrap();
+        let sid = CString::new(saved.id).unwrap();
+        let cmd = CString::new("printf out; printf err >&2; exit 7").unwrap();
+        let mut out: *mut c_char = ptr::null_mut();
+
+        let rc = orbit_agent_exec(app, sid.as_ptr(), cmd.as_ptr(), 10_000, 10_000, 1_048_576, &mut out);
+        assert_eq!(rc, 0);
+        assert!(!out.is_null());
+        let json = unsafe { CStr::from_ptr(out).to_string_lossy().into_owned() };
+        assert!(json.contains("\"stdout\":\"out\""), "{json}");
+        assert!(json.contains("\"stderr\":\"err\""), "{json}");
+        assert!(json.contains("\"exitCode\":7"), "{json}");
+
+        orbit_free_string(out);
+        orbit_app_free(app);
+    }
+
+    #[test]
+    #[ignore]
+    fn agent_job_runs_in_background_and_can_be_polled() {
+        let host = std::env::var("ORBIT_TEST_HOST").expect("ORBIT_TEST_HOST");
+        let user = std::env::var("ORBIT_TEST_USER").expect("ORBIT_TEST_USER");
+        let password = std::env::var("ORBIT_TEST_PASSWORD").expect("ORBIT_TEST_PASSWORD");
+
+        let app = Box::into_raw(Box::new(OrbitApp::new(":memory:").unwrap()));
+        let saved = unsafe { &*app }
+            .db
+            .add_server(&server_input(&host, &user, &password))
+            .unwrap();
+        let sid = CString::new(saved.id).unwrap();
+        let cmd = CString::new("sleep 2; echo done").unwrap();
+        let mut out: *mut c_char = ptr::null_mut();
+        let rc = orbit_agent_exec(app, sid.as_ptr(), cmd.as_ptr(), 30_000, 100, 1_048_576, &mut out);
+        assert_eq!(rc, 0);
+        let first = unsafe { CStr::from_ptr(out).to_string_lossy().into_owned() };
+        orbit_free_string(out);
+        assert!(first.contains("\"status\":\"running\""), "{first}");
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+        let job_id = value["jobId"].as_str().unwrap().to_string();
+        let job_c = CString::new(job_id.clone()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let mut status_out: *mut c_char = ptr::null_mut();
+            let rc = orbit_agent_job_status(app, job_c.as_ptr(), &mut status_out);
+            assert_eq!(rc, 0);
+            let status = unsafe { CStr::from_ptr(status_out).to_string_lossy().into_owned() };
+            orbit_free_string(status_out);
+            if status.contains("\"status\":\"completed\"") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "job did not complete: {status}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let mut output_out: *mut c_char = ptr::null_mut();
+        let rc = orbit_agent_job_output(app, job_c.as_ptr(), 0, &mut output_out);
+        assert_eq!(rc, 0);
+        let output = unsafe { CStr::from_ptr(output_out).to_string_lossy().into_owned() };
+        orbit_free_string(output_out);
+        assert!(output.contains("done"), "{output}");
+        orbit_app_free(app);
     }
 }

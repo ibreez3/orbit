@@ -8,6 +8,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case keybindings = "快捷键"
     case keywords = "关键词高亮"
     case ai = "AI 助手"
+    case agent = "AI Agent"
     case connection = "连接"
     case monitor = "监控"
     case database = "数据库"
@@ -23,6 +24,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .keybindings:   return "keyboard"
         case .keywords:      return "text.word.spacing"
         case .ai:            return "sparkles"
+        case .agent:         return "cpu"
         case .connection:    return "network"
         case .monitor:       return "gauge.with.dots.needle.33percent"
         case .database:      return "cylinder"
@@ -83,7 +85,8 @@ struct SettingsView: View {
         case .keybindings:   KeybindingsPane()
         case .keywords:      KeywordsPane(appState: appState)
         case .ai:            AIPane(appState: appState)
-        case .connection:    ConnectionPane()
+        case .agent:         AgentPane(appState: appState)
+        case .connection:    ConnectionPane(appState: appState)
         case .monitor:       MonitorPane()
         case .database:      DatabasePane()
         case .exportImport:  ExportImportPane(appState: appState)
@@ -107,8 +110,8 @@ private struct AppearancePane: View {
                     GridItem(.adaptive(minimum: 130, maximum: 160), spacing: 10)
                 ], spacing: 10) {
                     ForEach(displayThemes) { theme in
-                        ThemeCard(theme: theme, isSelected: themeState.theme.rawValue == theme.id) {
-                            if let t = AppTheme(rawValue: theme.id) {
+                        ThemeCard(theme: theme, isSelected: AppTheme(themeFileID: theme.id) == themeState.theme) {
+                            if let t = AppTheme(themeFileID: theme.id) {
                                 appState.setTheme(t)
                             }
                         }
@@ -147,7 +150,6 @@ private struct TerminalPane: View {
     @AppStorage("fontSize") private var fontSize: Double = 14
     @AppStorage("fontFamily") private var fontFamily: String = TerminalRenderSettings.defaultFontName
     @AppStorage("cursorStyle") private var cursorStyle: String = "bar"
-    @AppStorage("useMetalRenderer") private var useMetalRenderer: Bool = false
     @AppStorage("backgroundBlur") private var backgroundBlur: Bool = false
     @AppStorage("fontLigatures") private var fontLigatures: Bool = false
     @AppStorage("selectToCopy") private var selectToCopy: Bool = true
@@ -178,7 +180,7 @@ private struct TerminalPane: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        SettingsToggle("字体连字", isOn: $fontLigatures)
+                        SettingsToggle("字体连字", isOn: $fontLigatures, identifier: "fontLigaturesToggle")
 
                         Text(" sunyang  ~/dev  23:19  ABC abc 012")
                             .font(.custom(fontFamily, size: fontSize))
@@ -217,9 +219,8 @@ private struct TerminalPane: View {
                 }
 
                 SettingsGroup("交互") {
-                    SettingsToggle("选中即复制", isOn: $selectToCopy)
-                    SettingsToggle("背景模糊", isOn: $backgroundBlur)
-                    SettingsToggle("Metal GPU 渲染", isOn: $useMetalRenderer)
+                    SettingsToggle("选中即复制", isOn: $selectToCopy, identifier: "selectToCopyToggle")
+                    SettingsToggle("背景模糊", isOn: $backgroundBlur, identifier: "backgroundBlurToggle")
                 }
 
                 SettingsGroup("快速终端") {
@@ -238,9 +239,9 @@ private struct TerminalPane: View {
 // MARK: - Keybindings Pane
 
 private struct KeybindingsPane: View {
+    @ObservedObject private var keyBindings = KeyBindings.shared
     @State private var recordingAction: String? = nil
-    @State private var recordingKey: String = ""
-    @State private var recordingModifiers: KeyBinding.Modifiers = .init()
+    @State private var keyMonitor: Any? = nil
 
     var body: some View {
         ScrollView {
@@ -251,7 +252,7 @@ private struct KeybindingsPane: View {
                     recordingOverlay
                 }
 
-                let actions = KeyBindings.shared.allActions()
+                let actions = keyBindings.allActions()
                 ForEach(actions, id: \.action) { item in
                     Button(action: { startRecording(item.action) }) {
                         HStack {
@@ -269,31 +270,27 @@ private struct KeybindingsPane: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
                         .padding(.vertical, 2)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("keybinding-\(item.action)")
                 }
 
                 Divider()
-                Button("恢复默认快捷键") { KeyBindings.shared.resetToDefaults() }
+                Button("恢复默认快捷键") { keyBindings.resetToDefaults() }
                     .font(.system(size: 12))
+                    .accessibilityIdentifier("keybindingResetButton")
             }
             .padding(24)
         }
-        .background(KeyCaptureView { event in
-            guard let action = recordingAction else { return }
-            let mods = KeyBinding.Modifiers(flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask))
-            guard !mods.isEmpty || event.keyCode == 0x35 else { return }
-            let key: String
-            if let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
-                key = chars.lowercased()
-            } else if let special = specialKeyName(event.keyCode) {
-                key = special
-            } else {
-                return
-            }
-            KeyBindings.shared.setBinding(action: action, key: key, modifiers: mods)
+        .onAppear { installKeyMonitor() }
+        .onDisappear {
+            removeKeyMonitor()
             recordingAction = nil
-        })
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+            recordingAction = nil
+        }
     }
 
     private var recordingOverlay: some View {
@@ -302,6 +299,7 @@ private struct KeybindingsPane: View {
                 .foregroundStyle(.red)
             Text("正在录制快捷键... 请按下组合键")
                 .font(.system(size: 12))
+                .accessibilityIdentifier("keybindingRecordingStatus")
             Spacer()
             Button("取消") { recordingAction = nil }
                 .font(.system(size: 11))
@@ -317,24 +315,44 @@ private struct KeybindingsPane: View {
         recordingAction = action
     }
 
-    private func specialKeyName(_ keyCode: UInt16) -> String? {
-        switch keyCode {
-        case 126: return "\u{1b}" // Up
-        case 125: return "\u{1c}" // Down
-        case 123: return "\u{1d}" // Left
-        case 124: return "\u{1e}" // Right
-        case 0x33: return "\u{7f}" // Delete
-        case 0x24: return "\r"    // Return
-        case 0x30: return "\t"    // Tab
-        case 0x35: return "\u{1b}" // Escape
-        case 0x31: return " "     // Space
-        default: return nil
+    /// Records keys through a local event monitor so recording works no
+    /// matter which control currently owns first responder.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard let action = recordingAction else { return event }
+            guard NSApp.windows.contains(where: { $0.title == "设置" && $0.isVisible }) else {
+                recordingAction = nil
+                return event
+            }
+            guard !event.isARepeat else { return nil }
+
+            let mods = KeyBinding.Modifiers(
+                flags: event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            )
+            guard !mods.isEmpty || event.keyCode == 0x35 else { return nil }
+            guard let key = KeyBinding.token(
+                keyCode: event.keyCode,
+                characters: event.charactersIgnoringModifiers
+            ) else { return nil }
+
+            keyBindings.setBinding(action: action, key: key, modifiers: mods)
+            recordingAction = nil
+            return nil
         }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
+        keyMonitor = nil
     }
 
     private func actionLabel(for action: String) -> String {
         switch action {
-        case "spotlight": return "Spotlight 搜索"
+        case "quickConnect": return "快速连接"
+        case "commandPalette": return "命令面板"
         case "settings": return "打开设置"
         case "newTerminal": return "新建终端"
         case "toggleSftp": return "SFTP 侧栏"
@@ -352,35 +370,6 @@ private struct KeybindingsPane: View {
         case "shrinkPane": return "缩小窗格"
         default: return action
         }
-    }
-}
-
-private struct KeyCaptureView: NSViewRepresentable {
-    let onKeyDown: (NSEvent) -> Void
-
-    func makeNSView(context: Context) -> KeyCaptureNSView {
-        let view = KeyCaptureNSView()
-        view.onKeyDown = onKeyDown
-        return view
-    }
-
-    func updateNSView(_ nsView: KeyCaptureNSView, context: Context) {
-        nsView.onKeyDown = onKeyDown
-    }
-}
-
-private class KeyCaptureNSView: NSView {
-    var onKeyDown: ((NSEvent) -> Void)?
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        window?.makeFirstResponder(self)
-    }
-
-    override func keyDown(with event: NSEvent) {
-        onKeyDown?(event)
     }
 }
 
@@ -449,9 +438,14 @@ private struct AIPane: View {
                     LabeledRow("启用 AI 面板") {
                         Toggle("", isOn: Binding(
                             get: { aiState.aiConfig.enabled },
-                            set: { aiState.aiConfig.enabled = $0; appState.saveAIConfig() }
+                            set: {
+                                aiState.aiConfig.enabled = $0
+                                appState.saveAIConfig()
+                                appState.applyAIEnabledSetting()
+                            }
                         ))
                         .toggleStyle(.switch)
+                        .accessibilityIdentifier("aiEnabledToggle")
                     }
                 }
 
@@ -499,6 +493,7 @@ private struct AIPane: View {
 // MARK: - Connection Pane
 
 private struct ConnectionPane: View {
+    let appState: AppState
     @AppStorage("sshTimeout") private var sshTimeout: Double = 10
     @AppStorage("sshReconnectEnabled") private var sshReconnectEnabled: Bool = true
     @AppStorage("sshReconnectInterval") private var sshReconnectInterval: Double = 3
@@ -517,7 +512,7 @@ private struct ConnectionPane: View {
                                 .font(.system(.body, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
-                        SettingsToggle("自动重连", isOn: $sshReconnectEnabled)
+                        SettingsToggle("自动重连", isOn: $sshReconnectEnabled, identifier: "sshReconnectToggle")
                         if sshReconnectEnabled {
                             LabeledRow("重连间隔") {
                                 Slider(value: $sshReconnectInterval, in: 1...30, step: 1).frame(width: 160)
@@ -545,6 +540,17 @@ private struct ConnectionPane: View {
                 }
             }
             .padding(24)
+        }
+        .onChange(of: sshTimeout) { _ in
+            appState.bridge.applyConnectionPreferences()
+        }
+        .onChange(of: sshKeepaliveInterval) { _ in
+            appState.bridge.applyConnectionPreferences()
+        }
+        .onChange(of: sshReconnectEnabled) { enabled in
+            if !enabled {
+                appState.cancelAutoReconnects()
+            }
         }
     }
 }
@@ -626,7 +632,7 @@ private struct DatabasePane: View {
 
                 SettingsGroup("查询设置") {
                     VStack(alignment: .leading, spacing: 10) {
-                        SettingsToggle("自动添加 LIMIT", isOn: $dbAutoLimit)
+                        SettingsToggle("自动添加 LIMIT", isOn: $dbAutoLimit, identifier: "dbAutoLimitToggle")
                         if dbAutoLimit {
                             LabeledRow("默认 LIMIT") {
                                 Slider(value: $dbDefaultLimit, in: 10...1000, step: 10).frame(width: 160)
@@ -645,7 +651,7 @@ private struct DatabasePane: View {
                 }
 
                 SettingsGroup("安全") {
-                    SettingsToggle("只读模式", isOn: $dbReadOnlyMode)
+                    SettingsToggle("只读模式", isOn: $dbReadOnlyMode, identifier: "dbReadOnlyToggle")
                     Text("只读模式下禁止执行 INSERT / UPDATE / DELETE 等写操作")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -806,7 +812,7 @@ private struct SettingsHeader: View {
     }
 }
 
-private struct SettingsGroup<Content: View>: View {
+struct SettingsGroup<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
     init(_ title: String, @ViewBuilder content: @escaping () -> Content) {
@@ -846,15 +852,20 @@ private struct LabeledRow<Content: View>: View {
 
 private struct SettingsToggle: View {
     let label: String
+    let identifier: String?
     @Binding var isOn: Bool
-    init(_ label: String, isOn: Binding<Bool>) {
-        self.label = label; self._isOn = isOn
+    init(_ label: String, isOn: Binding<Bool>, identifier: String? = nil) {
+        self.label = label
+        self.identifier = identifier
+        self._isOn = isOn
     }
     var body: some View {
         HStack {
             Text(label).font(.system(size: 12)).foregroundStyle(.secondary)
             Spacer()
-            Toggle("", isOn: $isOn).toggleStyle(.switch)
+            Toggle("", isOn: $isOn)
+                .toggleStyle(.switch)
+                .accessibilityIdentifier(identifier ?? label)
         }
         .frame(height: 24)
     }

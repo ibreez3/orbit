@@ -29,6 +29,26 @@ ORBIT_API int32_t orbit_update_server(struct OrbitApp *app, const char *id, cons
 
 ORBIT_API int32_t orbit_delete_server(struct OrbitApp *app, const char *id);
 
+ORBIT_API int32_t orbit_list_server_organization(struct OrbitApp *app, char **out_json);
+
+ORBIT_API int32_t orbit_create_server_folder(struct OrbitApp *app, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_rename_server_folder(struct OrbitApp *app, const char *folder_id, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_move_server_folder(struct OrbitApp *app, const char *folder_id, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_delete_server_folder(struct OrbitApp *app, const char *folder_id, const char *json_input);
+
+ORBIT_API int32_t orbit_create_server_tag(struct OrbitApp *app, const char *json_input, char **out_json);
+
+ORBIT_API int32_t orbit_delete_server_tag(struct OrbitApp *app, const char *tag_id);
+
+ORBIT_API int32_t orbit_set_server_tags(struct OrbitApp *app, const char *server_id, const char *json_input);
+
+ORBIT_API int32_t orbit_move_server(struct OrbitApp *app, const char *server_id, const char *json_input);
+
+ORBIT_API int32_t orbit_set_server_pin(struct OrbitApp *app, const char *server_id, const char *json_input, char **out_json);
+
 ORBIT_API int32_t orbit_list_credential_groups(struct OrbitApp *app, char **out_json);
 
 ORBIT_API int32_t orbit_add_credential_group(struct OrbitApp *app, const char *json_input, char **out_json);
@@ -64,6 +84,10 @@ ORBIT_API int32_t orbit_db_run_import(struct OrbitApp *app, const char *json_req
 ORBIT_API int32_t orbit_test_connection(struct OrbitApp *app, const char *json_input);
 
 ORBIT_API int32_t orbit_connect_ssh(struct OrbitApp *app, const char *server_id, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);
+
+ORBIT_API int32_t orbit_connect_ssh_temporary(struct OrbitApp *app, const char *json_input, OrbitDataCallback data_cb, OrbitClosedCallback closed_cb, void *userdata, char **out_session_id);
+
+ORBIT_API int32_t orbit_promote_temporary_server(struct OrbitApp *app, const char *session_id, const char *json_input, char **out_server_json);
 
 ORBIT_API int32_t orbit_get_last_error(struct OrbitApp *app, char **out_error);
 
@@ -111,7 +135,20 @@ ORBIT_API int32_t orbit_docker_action(struct OrbitApp *app, const char *server_i
 
 ORBIT_API void orbit_shutdown_pool(struct OrbitApp *app);
 
+/**
+ * Updates SSH connection preferences and applies keepalive to live sessions.
+ */
+ORBIT_API int32_t orbit_set_connection_settings(struct OrbitApp *app, uint32_t timeout_seconds, uint32_t keepalive_seconds);
+
 ORBIT_API int32_t orbit_exec_command(struct OrbitApp *app, const char *server_id, const char *command, uint32_t timeout_ms, char **out_output);
+
+ORBIT_API int32_t orbit_agent_exec(struct OrbitApp *app, const char *server_id, const char *command, uint32_t timeout_ms, uint32_t wait_ms, uint32_t max_output_bytes, char **out_json);
+
+ORBIT_API int32_t orbit_agent_job_status(struct OrbitApp *app, const char *job_id, char **out_json);
+
+ORBIT_API int32_t orbit_agent_job_output(struct OrbitApp *app, const char *job_id, uint64_t cursor, char **out_json);
+
+ORBIT_API int32_t orbit_agent_job_cancel(struct OrbitApp *app, const char *job_id);
 
 ORBIT_API int32_t orbit_start_port_forward(struct OrbitApp *app, const char *forwarding_id, const char *server_id, uint16_t local_port, const char *remote_host, uint16_t remote_port, uint16_t *out_local_port);
 

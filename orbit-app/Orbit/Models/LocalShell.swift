@@ -2,15 +2,20 @@ import Foundation
 import Darwin
 
 class LocalShell {
+    private let stateLock = NSLock()
     private var masterFd: Int32 = -1
     private var pid: pid_t = 0
     private var readSource: DispatchSourceRead?
     private var cleanedUp = false
 
+    private(set) var isRunning = false
+
     var onData: ((Data) -> Void)?
     var onClosed: (() -> Void)?
 
     func start(cols: UInt16 = 80, rows: UInt16 = 24) {
+        guard !isRunning else { return }
+
         // Create PTY master/slave pair manually
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0 else {
@@ -95,16 +100,23 @@ class LocalShell {
             return
         }
 
+        stateLock.lock()
         self.masterFd = master
         self.pid = childPid
+        self.isRunning = true
+        stateLock.unlock()
 
         // Async read from PTY master
         let fd = master
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .global(qos: .userInteractive))
         source.setEventHandler { [weak self] in
-            guard let self = self, self.masterFd >= 0 else { return }
+            guard let self else { return }
+            self.stateLock.lock()
+            let fd = self.masterFd
+            self.stateLock.unlock()
+            guard fd >= 0 else { return }
             var buffer = [UInt8](repeating: 0, count: 8192)
-            let count = read(self.masterFd, &buffer, buffer.count)
+            let count = read(fd, &buffer, buffer.count)
             if count > 0 {
                 let data = Data(buffer[..<count])
                 self.onData?(data)
@@ -120,25 +132,66 @@ class LocalShell {
     }
 
     func write(_ data: Data) {
-        guard masterFd >= 0 else { return }
-        Darwin.write(masterFd, [UInt8](data), data.count)
+        stateLock.lock()
+        let fd = masterFd
+        stateLock.unlock()
+        guard fd >= 0 else { return }
+        Darwin.write(fd, [UInt8](data), data.count)
     }
 
     func resize(cols: UInt16, rows: UInt16) {
-        guard masterFd >= 0 else { return }
+        stateLock.lock()
+        let fd = masterFd
+        stateLock.unlock()
+        guard fd >= 0 else { return }
         var ws = winsize()
         ws.ws_col = cols
         ws.ws_row = rows
-        _ = ioctl(masterFd, TIOCSWINSZ, &ws)
+        _ = ioctl(fd, TIOCSWINSZ, &ws)
+    }
+
+    /// Terminates the shell without emitting `onClosed`. Used when a pane or
+    /// tab is closed, where the UI has already decided the session is gone.
+    func stop() {
+        stateLock.lock()
+        guard !cleanedUp else {
+            stateLock.unlock()
+            return
+        }
+        cleanedUp = true
+        isRunning = false
+        let fd = masterFd
+        masterFd = -1
+        let childPid = pid
+        pid = 0
+        let source = readSource
+        readSource = nil
+        stateLock.unlock()
+
+        source?.cancel()
+        if fd >= 0 {
+            close(fd)
+        }
+        if childPid > 0 {
+            kill(childPid, SIGTERM)
+        }
     }
 
     private func cleanup() {
-        guard !cleanedUp else { return }
+        stateLock.lock()
+        guard !cleanedUp else {
+            stateLock.unlock()
+            return
+        }
         cleanedUp = true
+        isRunning = false
+        let fd = masterFd
+        masterFd = -1
         readSource = nil
-        if masterFd >= 0 {
-            close(masterFd)
-            masterFd = -1
+        stateLock.unlock()
+
+        if fd >= 0 {
+            close(fd)
         }
         DispatchQueue.main.async { [weak self] in
             self?.onClosed?()
@@ -146,9 +199,6 @@ class LocalShell {
     }
 
     deinit {
-        readSource?.cancel()
-        if pid > 0 {
-            kill(pid, SIGTERM)
-        }
+        stop()
     }
 }

@@ -404,7 +404,11 @@ struct DatabaseView: View {
         queryResult = nil
         do {
             let request = DatabaseQueryRequest(
-                sql: sqlText,
+                sql: DatabaseQueryPolicy.applyingAutoLimit(
+                    to: sqlText,
+                    limit: Int(dbDefaultLimit),
+                    enabled: dbAutoLimit
+                ),
                 read_only: dbReadOnlyMode,
                 timeout_ms: UInt32(dbQueryTimeout * 1000)
             )
@@ -426,7 +430,8 @@ struct DatabaseView: View {
         selectedTable = tableName
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
         if replaceSQL || trimmed.isEmpty || trimmed.hasPrefix("SELECT * FROM") {
-            sqlText = "SELECT * FROM \(quoteIdentifier(tableName)) LIMIT \(Int(dbDefaultLimit));"
+            let limitClause = dbAutoLimit ? " LIMIT \(Int(dbDefaultLimit))" : ""
+            sqlText = "SELECT * FROM \(quoteIdentifier(tableName))\(limitClause);"
         }
     }
 

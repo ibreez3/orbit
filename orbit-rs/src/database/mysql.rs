@@ -33,6 +33,7 @@ impl MysqlEngine {
         connection: &DatabaseConnection,
         sql: &str,
         read_only: bool,
+        timeout_ms: u32,
     ) -> Result<DatabaseQueryResult> {
         if read_only && is_write_statement(sql) {
             return Err(anyhow!("read-only database query rejected write statement"));
@@ -40,6 +41,7 @@ impl MysqlEngine {
 
         let started = Instant::now();
         let mut conn = Self::connect(connection)?;
+        Self::apply_statement_timeout(&mut conn, timeout_ms);
         if is_write_statement(sql) {
             conn.query_drop(sql)?;
             return Ok(DatabaseQueryResult::empty_message(
@@ -73,6 +75,24 @@ impl MysqlEngine {
             elapsed_ms: started.elapsed().as_millis() as u64,
             message: String::new(),
         })
+    }
+
+    fn apply_statement_timeout(conn: &mut mysql::Conn, timeout_ms: u32) {
+        if timeout_ms == 0 {
+            return;
+        }
+        let ms = timeout_ms.max(1);
+        // MySQL 5.7.8+ uses milliseconds; MariaDB uses seconds.
+        if conn
+            .query_drop(format!("SET SESSION max_execution_time = {}", ms))
+            .is_err()
+        {
+            let seconds = ms as f64 / 1000.0;
+            let _ = conn.query_drop(format!(
+                "SET SESSION max_statement_time = {:.3}",
+                seconds
+            ));
+        }
     }
 
     pub fn backup_tables(connection: &DatabaseConnection) -> Result<Vec<DatabaseBackupTable>> {

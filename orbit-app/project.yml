@@ -25,6 +25,13 @@ schemes:
     build:
       targets:
         Orbit: all
+        OrbitTests: [test]
+        OrbitMCP: [build]
+        OrbitCLI: [build]
+    test:
+      config: Debug
+      targets:
+        - OrbitTests
     run:
       config: Release
     profile:
@@ -33,8 +40,56 @@ schemes:
       config: Release
     archive:
       config: Release
+  OrbitUITests:
+    build:
+      targets:
+        OrbitUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - OrbitUITests
 
 targets:
+  AgentKit:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: AgentKit
+    settings:
+      base:
+        PRODUCT_NAME: AgentKit
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.agentkit
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        SWIFT_VERSION: "5.9"
+
+  OrbitMCP:
+    type: tool
+    platform: macOS
+    sources:
+      - path: OrbitMCP
+    dependencies:
+      - target: AgentKit
+    settings:
+      base:
+        PRODUCT_NAME: orbit-mcp
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.mcp
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        SWIFT_VERSION: "5.9"
+
+  OrbitCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: OrbitCLI
+    dependencies:
+      - target: AgentKit
+    settings:
+      base:
+        PRODUCT_NAME: orbit-cli
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.cli
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        SWIFT_VERSION: "5.9"
+
   Orbit:
     type: application
     platform: macOS
@@ -46,11 +101,18 @@ targets:
       - package: SwiftTerm
       - package: Sparkle
         product: Sparkle
+      - target: AgentKit
+      - target: OrbitMCP
+        link: false
+        embed: false
+      - target: OrbitCLI
+        link: false
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal
-        MARKETING_VERSION: "0.0.6"
-        CURRENT_PROJECT_VERSION: "6"
+        MARKETING_VERSION: "0.0.11"
+        CURRENT_PROJECT_VERSION: "12"
         INFOPLIST_FILE: Orbit/Info.plist
         PRODUCT_NAME: Orbit
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -85,3 +147,41 @@ targets:
             - arm64
           ONLY_ACTIVE_ARCH: true
     MACOSX_DEPLOYMENT_TARGET: "13.0"
+    postBuildScripts:
+      - name: Embed Agent tools
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS"
+          cp "$BUILT_PRODUCTS_DIR/orbit-mcp" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/orbit-mcp"
+          cp "$BUILT_PRODUCTS_DIR/orbit-cli" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/orbit-cli"
+          chmod +x "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/orbit-mcp"
+          chmod +x "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/orbit-cli"
+  OrbitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: OrbitTests
+    dependencies:
+      - target: Orbit
+      - target: AgentKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.tests
+        GENERATE_INFOPLIST_FILE: true
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/../orbit-rs/include"
+  OrbitUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: OrbitUITests
+    dependencies:
+      - target: Orbit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal.uitests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: Orbit
+        HEADER_SEARCH_PATHS:
+          - "$(PROJECT_DIR)/../orbit-rs/include"

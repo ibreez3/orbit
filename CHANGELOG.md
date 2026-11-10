@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+## [v0.0.11] - 2026-11-10
+
+### Added
+- Local AI Agent gateway: `orbit-mcp` (MCP bridge) and `orbit-cli` let Claude Code, Codex, and other local agents use selected servers without receiving SSH credentials.
+- Per-server AI exposure, session admission approval, a read/write command guard, session-scoped write grants, session revocation, job polling with incremental output, persistent shells, and an audit log.
+- AI Agent settings pane showing gateway status, exposed servers, active sessions, and recent activity.
+- `docs/agent-mcp-setup.md` with setup instructions for Claude Code, Codex, and CLI-only agents.
+
+### Fixed
+- MCP stdio initialization no longer stalls before the first tool call.
+
+## [v0.0.10-pre] - 2026-11-09
+
+### Changed
+- Redesigned the Add Server dialog around a consistent two-column form: aligned labels and fields, grouped basic/connection/authentication sections, segmented pickers for jump host and authentication source/method, inline tag chips, and a clear test/cancel/save footer.
+- The dialog now expands for private-key authentication so the key editor and passphrase stay visible, and it supports Return to save and Escape to cancel.
+
+## [v0.0.9-pre] - 2026-11-09
+
+### Changed
+- Rotated the Sparkle EdDSA update signing key and enabled signed DMG and appcast publishing in the release workflow.
+- Existing installations need one manual install of this build; automatic updates resume after that.
+
+## [v0.0.8-pre] - 2026-11-08
+
+### Fixed
+- Splitting a local terminal now opens a second local shell pane instead of failing with an SSH channel error; each pane keeps its own shell, and closing a pane or tab terminates only its shell.
+- The workspace window supports the standard title-bar behaviors again: double-clicking the title bar or an empty part of the global bar zooms the window (or minimizes it, following the system double-click preference), and the window can be dragged by its title bar.
+- The settings window is resizable and supports title-bar double-click zoom.
+- Every control in the settings window now takes effect: SSH timeout, keepalive, auto-reconnect interval, AI enable gating, all customizable keybindings, database query timeout and auto-`LIMIT`, custom theme selection, window background blur, and the select-to-copy default.
+- Settings that change live UI state (AI dock availability, keybinding rows, status-bar shortcut hints) refresh immediately instead of waiting for an unrelated redraw.
+- Keybinding rows are now clickable across the full row, and key recording no longer depends on which control owns keyboard focus.
+- Removed the non-functional Metal GPU renderer toggle.
+
+## [v0.0.7-pre] - 2026-11-08
+
+### Added
+- Server-first homepage with a single quick-connect input, recent connections, and compact secondary actions.
+- Server folders up to three levels, multi-tag classification, drag-and-drop organization, and tag filtering.
+- Temporary SSH connections with inline authentication and optional promotion into saved assets.
+- Command palette on `⌘⇧P`; quick connect on `⌘K`; resizable and collapsible asset sidebar.
+- Connection attempt and result metadata persisted by the Rust core.
+- XCTest unit suite, XCUITest UI suite, and environment-gated real-server smoke tests.
+
+### Changed
+- Spotlight is now a command-only palette; server search lives in the global input.
+- Server organization uses folder and tag tables with transactional legacy group migration.
+- Window minimum size is 1024×640; the right tool dock keeps its 52pt width.
+
+### Fixed
+- Reconnect for saved, temporary, and local terminals, including split-pane teardown and orphan session cleanup.
+- Temporary connection panel layout collapse, port formatting, focus restoration, and `Esc` priority.
+- Quick terminal input routing, `Ctrl+\`` hotkey under IME, and menu entry.
+- Status bar session count and database dock entry.
+- SSH TCP and handshake timeouts; proxy bind failures return errors instead of panicking.
+- Partial server updates no longer wipe omitted credentials.
+- Monitor process CPU/memory parsing and SFTP percent escaping.
+- User-facing API error text no longer exposes internal error codes.
+
 ## [v0.0.6-pre] - 2026-07-02
 
 ### Added

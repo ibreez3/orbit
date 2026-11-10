@@ -7,7 +7,7 @@ struct OrbitApp: App {
     var body: some Scene {
         WindowGroup {
             MainView()
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 1024, minHeight: 640)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 800)
@@ -18,33 +18,63 @@ struct OrbitApp: App {
 }
 
 struct OrbitCommands: Commands {
+    @ObservedObject private var keyBindings = KeyBindings.shared
+
     var body: some Commands {
         SidebarCommands()
         CommandGroup(after: .toolbar) {
-            Button("Spotlight") {
-                NotificationCenter.default.post(name: .openSpotlight, object: nil)
+            Button("快速终端") {
+                QuickTerminalController.shared.toggle()
             }
-            .keyboardShortcut("k", modifiers: .command)
+            .keyboardShortcut("`", modifiers: .control)
+
+            Button("快速连接") {
+                NotificationCenter.default.post(name: .focusQuickConnect, object: nil)
+            }
+            .keyboardShortcut(
+                keyEquivalent(for: "quickConnect"),
+                modifiers: eventModifiers(for: "quickConnect")
+            )
+
+            Button("命令面板") {
+                NotificationCenter.default.post(name: .openCommandPalette, object: nil)
+            }
+            .keyboardShortcut(
+                keyEquivalent(for: "commandPalette"),
+                modifiers: eventModifiers(for: "commandPalette")
+            )
 
             Button("Toggle SFTP Drawer") {
                 NotificationCenter.default.post(name: .toggleSftpDrawer, object: nil)
             }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .keyboardShortcut(
+                keyEquivalent(for: "toggleSftp"),
+                modifiers: eventModifiers(for: "toggleSftp")
+            )
 
             Button("Clear Screen") {
                 NotificationCenter.default.post(name: .clearScreen, object: nil)
             }
-            .keyboardShortcut("l", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "clearScreen"),
+                modifiers: eventModifiers(for: "clearScreen")
+            )
 
             Button("Find in Terminal") {
                 NotificationCenter.default.post(name: .findInTerminal, object: nil)
             }
-            .keyboardShortcut("f", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "findInTerminal"),
+                modifiers: eventModifiers(for: "findInTerminal")
+            )
 
             Button("Open Settings") {
                 NotificationCenter.default.post(name: .openSettings, object: nil)
             }
-            .keyboardShortcut(",", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "settings"),
+                modifiers: eventModifiers(for: "settings")
+            )
 
             Button("检查更新...") {
                 NotificationCenter.default.post(name: .checkForUpdates, object: nil)
@@ -53,7 +83,10 @@ struct OrbitCommands: Commands {
             Button("Reconnect Session") {
                 NotificationCenter.default.post(name: .reconnectSession, object: nil)
             }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .keyboardShortcut(
+                keyEquivalent(for: "reconnect"),
+                modifiers: eventModifiers(for: "reconnect")
+            )
 
             Divider()
 
@@ -71,66 +104,123 @@ struct OrbitCommands: Commands {
             Button("新建终端连接") {
                 NotificationCenter.default.post(name: .newTerminal, object: nil)
             }
-            .keyboardShortcut("t", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "newTerminal"),
+                modifiers: eventModifiers(for: "newTerminal")
+            )
         }
         CommandMenu("分屏") {
-            Button("水平分屏（上下）") {
+            Button("水平分屏（左右）") {
                 NotificationCenter.default.post(name: .splitHorizontal, object: nil)
             }
-            .keyboardShortcut("d", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "splitHorizontal"),
+                modifiers: eventModifiers(for: "splitHorizontal")
+            )
 
-            Button("垂直分屏（左右）") {
+            Button("垂直分屏（上下）") {
                 NotificationCenter.default.post(name: .splitVertical, object: nil)
             }
-            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .keyboardShortcut(
+                keyEquivalent(for: "splitVertical"),
+                modifiers: eventModifiers(for: "splitVertical")
+            )
 
             Divider()
 
             Button("关闭当前窗格") {
                 NotificationCenter.default.post(name: .closePane, object: nil)
             }
-            .keyboardShortcut("w", modifiers: .command)
+            .keyboardShortcut(
+                keyEquivalent(for: "closePane"),
+                modifiers: eventModifiers(for: "closePane")
+            )
 
             Divider()
 
             Button("切换到上一个窗格") {
                 NotificationCenter.default.post(name: .navigatePrevPane, object: nil)
             }
-            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            .keyboardShortcut(
+                keyEquivalent(for: "navPrevPane"),
+                modifiers: eventModifiers(for: "navPrevPane")
+            )
 
             Button("切换到下一个窗格") {
                 NotificationCenter.default.post(name: .navigateNextPane, object: nil)
             }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            .keyboardShortcut(
+                keyEquivalent(for: "navNextPane"),
+                modifiers: eventModifiers(for: "navNextPane")
+            )
 
             Button("切换到左侧窗格") {
                 NotificationCenter.default.post(name: .navigateLeftPane, object: nil)
             }
-            .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            .keyboardShortcut(
+                keyEquivalent(for: "navLeftPane"),
+                modifiers: eventModifiers(for: "navLeftPane")
+            )
 
             Button("切换到右侧窗格") {
                 NotificationCenter.default.post(name: .navigateRightPane, object: nil)
             }
-            .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            .keyboardShortcut(
+                keyEquivalent(for: "navRightPane"),
+                modifiers: eventModifiers(for: "navRightPane")
+            )
 
             Divider()
 
             Button("增大当前窗格") {
                 NotificationCenter.default.post(name: .growPane, object: nil)
             }
-            .keyboardShortcut(.rightArrow, modifiers: [.command, .shift])
+            .keyboardShortcut(
+                keyEquivalent(for: "growPane"),
+                modifiers: eventModifiers(for: "growPane")
+            )
 
             Button("缩小当前窗格") {
                 NotificationCenter.default.post(name: .shrinkPane, object: nil)
             }
-            .keyboardShortcut(.leftArrow, modifiers: [.command, .shift])
+            .keyboardShortcut(
+                keyEquivalent(for: "shrinkPane"),
+                modifiers: eventModifiers(for: "shrinkPane")
+            )
         }
+    }
+
+    private func keyEquivalent(for action: String) -> KeyEquivalent {
+        switch keyBindings.binding(for: action).key {
+        case "up": return .upArrow
+        case "down": return .downArrow
+        case "left": return .leftArrow
+        case "right": return .rightArrow
+        case "delete": return .delete
+        case "return": return .return
+        case "tab": return .tab
+        case "escape": return .escape
+        case "space": return .space
+        default:
+            return KeyEquivalent(keyBindings.binding(for: action).key.first ?? " ")
+        }
+    }
+
+    private func eventModifiers(for action: String) -> EventModifiers {
+        let modifiers = keyBindings.binding(for: action).modifiers
+        var result = EventModifiers()
+        if modifiers.command { result.insert(.command) }
+        if modifiers.shift { result.insert(.shift) }
+        if modifiers.option { result.insert(.option) }
+        if modifiers.control { result.insert(.control) }
+        return result
     }
 }
 
 extension Notification.Name {
     static let newTerminal = Notification.Name("newTerminal")
-    static let openSpotlight = Notification.Name("openSpotlight")
+    static let focusQuickConnect = Notification.Name("focusQuickConnect")
+    static let openCommandPalette = Notification.Name("openCommandPalette")
     static let splitHorizontal = Notification.Name("splitHorizontal")
     static let splitVertical = Notification.Name("splitVertical")
     static let closePane = Notification.Name("closePane")
