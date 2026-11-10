@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+- Standalone About Orbit window with version, update status, last check time, automatic check preference, and embedded release notes.
+- Immediate update checks at launch when automatic checking is enabled; installation still requires user confirmation.
+
+### Changed
+- Only stable `vX.Y.Z` tags publish the signed appcast; preview releases stay outside the automatic update channel.
+- Stable release notes are required and embedded as Markdown in the appcast.
+- Require signed Sparkle feeds and verify update archives before extraction.
+
+### Fixed
+- Reject reused or decreasing build numbers across releases and prevent appcast rollback, while allowing same-tag publishing retries.
+- Avoid missed update prompts caused by the default check interval during short app sessions.
+- Preserve normal no-update status instead of treating Sparkle's no-update callback as a failure.
+
 ## [v0.0.11] - 2026-11-10
 
 ### Added

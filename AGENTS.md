@@ -57,15 +57,19 @@ cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration
 
 ## 发布流程（Agent / 维护者）
 
-预览版本使用类似 `v0.0.6-pre` 的 tag。
+稳定 tag 使用 `vX.Y.Z`；预览 tag 使用带后缀的版本，例如 `v0.0.12-pre.1`、`v0.0.12-rc1`。
 
-1. 更新 `orbit-app/project.yml` 中的版本字段。
+1. 更新 `orbit-app/project.yml`：`MARKETING_VERSION` 必须等于 tag 的基础版本（不含 `v` 和后缀）；每次发布（含预览版）的 `CURRENT_PROJECT_VERSION` 必须严格大于上一个 tag 的 build。
 2. 运行 `cd orbit-app && xcodegen generate && cd ..` 重新生成 Xcode 工程。
-3. 运行本地验证，例如 `make build-app` 和 Rust 测试。
+3. 运行本地验证，例如 `make build-app`、相关单元测试和 `python3 -m unittest discover -s scripts/tests -v`。
 4. 提交到 `develop` 并推送分支。
 5. 创建并推送 release tag。
-6. 创建 GitHub prerelease，只填写 release notes。
-7. 交给 `Release DMG` GitHub Action 构建、验证并上传 Apple Silicon DMG。
+6. 创建 GitHub Release 并标记为 Latest（不要勾选 prerelease，以便仓库首页展示），填写 release notes；稳定版正文必须非空。
+7. 交给 `Release DMG` GitHub Action 构建、验证并上传 Apple Silicon DMG。稳定版必须配置 `SPARKLE_PRIVATE_KEY`，工作流把 Release 正文以 Markdown 嵌入 appcast 并签名。
+
+只有稳定 tag 会更新 `docs/appcast.xml`；预览 tag 不进入自动更新通道。GitHub Release 的 Latest / Pre-release 标记不影响 Sparkle，自动更新通道只由 tag 后缀决定。不要手工编辑 `docs/appcast.xml`，它是签名文件。
+
+客户端在启用自动检查时于启动立即检查更新，发现新版后由用户确认下载安装。预览版用户需要等下一个 build 更高的稳定版才能自动升级；旧版本（≤ v0.0.8）因公钥轮换仍需一次手动安装，稳定版 release notes 应保留此说明。
 
 不要把本地构建的 DMG 上传到 GitHub Releases。本地 DMG 仅用于冒烟验证。
 
