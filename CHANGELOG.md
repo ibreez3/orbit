@@ -7,7 +7,8 @@
 - Immediate update checks at launch when automatic checking is enabled; installation still requires user confirmation.
 
 ### Changed
-- Only stable `vX.Y.Z` tags publish the signed appcast; preview releases stay outside the automatic update channel.
+- Only stable `vX.Y.Z` tags publish the default signed appcast; preview releases stay outside the stable channel.
+- Preview releases update a separate `docs/appcast-preview.xml` for local verification; the default stable feed is unchanged.
 - Stable release notes are required and embedded as Markdown in the appcast.
 - Require signed Sparkle feeds and verify update archives before extraction.
 

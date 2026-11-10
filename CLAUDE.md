@@ -32,7 +32,16 @@ make build-dmg DMG_PATH=release/Orbit-local-AppleSilicon.dmg VOLUME_NAME="Orbit"
 6. 创建 GitHub Release 并标记为 Latest（不要勾选 prerelease，以便仓库首页展示），填写 release notes；稳定版正文必须非空。
 7. 交给 `Release DMG` GitHub Action 构建、验证并上传 Apple Silicon DMG。稳定版必须配置 `SPARKLE_PRIVATE_KEY`，工作流把 Release 正文以 Markdown 嵌入 appcast 并签名。
 
-只有稳定 tag 会更新 `docs/appcast.xml`；预览 tag 不进入自动更新通道。GitHub Release 的 Latest / Pre-release 标记不影响 Sparkle，自动更新通道只由 tag 后缀决定。不要手工编辑 `docs/appcast.xml`，它是签名文件。
+只有稳定 tag 会更新默认的 `docs/appcast.xml`；预览 tag 不进入默认稳定通道，而是更新独立的 `docs/appcast-preview.xml`。GitHub Release 的 Latest / Pre-release 标记不影响 Sparkle，通道只由 appcast 文件决定。不要手工编辑这两个 appcast，它们都是签名文件。
+
+本机验收预览版可以临时覆盖 feed（只影响本机，不影响其他用户）：
+
+```bash
+defaults write com.orbit.terminal SUFeedURL "https://raw.githubusercontent.com/ibreez3/orbit/develop/docs/appcast-preview.xml"
+defaults delete com.orbit.terminal SULastCheckTime
+# 重启 Orbit 后自动检查会收到预览版
+defaults delete com.orbit.terminal SUFeedURL   # 恢复稳定通道
+```
 
 客户端在启用自动检查时于启动立即检查更新，发现新版后由用户确认下载安装。预览版用户需要等下一个 build 更高的稳定版才能自动升级；旧版本（≤ v0.0.8）因公钥轮换仍需一次手动安装，稳定版 release notes 应保留此说明。
 

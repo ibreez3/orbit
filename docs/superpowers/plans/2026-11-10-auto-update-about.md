@@ -1546,3 +1546,16 @@ Expected: stdout 输出合法 XML，包含 `<description sparkle:format="markdow
 - UI 测试增加断言：About 窗口中心与主窗口中心一致（误差 40pt），高度小于 420pt。
 
 验证：Swift 单测 163/163、关于窗口 UI 测试 1/1、Release 构建与签名校验通过。
+
+## 8. 预览通道与 v0.0.12-pre（2026-11-10）
+
+- 预览 tag 更新独立的 `docs/appcast-preview.xml`，默认 `docs/appcast.xml` 仍只由稳定版更新。
+- 本机验收预览版：
+  ```bash
+  defaults write com.orbit.terminal SUFeedURL "https://raw.githubusercontent.com/ibreez3/orbit/develop/docs/appcast-preview.xml"
+  defaults delete com.orbit.terminal SULastCheckTime
+  # 重启 Orbit 后自动检查会收到预览版
+  defaults delete com.orbit.terminal SUFeedURL   # 恢复稳定通道
+  ```
+- 版本提升到 `0.0.12` / build `13`；发布 tag `v0.0.12-pre`。
+- 本地 Release 构建验证：`CFBundleShortVersionString=0.0.12`、`CFBundleVersion=13`、`SURequireSignedFeed=true`；Swift 单测 163/163，Python 12/12。

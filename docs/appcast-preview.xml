@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+  <channel>
+    <title>Orbit v0.0.11</title>
+    <link>https://github.com/ibreez3/orbit/releases</link>
+    <description>Orbit macOS pre-release updates</description>
+    <language>zh-CN</language>
+    <item>
+      <title>Orbit v0.0.5-pre.1</title>
+      <sparkle:releaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.11</sparkle:releaseNotesLink>
+      <pubDate>Tue, 10 Nov 2026 00:51:21 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.11/Orbit-v0.0.11-AppleSilicon.dmg" sparkle:version="12" sparkle:shortVersionString="0.0.11" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="2lvRVUEg2lOJ4OzC3ZZkktVkrCd5a26IDYWEM6N9r/FGQK6XePRJ/iZaxU/dL+D8L483W/Nd9YRHza/EXRq8Bw==" length="15077190" type="application/x-apple-diskimage"></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: AuE5DhmWf7TgvS5DUy0/7Ra5w+BrzfdkCso/zdLoTqf/XEoV9JN5PlyathfDVC/xvKMfhiTVoQ0YRBJy5zQMBQ==
+length: 1258
+-->

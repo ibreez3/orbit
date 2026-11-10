@@ -144,19 +144,23 @@ jobs:
           gh --version
 
       - name: Fetch release notes
-        if: steps.release.outputs.stable == 'true'
         shell: bash
         env:
           TAG: ${{ steps.release.outputs.tag }}
+          STABLE: ${{ steps.release.outputs.stable }}
         run: |
           set -euo pipefail
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
-            > "$RUNNER_TEMP/orbit-release-notes.md"; then
+          NOTES="$RUNNER_TEMP/orbit-release-notes.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$NOTES"; then
+            :
+          elif [ "$STABLE" = "true" ]; then
             echo "::error::Create the GitHub release with notes before dispatching a stable release"
             exit 1
+          else
+            printf 'Orbit macOS preview release.\n' > "$NOTES"
           fi
-          if [ -z "$(tr -d '[:space:]' < "$RUNNER_TEMP/orbit-release-notes.md")" ]; then
-            echo "::error::Stable release notes are empty"
+          if [ -z "$(tr -d '[:space:]' < "$NOTES")" ]; then
+            echo "::error::Release notes are empty"
             exit 1
           fi
 
@@ -295,7 +299,7 @@ jobs:
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
 
       - name: Update appcast on develop
-        if: env.SPARKLE_PRIVATE_KEY != '' && steps.release.outputs.stable == 'true' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
+        if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
         shell: bash
         run: |
           set -euo pipefail
@@ -308,6 +312,11 @@ jobs:
           SIGN_UPDATE="${{ steps.sparkle.outputs.sign_update }}"
           SPARKLE_SIGNATURE="${{ steps.sparkle.outputs.signature }}"
           SPARKLE_LENGTH="${{ steps.sparkle.outputs.length }}"
+          if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
+            APPCAST_PATH="docs/appcast.xml"
+          else
+            APPCAST_PATH="docs/appcast-preview.xml"
+          fi
           mkdir -p "$RUNNER_TEMP/orbit-appcast-tools"
           cp scripts/appcast_lib.py scripts/update-appcast.py "$RUNNER_TEMP/orbit-appcast-tools/"
 
@@ -317,42 +326,47 @@ jobs:
           git switch --discard-changes develop
           git pull --ff-only origin develop
           # 旧 feed 可能来自上一把签名密钥；验签失败只告警，不能阻断密钥轮换。
-          if ! printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify docs/appcast.xml; then
+          if ! printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "$APPCAST_PATH"; then
             echo "::warning::Existing appcast does not verify with the current Sparkle key (possible key rotation); regenerating with the current key."
           fi
 
           python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" \
-            --appcast docs/appcast.xml \
+            --appcast "$APPCAST_PATH" \
             --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" \
             --url "$URL" --signature "$SPARKLE_SIGNATURE" --length "$SPARKLE_LENGTH" \
             --notes-file "$RUNNER_TEMP/orbit-release-notes.md" \
             --full-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
-          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify docs/appcast.xml \
+          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify "$APPCAST_PATH" \
             --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION"
 
       - name: Sign and push appcast
-        if: env.SPARKLE_PRIVATE_KEY != '' && steps.release.outputs.stable == 'true' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
+        if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
         shell: bash
         run: |
           set -euo pipefail
           SIGN_UPDATE="${{ steps.sparkle.outputs.sign_update }}"
-          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - docs/appcast.xml
-          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify docs/appcast.xml
+          if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
+            APPCAST_PATH="docs/appcast.xml"
+          else
+            APPCAST_PATH="docs/appcast-preview.xml"
+          fi
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - "$APPCAST_PATH"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "$APPCAST_PATH"
 
           TAG="${{ steps.release.outputs.tag }}"
           VERSION="${{ steps.release.outputs.version }}"
           APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
           BUILD_VERSION="$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist")"
-          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify docs/appcast.xml \
+          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify "$APPCAST_PATH" \
             --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" --require-signature
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs/appcast.xml; then
+          if git diff --quiet -- "$APPCAST_PATH"; then
             echo "appcast unchanged"
             exit 0
           fi
-          git add docs/appcast.xml
+          git add "$APPCAST_PATH"
           git commit -m "chore: update appcast for ${{ steps.release.outputs.tag }}"
           git push origin develop || { git pull --rebase origin develop && git push origin develop; }
 
