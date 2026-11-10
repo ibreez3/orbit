@@ -61,7 +61,7 @@ Orbit is designed for developers and operators who work with many servers every 
 
 - A built-in AI panel that works with any OpenAI-compatible endpoint, including OpenAI, DeepSeek, Qwen, Kimi, and Ollama.
 - The assistant can propose shell commands in ```` ```execute ```` blocks; Orbit asks for confirmation before running them.
-- AI activity is recorded in the audit log and visible in Settings.
+- AI activity is recorded in the per-session audit trail shown in the AI panel.
 
 ### AI Agent gateway (MCP + CLI)
 

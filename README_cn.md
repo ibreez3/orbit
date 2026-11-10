@@ -61,7 +61,7 @@ Orbit 面向每天需要操作多台服务器的开发者与运维人员：与�
 
 - 内置 AI 面板，可接入任意兼容 OpenAI 的接口，包括 OpenAI、DeepSeek、Qwen、Kimi 和 Ollama。
 - AI 可以在 ```` ```execute ```` 代码块中给出命令建议；Orbit 会在执行前请求确认。
-- AI 活动会写入审计日志，并显示在设置中。
+- AI 活动会写入会话审计记录，并在 AI 面板中显示。
 
 ### AI Agent 网关（MCP + CLI）
 
