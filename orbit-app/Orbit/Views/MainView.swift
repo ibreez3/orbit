@@ -305,12 +305,17 @@ struct MainView: View {
     private var contentArea: some View {
         if let activeTab = tabState.tabs.first(where: { $0.id == tabState.activeTabId }) {
             if let tree = activeTab.paneTree {
-                SplitPaneView(
-                    node: tree,
-                    connectionTarget: activeTab.connectionTarget,
-                    tabId: activeTab.id,
-                    appState: appState
-                )
+                ZStack(alignment: .bottomTrailing) {
+                    SplitPaneView(
+                        node: tree,
+                        connectionTarget: activeTab.connectionTarget,
+                        tabId: activeTab.id,
+                        appState: appState
+                    )
+                    if activeTab.id == tabState.activeTabId {
+                        tabBanners(activeTab)
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 tabContent(activeTab)
@@ -319,6 +324,29 @@ struct MainView: View {
         } else {
             emptyState
         }
+    }
+
+    @ViewBuilder
+    private func tabBanners(_ tab: TabItem) -> some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            if let failure = tabState.temporaryPromotionFailures[tab.id] {
+                TemporaryPromotionRetryBanner(
+                    failure: failure,
+                    retry: {
+                        Task {
+                            await appState.retryTemporaryPromotion(tabId: tab.id)
+                        }
+                    },
+                    dismiss: {
+                        appState.dismissTemporaryPromotionFailure(tabId: tab.id)
+                    }
+                )
+            }
+            if let activeTabError = tabState.visibleActiveTabError {
+                AIErrorBanner(error: activeTabError, appState: appState)
+            }
+        }
+        .padding(12)
     }
 
     @ViewBuilder
@@ -335,25 +363,7 @@ struct MainView: View {
                 )
                 .id(tab.id)
                 if tab.id == tabState.activeTabId {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        if let failure = tabState.temporaryPromotionFailures[tab.id] {
-                            TemporaryPromotionRetryBanner(
-                                failure: failure,
-                                retry: {
-                                    Task {
-                                        await appState.retryTemporaryPromotion(tabId: tab.id)
-                                    }
-                                },
-                                dismiss: {
-                                    appState.dismissTemporaryPromotionFailure(tabId: tab.id)
-                                }
-                            )
-                        }
-                        if let activeTabError = tabState.activeTabError {
-                            AIErrorBanner(errorText: activeTabError, appState: appState)
-                        }
-                    }
-                    .padding(12)
+                    tabBanners(tab)
                 }
             }
         case .sftp:
@@ -677,9 +687,7 @@ private struct ClearScreenModifier: ViewModifier {
                let tab = appState.tabs.first(where: { $0.id == activeId }),
                let sid = tab.focusedChannelId ?? tab.sessionId,
                let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView {
-                let term = tv.getTerminal()
-                term.buffer.clear()
-                tv.setNeedsDisplay(tv.bounds)
+                tv.clearScreenAndScrollback()
             }
         }
     }

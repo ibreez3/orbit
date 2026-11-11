@@ -3,13 +3,13 @@ options:
   bundleIdPrefix: com.orbit
   deploymentTarget:
     macOS: "13.0"
-  xcodeVersion: "15.0"
+  xcodeVersion: "26.0"
   generateEmptyDirectories: true
 
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
-    from: "1.13.0"
+    exactVersion: "1.99.3"
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: "2.9.3"
@@ -176,6 +176,11 @@ targets:
     platform: macOS
     sources:
       - path: OrbitUITests
+        excludes:
+          - Fixtures
+      - path: OrbitUITests/Fixtures
+        buildPhase: resources
+        type: folder
     dependencies:
       - target: Orbit
     settings:

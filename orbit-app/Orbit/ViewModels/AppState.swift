@@ -32,9 +32,20 @@ class AppState: ObservableObject {
         set { tabState.activeTabId = newValue }
     }
 
-    var activeTabError: String? {
-        get { tabState.activeTabError }
-        set { tabState.activeTabError = newValue }
+    @discardableResult
+    func setActiveTabError(_ message: String, tabId: String, sessionId: String) -> UUID? {
+        guard activeTabId == tabId, let tab = tabState.tab(id: tabId),
+              (tab.focusedChannelId ?? tab.sessionId) == sessionId else { return nil }
+        let generation = UUID()
+        tabState.activeTabError = ActiveTabError(
+            tabId: tabId, sessionId: sessionId, message: message, generation: generation
+        )
+        return generation
+    }
+
+    func clearActiveTabError(matchingGeneration generation: UUID) {
+        guard tabState.activeTabError?.generation == generation else { return }
+        tabState.activeTabError = nil
     }
 
     var spotlightOpen: Bool {

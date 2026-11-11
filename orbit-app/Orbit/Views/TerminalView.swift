@@ -6,7 +6,6 @@ final class TerminalOutputPump {
     private static let defaultMaxBufferedBytes = 2 * 1024 * 1024
     private static let defaultChunkBytes = 64 * 1024
     private static let defaultMaxChunksPerFrame = 4
-    static let keywordBypassBacklogBytes = 512 * 1024
 
     private let maxBufferedBytes: Int
     private let chunkBytes: Int
@@ -298,7 +297,6 @@ struct TerminalView: NSViewRepresentable {
     let connectionTarget: ServerConnectionTarget
     let tabId: String
     var sessionGeneration: Int = 0
-    @EnvironmentObject var tabState: TabState
     @EnvironmentObject var themeState: ThemeState
     let appState: AppState
 
@@ -319,15 +317,15 @@ struct TerminalView: NSViewRepresentable {
             context.coordinator.sessionId = cid
             context.coordinator.terminalView = cached
             cached.terminalDelegate = context.coordinator
+            context.coordinator.refreshInteractionState()
             if isLocalTarget {
                 context.coordinator.adoptLocalShell()
             } else {
                 context.coordinator.registerHandlers()
-                let term = cached.getTerminal()
-                do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
+                let term = cached.terminalDimensions
+                context.coordinator.resizeTransport(cols: term.cols, rows: term.rows)
             }
             Self.applySettings(cached, theme: themeState.theme)
-            cached.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
             return cached
         }
 
@@ -337,9 +335,7 @@ struct TerminalView: NSViewRepresentable {
         Self.applySettings(tv, theme: themeState.theme)
         tv.terminalDelegate = context.coordinator
         context.coordinator.terminalView = tv
-
-        // Background blur
-        tv.updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
+        context.coordinator.refreshInteractionState()
 
         if isLocalTarget {
             if let cid = channelId {
@@ -351,8 +347,8 @@ struct TerminalView: NSViewRepresentable {
             context.coordinator.sessionId = cid
             OrbitBridge.shared.cacheTerminalView(tv, sessionId: cid)
             context.coordinator.registerHandlers()
-            let term = tv.getTerminal()
-            do { try OrbitBridge.shared.resizeSSH(sessionId: cid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(cached) failed: \(error)") }
+            let term = tv.terminalDimensions
+            context.coordinator.resizeTransport(cols: term.cols, rows: term.rows)
         } else {
             context.coordinator.connect()
         }
@@ -363,6 +359,7 @@ struct TerminalView: NSViewRepresentable {
     func updateNSView(_ nsView: OrbitTerminalView, context: Context) {
         if context.coordinator.sessionGeneration != sessionGeneration {
             context.coordinator.sessionGeneration = sessionGeneration
+            context.coordinator.prepareForNewSession()
             if context.coordinator.isLocal {
                 context.coordinator.restartLocal()
             } else {
@@ -370,6 +367,9 @@ struct TerminalView: NSViewRepresentable {
             }
         }
         if let cid = channelId, context.coordinator.sessionId != cid {
+            if context.coordinator.sessionId != nil {
+                context.coordinator.prepareForNewSession()
+            }
             context.coordinator.sessionId = cid
             if context.coordinator.isLocal {
                 context.coordinator.adoptLocalShell()
@@ -402,11 +402,14 @@ struct TerminalView: NSViewRepresentable {
         var sessionGeneration: Int
         private var alive = true
         private var localShell: LocalShell?
+        private let outputPumpLock = NSLock()
         private var outputPump: TerminalOutputPump?
 
         // AI ! prefix question buffer
         private var _aiBuffer = ""
         private var _aiMode = false
+        private var inputState: TerminalInputStateSnapshot?
+        private var interactionMode: TerminalOutputPolicy.InteractionMode = .normalShell
 
         // Error detection throttling
         private var _lastErrorScanTime: Date = .distantPast
@@ -440,22 +443,83 @@ struct TerminalView: NSViewRepresentable {
         }
 
         private func enqueueData(_ data: Data) {
+            outputPumpLock.lock()
             if outputPump == nil {
                 outputPump = makeOutputPump()
             }
-            outputPump?.enqueue(data)
+            let pump = outputPump
+            outputPumpLock.unlock()
+            pump?.enqueue(data)
         }
 
         private func makeOutputPump() -> TerminalOutputPump {
             TerminalOutputPump { [weak self] data, queuedBytes in
                 guard let self = self, self.alive, let tv = self.terminalView else { return }
-                let output = queuedBytes > TerminalOutputPump.keywordBypassBacklogBytes
-                    ? data
-                    : KeywordInjector.highlight(data, keywords: self.appState.keywordHighlights)
-                self.scanForErrors(in: output)
-                TerminalOutputPump.feed(output, to: tv)
+                self.handleOutput(data, queuedBytes: queuedBytes, terminalView: tv)
             }
         }
+
+        func handleOutput(_ data: Data, queuedBytes: Int, terminalView tv: OrbitTerminalView) {
+            let focusedSessionId = appState.tabState.tab(id: tabId).flatMap { $0.focusedChannelId ?? $0.sessionId }
+            let policy = TerminalOutputPolicy(
+                snapshot: inputState ?? tv.terminalInputStateSnapshot(), backlog: queuedBytes,
+                isActiveTab: appState.activeTabId == tabId,
+                isFocusedPane: sessionId != nil && focusedSessionId == sessionId,
+                keywordsEnabled: appState.keywordHighlights.contains { $0.enabled && !$0.pattern.isEmpty },
+                forceTUI: TerminalOutputPolicy.chunkEntersTUI(data)
+            )
+#if DEBUG
+            if policy.shouldInjectKeywords { tv.keywordInjectionCount += 1 }
+            if policy.shouldScanErrors { tv.errorScanCount += 1 }
+#endif
+            let output = policy.shouldInjectKeywords
+                ? KeywordInjector.highlight(data, keywords: appState.keywordHighlights) : data
+            if policy.shouldScanErrors { scanForErrors(in: data) }
+            TerminalOutputPump.feed(output, to: tv)
+            refreshInteractionState()
+        }
+
+        func refreshInteractionState() {
+            guard let terminalView else { return }
+            inputState = terminalView.terminalInputStateSnapshot()
+            let policy = TerminalOutputPolicy(
+                snapshot: inputState, backlog: 0, isActiveTab: false,
+                isFocusedPane: false, keywordsEnabled: false
+            )
+            interactionMode = policy.interactionMode
+            if policy.isTUI {
+                _aiMode = false
+                _aiBuffer = ""
+            }
+            terminalView.setTUIInteractionActive(policy.isTUI)
+        }
+
+        /// A new shell must not inherit alternate-screen/mouse modes from a
+        /// TUI that died without restoring the terminal.
+        func prepareForNewSession() {
+            terminalView?.resetForNewSession()
+            inputState = nil
+            interactionMode = .normalShell
+            _aiMode = false
+            _aiBuffer = ""
+            refreshInteractionState()
+        }
+
+        private static let errorPatterns: [(String, String)] = [
+            ("command not found", "命令未找到"),
+            ("Permission denied", "权限被拒绝"),
+            ("FATAL", "严重错误"),
+            ("fatal:", "严重错误"),
+            ("panic:", "程序恐慌"),
+            ("Segmentation fault", "段错误"),
+            ("Aborted", "进程中止"),
+            ("Killed", "进程被杀死"),
+            ("Connection refused", "连接被拒绝"),
+            ("No route to host", "无法到达主机"),
+            ("Could not resolve host", "无法解析主机名"),
+            ("error:", "错误"),
+            ("Error:", "错误"),
+        ]
 
         private func scanForErrors(in data: Data) {
             let now = Date()
@@ -467,23 +531,7 @@ struct TerminalView: NSViewRepresentable {
             guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.isEmpty else { return }
 
-            let patterns: [(String, String)] = [
-                ("command not found", "命令未找到"),
-                ("Permission denied", "权限被拒绝"),
-                ("FATAL", "严重错误"),
-                ("fatal:", "严重错误"),
-                ("panic:", "程序恐慌"),
-                ("Segmentation fault", "段错误"),
-                ("Aborted", "进程中止"),
-                ("Killed", "进程被杀死"),
-                ("Connection refused", "连接被拒绝"),
-                ("No route to host", "无法到达主机"),
-                ("Could not resolve host", "无法解析主机名"),
-                ("error:", "错误"),
-                ("Error:", "错误"),
-            ]
-
-            for (pattern, _) in patterns {
+            for (pattern, _) in Self.errorPatterns {
                 if text.range(of: pattern, options: .caseInsensitive) != nil {
                     // Extract surrounding context
                     let lines = text.components(separatedBy: "\n")
@@ -498,13 +546,10 @@ struct TerminalView: NSViewRepresentable {
                     }
                     let context = contextLines.joined(separator: "\n")
                     _lastErrorSetTime = now
-                    DispatchQueue.main.async { [weak self] in
-                        self?.appState.activeTabError = context
-                        // Auto-dismiss after 10 seconds
+                    if let sessionId,
+                       let generation = appState.setActiveTabError(context, tabId: tabId, sessionId: sessionId) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
-                            if self?.appState.activeTabError == context {
-                                self?.appState.activeTabError = nil
-                            }
+                            self?.appState.clearActiveTabError(matchingGeneration: generation)
                         }
                     }
                     return
@@ -560,12 +605,13 @@ struct TerminalView: NSViewRepresentable {
             guard shell.isRunning else { return }
             shell.onData = makeDataHandler()
             shell.onClosed = makeClosedHandler()
-            if let term = terminalView?.getTerminal() {
-                shell.resize(cols: UInt16(term.cols), rows: UInt16(term.rows))
+            if let term = terminalView?.terminalDimensions {
+                resizeTransport(cols: term.cols, rows: term.rows)
             }
         }
 
         private func connectLocal(reuseId: String? = nil) {
+            prepareForNewSession()
             if let existing = terminalView?.localShell, existing.isRunning {
                 adoptLocalShell()
                 return
@@ -588,7 +634,7 @@ struct TerminalView: NSViewRepresentable {
                 }
                 if let tv = self.terminalView {
                     OrbitBridge.shared.cacheTerminalView(tv, sessionId: effectiveId)
-                    let term = tv.getTerminal()
+                    let term = tv.terminalDimensions
                     shell.start(cols: UInt16(term.cols), rows: UInt16(term.rows))
                 } else {
                     shell.start()
@@ -599,7 +645,9 @@ struct TerminalView: NSViewRepresentable {
 
         func restartLocal() {
             guard isLocal else { return }
+            prepareForNewSession()
             let previousId = sessionId ?? channelId
+            terminalView?.resizeDeduplicator.reset()
             localShell?.stop()
             if terminalView?.localShell === localShell {
                 terminalView?.localShell = nil
@@ -610,6 +658,7 @@ struct TerminalView: NSViewRepresentable {
         }
 
         private func connectSSH() {
+            prepareForNewSession()
             let dataHandler = makeDataHandler()
             let closedHandler = makeClosedHandler()
             Task {
@@ -634,8 +683,8 @@ struct TerminalView: NSViewRepresentable {
                             OrbitBridge.shared.cacheTerminalView(terminalView, sessionId: sid)
                         }
                         if let tv = terminalView {
-                            let term = tv.getTerminal()
-                            do { try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(term.cols), rows: UInt32(term.rows)) } catch { print("[Orbit] resizeSSH(connect) failed: \(error)") }
+                            let term = tv.terminalDimensions
+                            self.resizeTransport(cols: term.cols, rows: term.rows)
                         }
                         self.scheduleInitialCommandForSSH(sessionId: sid)
                     }
@@ -676,12 +725,12 @@ struct TerminalView: NSViewRepresentable {
             OrbitBridge.shared.setSSHHandlers(sessionId: sid, dataHandler: makeDataHandler(), closedHandler: makeClosedHandler())
         }
 
-        func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
+        @MainActor func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
             guard alive else { return }
             let bytes = Data(data)
 
             // AI ! prefix interception
-            if _aiMode {
+            if interactionMode == .normalShell && _aiMode {
                 if bytes.contains(0x0d) || bytes.contains(0x0a) {
                     // Enter pressed — submit the question
                     _aiMode = false
@@ -700,7 +749,7 @@ struct TerminalView: NSViewRepresentable {
 
             // Detect ! prefix at the start of a new input
             let str = String(data: bytes, encoding: .utf8) ?? ""
-            if str.hasPrefix("! ") {
+            if interactionMode == .normalShell && str.hasPrefix("! ") {
                 _aiMode = true
                 let remaining = String(str.dropFirst(2))
                 // Check if Enter is embedded in the same chunk (e.g. paste)
@@ -730,43 +779,50 @@ struct TerminalView: NSViewRepresentable {
             }
         }
 
-        func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
-            guard alive, newCols > 0, newRows > 0 else { return }
+        @MainActor func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
+#if DEBUG
+            (source as? OrbitTerminalView)?.sizeChangedCount += 1
+#endif
+            resizeTransport(cols: newCols, rows: newRows)
+        }
+
+        func resizeTransport(cols: Int, rows: Int) {
+            guard alive, let sid = sessionId, let tv = terminalView,
+                  tv.resizeDeduplicator.needsResize(sessionId: sid, cols: cols, rows: rows) else { return }
             if isLocal {
-                localShell?.resize(cols: UInt16(newCols), rows: UInt16(newRows))
-            } else if let sid = sessionId {
+                guard let localShell, localShell.isRunning else { return }
+                guard localShell.resize(cols: UInt16(clamping: cols), rows: UInt16(clamping: rows)) else {
+                    return
+                }
+            } else {
                 do {
-                    try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(newCols), rows: UInt32(newRows))
+                    try OrbitBridge.shared.resizeSSH(sessionId: sid, cols: UInt32(cols), rows: UInt32(rows))
                 } catch {
                     print("[Orbit] resizeSSH failed for session \(sid): \(error)")
+                    return
                 }
             }
+            tv.resizeDeduplicator.record(sessionId: sid, cols: cols, rows: rows)
         }
 
-        func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}
-        func hostCurrentDirectoryUpdate(source: SwiftTerm.TerminalView, directory: String?) {}
-        func scrolled(source: SwiftTerm.TerminalView, position: Double) {}
-        func requestOpenLink(source: SwiftTerm.TerminalView, link: String, params: [String: String]) {
-            if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+        @MainActor func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}
+        @MainActor func hostCurrentDirectoryUpdate(source: SwiftTerm.TerminalView, directory: String?) {}
+        @MainActor func scrolled(source: SwiftTerm.TerminalView, position: Double) {}
+        @MainActor func requestOpenLink(source: SwiftTerm.TerminalView, request: TerminalLinkRequest) {
+            request.openDefault()
         }
 
-        func bell(source: SwiftTerm.TerminalView) { NSSound.beep() }
+        @MainActor func bell(source: SwiftTerm.TerminalView) { NSSound.beep() }
 
-        func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
+        @MainActor func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
             NSPasteboard.general.clearContents()
             if let str = String(data: content, encoding: .utf8) {
                 NSPasteboard.general.setString(str, forType: .string)
             }
         }
 
-        func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {
-            // Auto-copy selected text to clipboard when selectToCopy is enabled
-            guard TerminalRenderSettings.selectToCopyEnabled else { return }
-            if let tv = terminalView, tv.selectionActive {
-                tv.copy(tv)
-            }
-        }
+        @MainActor func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {}
 
-        func iTermContent(source: SwiftTerm.TerminalView, content: ArraySlice<UInt8>) {}
+        @MainActor func iTermContent(source: SwiftTerm.TerminalView, content: ArraySlice<UInt8>) {}
     }
 }

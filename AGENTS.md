@@ -25,7 +25,7 @@ GitHub: https://github.com/ibreez3/orbit
 ## 环境要求
 
 - macOS 13.0+
-- Xcode 15+
+- Xcode 26.3+（SwiftTerm 1.99 需要 Swift 6.2；Orbit 保持 Swift 5.9 语言模式）
 - Rust >= 1.77（通过 rustup 安装）
 - rustup target: `aarch64-apple-darwin`
 - xcodegen（`brew install xcodegen`）
