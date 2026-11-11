@@ -2,7 +2,7 @@
 
 Orbit — 原生 macOS SSH 终端。SwiftUI + Rust (FFI) 混合架构。
 
-环境要求：Xcode 26.3+；SwiftTerm 1.99 需要 Swift 6.2，Orbit 保持 Swift 5.9 语言模式。
+环境要求：Xcode 27.2+；SwiftTerm 1.99.3 需要 Swift 6.4，Orbit 保持 Swift 5.9 语言模式。
 
 ## 构建流程
 
