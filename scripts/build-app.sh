@@ -12,6 +12,7 @@ xcodegen generate
 echo "==> Building Orbit (Release, Apple Silicon)..."
 xcodebuild -project Orbit.xcodeproj \
     -scheme Orbit \
+    -skipPackagePluginValidation \
     -configuration Release \
     -arch arm64 \
     ONLY_ACTIVE_ARCH=YES \

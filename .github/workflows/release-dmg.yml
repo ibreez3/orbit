@@ -69,6 +69,14 @@ jobs:
           ref: ${{ steps.release.outputs.tag }}
           fetch-depth: 0
 
+      - name: Select Xcode 26.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.3.app
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          xcodebuild -version | grep -q "Xcode 26.3"
+
       - name: Validate release versions
         shell: bash
         env:
@@ -173,6 +181,13 @@ jobs:
         working-directory: orbit-app
         run: xcodegen generate
 
+      - name: Test Orbit
+        shell: bash
+        working-directory: orbit-app
+        run: |
+          xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Debug \
+            -skipPackagePluginValidation -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" test
+
       - name: Build Orbit.app
         shell: bash
         working-directory: orbit-app
@@ -181,6 +196,7 @@ jobs:
           xcodebuild \
             -project Orbit.xcodeproj \
             -scheme Orbit \
+            -skipPackagePluginValidation \
             -configuration Release \
             -arch arm64 \
             -derivedDataPath "$DERIVED_DATA" \
