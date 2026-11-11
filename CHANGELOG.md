@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.0.13] - 2026-11-11
 
 ### Added
 - Standalone About Orbit window with version, update status, last check time, automatic check preference, and embedded release notes.
