@@ -7,6 +7,7 @@ class LocalShell {
     private var pid: pid_t = 0
     private var readSource: DispatchSourceRead?
     private var cleanedUp = false
+    private var resizeDeduplicator = TerminalResizeDeduplicator()
 
     private(set) var isRunning = false
 
@@ -39,7 +40,7 @@ class LocalShell {
         var ws = winsize()
         ws.ws_col = cols
         ws.ws_row = rows
-        _ = ioctl(slave, TIOCSWINSZ, &ws)
+        let initialResizeSucceeded = ioctl(slave, TIOCSWINSZ, &ws) == 0
 
         // Use posix_spawn instead of forkpty (safe in multi-threaded process)
         var fileActions: posix_spawn_file_actions_t? = nil
@@ -101,6 +102,9 @@ class LocalShell {
         }
 
         stateLock.lock()
+        if initialResizeSucceeded {
+            resizeDeduplicator.record(sessionId: "local", cols: Int(cols), rows: Int(rows))
+        }
         self.masterFd = master
         self.pid = childPid
         self.isRunning = true
@@ -139,15 +143,25 @@ class LocalShell {
         Darwin.write(fd, [UInt8](data), data.count)
     }
 
-    func resize(cols: UInt16, rows: UInt16) {
+    /// Returns true when the size is known to be applied (including an
+    /// already-recorded no-op), false when the ioctl failed and a retry is
+    /// needed.
+    @discardableResult
+    func resize(cols: UInt16, rows: UInt16) -> Bool {
         stateLock.lock()
-        let fd = masterFd
-        stateLock.unlock()
-        guard fd >= 0 else { return }
+        defer { stateLock.unlock() }
+        guard masterFd >= 0 else { return false }
+        guard resizeDeduplicator.needsResize(sessionId: "local", cols: Int(cols), rows: Int(rows)) else {
+            return true
+        }
         var ws = winsize()
         ws.ws_col = cols
         ws.ws_row = rows
-        _ = ioctl(fd, TIOCSWINSZ, &ws)
+        if ioctl(masterFd, TIOCSWINSZ, &ws) == 0 {
+            resizeDeduplicator.record(sessionId: "local", cols: Int(cols), rows: Int(rows))
+            return true
+        }
+        return false
     }
 
     /// Terminates the shell without emitting `onClosed`. Used when a pane or

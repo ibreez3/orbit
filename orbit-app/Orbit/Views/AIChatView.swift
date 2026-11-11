@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftTerm
 
 struct AIChatView: View {
     @EnvironmentObject var aiState: AIState
@@ -551,21 +550,7 @@ struct AIChatView: View {
         guard let tv = OrbitBridge.shared.terminalView(for: sid) as? OrbitTerminalView else {
             return "（终端会话已连接，暂无输出）"
         }
-        let term = tv.getTerminal()
-
-        let visibleRows = term.rows
-        let contextLines = min(visibleRows * 2, 100)
-        let startRow = max(0, visibleRows - contextLines)
-
-        var lines: [String] = []
-        for row in startRow..<visibleRows {
-            if let line = term.getLine(row: row) {
-                let text = line.translateToString(trimRight: true)
-                lines.append(text)
-            }
-        }
-
-        let result = lines.joined(separator: "\n")
+        let result = tv.contextText()
         if result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "（终端暂无输出）"
         }
@@ -831,14 +816,13 @@ private struct MessageBubble: View {
 // MARK: - Error Banner
 
 struct AIErrorBanner: View {
-    let errorText: String
-    @EnvironmentObject var tabState: TabState
+    let error: ActiveTabError
     let appState: AppState
 
     var body: some View {
         Button(action: {
-            tabState.activeTabError = nil
-            appState.submitAIQuestion("请分析这个错误:\n\(errorText)")
+            appState.clearActiveTabError(matchingGeneration: error.generation)
+            appState.submitAIQuestion("请分析这个错误:\n\(error.message)")
         }) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
@@ -848,7 +832,7 @@ struct AIErrorBanner: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.primary)
                 Button(action: {
-                    tabState.activeTabError = nil
+                    appState.clearActiveTabError(matchingGeneration: error.generation)
                 }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))

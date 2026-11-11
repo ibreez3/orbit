@@ -5,6 +5,7 @@ import SwiftTerm
 
 // MARK: - Quick Terminal (dropdown terminal)
 
+@MainActor
 final class QuickTerminalDelegate: NSObject, TerminalViewDelegate {
     weak var controller: QuickTerminalController?
 
@@ -17,6 +18,9 @@ final class QuickTerminalDelegate: NSObject, TerminalViewDelegate {
     }
 
     func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
+#if DEBUG
+        (source as? OrbitTerminalView)?.sizeChangedCount += 1
+#endif
         controller?.resize(cols: newCols, rows: newRows)
     }
 
@@ -26,8 +30,8 @@ final class QuickTerminalDelegate: NSObject, TerminalViewDelegate {
 
     func scrolled(source: SwiftTerm.TerminalView, position: Double) {}
 
-    func requestOpenLink(source: SwiftTerm.TerminalView, link: String, params: [String: String]) {
-        if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+    func requestOpenLink(source: SwiftTerm.TerminalView, request: TerminalLinkRequest) {
+        request.openDefault()
     }
 
     func bell(source: SwiftTerm.TerminalView) {
@@ -56,10 +60,13 @@ class QuickTerminalController: NSObject {
     private lazy var outputPump = TerminalOutputPump { [weak self] data, _ in
         guard let tv = self?.terminalView else { return }
         TerminalOutputPump.feed(data, to: tv)
+        let policy = TerminalOutputPolicy(snapshot: tv.terminalInputStateSnapshot(), backlog: 0,
+                                          isActiveTab: false, isFocusedPane: false, keywordsEnabled: false)
+        tv.setTUIInteractionActive(policy.isTUI)
     }
 
     private let hotkeyIdentifier = "quickTerminal"
-    private lazy var inputDelegate = QuickTerminalDelegate(controller: self)
+    @MainActor private lazy var inputDelegate = QuickTerminalDelegate(controller: self)
     private var hotKeyRef: EventHotKeyRef?
     private var hotKeyHandlerRef: EventHandlerRef?
 
@@ -73,7 +80,7 @@ class QuickTerminalController: NSObject {
         if let hotKeyHandlerRef { RemoveEventHandler(hotKeyHandlerRef) }
     }
 
-    func configureTerminalView(_ view: OrbitTerminalView) {
+    @MainActor func configureTerminalView(_ view: OrbitTerminalView) {
         view.terminalDelegate = inputDelegate
     }
 
@@ -118,7 +125,7 @@ class QuickTerminalController: NSObject {
         )
     }
 
-    func toggle() {
+    @MainActor func toggle() {
         if isVisible {
             hide()
         } else {
@@ -126,7 +133,7 @@ class QuickTerminalController: NSObject {
         }
     }
 
-    private func show() {
+    @MainActor private func show() {
         if window == nil {
             createWindow()
         }
@@ -141,7 +148,7 @@ class QuickTerminalController: NSObject {
         isVisible = false
     }
 
-    private func createWindow() {
+    @MainActor private func createWindow() {
         let screen = NSScreen.main!
         let screenFrame = screen.visibleFrame
         let width = min(screenFrame.width - 40, 900)
@@ -179,16 +186,17 @@ class QuickTerminalController: NSObject {
         // Start local shell
         let shell = LocalShell()
         localShell = shell
-        shell.onData = { [weak self] data in
-            self?.outputPump.enqueue(data)
+        let pump = outputPump
+        shell.onData = { data in
+            pump.enqueue(data)
         }
         shell.onClosed = {
             DispatchQueue.main.async {
                 tv.feed(text: "\r\n\u{1b}[33m--- 快速终端已退出 ---\u{1b}[0m\r\n")
             }
         }
-        let fontSize = TerminalRenderSettings.configuredFontSize
-        shell.start(cols: UInt16(Int(width / (fontSize * 0.6))), rows: UInt16(Int(height / (fontSize * 1.4))))
+        let dimensions = tv.terminalDimensions
+        shell.start(cols: UInt16(clamping: max(1, dimensions.cols)), rows: UInt16(clamping: max(1, dimensions.rows)))
 
         self.window = panel
     }

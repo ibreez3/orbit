@@ -276,8 +276,25 @@ class OrbitBridge {
 
     func removeTerminalView(sessionId: String) {
         handlersLock.lock()
-        terminalViewCache.removeValue(forKey: sessionId)
+        let removed = terminalViewCache.removeValue(forKey: sessionId)
         handlersLock.unlock()
+        guard let view = removed?.view as? OrbitTerminalView else { return }
+        Task { @MainActor in
+            Self.closeTerminalView(view)
+        }
+    }
+
+    /// SwiftTerm requires `updateUiClosed()` before a terminal view is
+    /// permanently released; retry while pending GPU work keeps it false.
+    @MainActor
+    private static func closeTerminalView(_ view: OrbitTerminalView, attempt: Int = 0) {
+        if view.updateUiClosed() { return }
+        guard attempt < 20 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            Task { @MainActor in
+                closeTerminalView(view, attempt: attempt + 1)
+            }
+        }
     }
 
     func terminalView(for sessionId: String) -> NSView? {

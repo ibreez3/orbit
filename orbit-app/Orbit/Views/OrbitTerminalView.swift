@@ -28,6 +28,24 @@ struct TerminalSettingsSnapshot: Equatable {
     }
 }
 
+struct TerminalFontKey: Equatable {
+    let family: String
+    let size: CGFloat
+    let ligatures: Bool
+
+    init(_ snapshot: TerminalSettingsSnapshot) {
+        family = snapshot.fontFamily
+        size = snapshot.fontSize
+        ligatures = snapshot.fontLigatures
+    }
+}
+
+struct TerminalRenderKey: Equatable {
+    let theme: AppTheme
+    let backgroundAlpha: CGFloat
+    let snapshot: TerminalSettingsSnapshot
+}
+
 enum TerminalRenderSettings {
     static let preferredFontNames = [
         "MesloLGS NF",
@@ -41,14 +59,7 @@ enum TerminalRenderSettings {
         "Menlo"
     ]
 
-    static var defaultFontName: String {
-        preferredFontNames.first(where: { isFontAvailable($0) }) ?? "Menlo"
-    }
-
-    static var configuredFontSize: CGFloat {
-        let fontSize = UserDefaults.standard.double(forKey: "fontSize")
-        return CGFloat(fontSize > 0 ? fontSize : 14)
-    }
+    static let defaultFontName = preferredFontNames.first(where: { isFontAvailable($0) }) ?? "Menlo"
 
     /// The settings UI defaults this to ON, so an unset key must mean ON too.
     static var selectToCopyEnabled: Bool {
@@ -88,45 +99,83 @@ enum TerminalRenderSettings {
         return ordered
     }
 
-    static func apply(to terminalView: OrbitTerminalView, theme: AppTheme, backgroundAlpha: CGFloat = 1) {
-        let snapshot = TerminalSettingsSnapshot.current()
-        let tc = ThemeColors.colors(for: theme)
-        let colors = tc.ansi.map { SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue) }
-        terminalView.installColors(colors)
-
-        let effectiveAlpha = backgroundAlpha * (snapshot.backgroundBlur ? 0.82 : 1.0)
-        terminalView.nativeBackgroundColor = NSColor(
-            red: tc.background.red,
-            green: tc.background.green,
-            blue: tc.background.blue,
-            alpha: effectiveAlpha
-        )
-        terminalView.nativeForegroundColor = NSColor(
-            red: tc.foreground.red,
-            green: tc.foreground.green,
-            blue: tc.foreground.blue,
-            alpha: 1
-        )
-
-        terminalView.font = makeFont()
-
-        let term = terminalView.getTerminal()
-        switch snapshot.cursorStyle {
-        case "block":
-            term.setCursorStyle(.steadyBlock)
-        case "underline":
-            term.setCursorStyle(.steadyUnderline)
-        default:
-            term.setCursorStyle(.steadyBar)
+    static func apply(to terminalView: OrbitTerminalView, key: TerminalRenderKey, previous: TerminalRenderKey?) {
+        let snapshot = key.snapshot
+        applyFont(to: terminalView, snapshot: snapshot)
+        applyPalette(to: terminalView, theme: key.theme)
+        applyNativeColors(to: terminalView, key: key)
+        if previous?.snapshot.cursorStyle != snapshot.cursorStyle {
+            applyCursorStyle(to: terminalView, style: snapshot.cursorStyle)
         }
-
-        terminalView.changeScrollback(snapshot.scrollbackLines)
-        terminalView.linkReporting = .implicit
-        terminalView.linkHighlightMode = .hover
+        if previous?.snapshot.scrollbackLines != snapshot.scrollbackLines {
+            terminalView.changeScrollback(snapshot.scrollbackLines)
+        }
+        applyLinkConfiguration(to: terminalView)
     }
 
-    private static func makeFont() -> NSFont {
-        let snapshot = TerminalSettingsSnapshot.current()
+    private static func applyPalette(to terminalView: OrbitTerminalView, theme: AppTheme) {
+        let colors = ThemeColors.colors(for: theme).ansi.map {
+            SwiftTerm.Color(red: $0.red, green: $0.green, blue: $0.blue)
+        }
+        guard terminalView.appliedPalette != colors else { return }
+        terminalView.installColors(colors)
+        terminalView.appliedPalette = colors
+    }
+
+    private static func applyNativeColors(to terminalView: OrbitTerminalView, key: TerminalRenderKey) {
+        let tc = ThemeColors.colors(for: key.theme)
+        let background = NSColor(
+            red: tc.background.red, green: tc.background.green, blue: tc.background.blue,
+            alpha: key.backgroundAlpha * (key.snapshot.backgroundBlur ? 0.82 : 1)
+        )
+        let foreground = NSColor(
+            red: tc.foreground.red, green: tc.foreground.green, blue: tc.foreground.blue, alpha: 1
+        )
+        if terminalView.nativeBackgroundColor != background {
+            terminalView.nativeBackgroundColor = background
+        }
+        if terminalView.nativeForegroundColor != foreground {
+            terminalView.nativeForegroundColor = foreground
+        }
+    }
+
+    static func applyFont(to terminalView: OrbitTerminalView, snapshot: TerminalSettingsSnapshot) {
+        let key = TerminalFontKey(snapshot)
+        guard terminalView.appliedFontKey != key else {
+            terminalView.pendingFontSnapshot = nil
+            terminalView.toolTip = nil
+            return
+        }
+        if terminalView.isTUIInteractionActive {
+            terminalView.pendingFontSnapshot = snapshot
+            terminalView.toolTip = "字体更改将在全屏终端程序退出后生效"
+            return
+        }
+        terminalView.pendingFontSnapshot = nil
+        terminalView.toolTip = nil
+        terminalView.font = makeFont(snapshot: snapshot)
+        terminalView.appliedFontKey = key
+    }
+
+    private static func applyCursorStyle(to terminalView: OrbitTerminalView, style: String) {
+        switch style {
+        case "block": terminalView.setCursorStyle(.steadyBlock)
+        case "underline": terminalView.setCursorStyle(.steadyUnderline)
+        default: terminalView.setCursorStyle(.steadyBar)
+        }
+    }
+
+    static func applyLinkConfiguration(to terminalView: OrbitTerminalView) {
+        if terminalView.linkReporting != .implicit {
+            terminalView.linkReporting = .implicit
+        }
+        let mode: LinkHighlightMode = terminalView.isTUIInteractionActive ? .hoverWithModifier : .hover
+        if terminalView.linkHighlightMode != mode {
+            terminalView.linkHighlightMode = mode
+        }
+    }
+
+    private static func makeFont(snapshot: TerminalSettingsSnapshot) -> NSFont {
         let cacheKey = "\(snapshot.fontFamily)|\(snapshot.fontSize)|\(snapshot.fontLigatures)"
         if cachedFontKey == cacheKey, let cachedFont {
             return cachedFont
@@ -179,52 +228,116 @@ enum TerminalRenderSettings {
 class OrbitTerminalView: SwiftTerm.TerminalView {
     var tabId: String?
     weak var appState: AppState?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        installNerdFontFallback()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installNerdFontFallback()
+    }
+
+    convenience init() {
+        self.init(frame: .zero)
+    }
+
+    private func installNerdFontFallback() {
+        guard glyphFallbackProvider == nil,
+              NerdFontGlyphFallbackProvider.shared.isAvailable else { return }
+        glyphFallbackProvider = NerdFontGlyphFallbackProvider.shared
+    }
+
     /// Owned here (rather than by the coordinator) so the shell survives the
     /// view/coordinator rebuild that happens when a pane is split.
     var localShell: LocalShell?
     private var renderTheme: AppTheme = .catppuccinMocha
     private var renderBackgroundAlpha: CGFloat = 1
     private var observingSettingsKeys = false
-    private var lastSettingsSnapshot: TerminalSettingsSnapshot?
+    private var lastRenderKey: TerminalRenderKey?
+    private var isApplyingRenderSettings = false
+    fileprivate var appliedPalette: [SwiftTerm.Color]?
+    fileprivate var appliedFontKey: TerminalFontKey?
+    fileprivate var pendingFontSnapshot: TerminalSettingsSnapshot?
+    private(set) var isTUIInteractionActive = false
+    private var metalFailureLogged = false
+#if DEBUG
+    var keywordInjectionCount = 0
+    var errorScanCount = 0
+    var sizeChangedCount = 0
+#endif
+    var resizeDeduplicator = TerminalResizeDeduplicator()
     private static let settingsKeys = [
         "fontFamily",
         "fontSize",
         "fontLigatures",
         "cursorStyle",
         "scrollbackLines",
-        "backgroundBlur"
+        "backgroundBlur",
+        "theme",
+        "terminalUseMetal"
     ]
 
     // Pending paste text after confirmation
     private var pendingPasteText: String?
 
-    /// Background blur is rendered once behind the whole window; the terminal
-    /// only needs to become translucent so that backdrop can show through.
-    func updateBlurEnabled(_ enabled: Bool) {
-        let alpha = renderBackgroundAlpha * (enabled ? 0.82 : 1.0)
-        nativeBackgroundColor = nativeBackgroundColor.withAlphaComponent(alpha)
+    func configureRenderSettings(theme: AppTheme, backgroundAlpha: CGFloat = 1) {
+        configureRenderSettings(TerminalRenderKey(
+            theme: theme, backgroundAlpha: backgroundAlpha, snapshot: .current()
+        ))
     }
 
-    func configureRenderSettings(theme: AppTheme, backgroundAlpha: CGFloat = 1) {
-        renderTheme = theme
-        renderBackgroundAlpha = backgroundAlpha
-        TerminalRenderSettings.apply(to: self, theme: theme, backgroundAlpha: backgroundAlpha)
-        updateBlurEnabled(UserDefaults.standard.bool(forKey: "backgroundBlur"))
-        lastSettingsSnapshot = TerminalSettingsSnapshot.current()
+    func configureRenderSettings(_ key: TerminalRenderKey) {
+        guard !isApplyingRenderSettings, key != lastRenderKey else { return }
+        isApplyingRenderSettings = true
+        defer { isApplyingRenderSettings = false }
+        renderTheme = key.theme
+        renderBackgroundAlpha = key.backgroundAlpha
+        TerminalRenderSettings.apply(to: self, key: key, previous: lastRenderKey)
+        lastRenderKey = key
+    }
+
+    /// A new shell/session must not inherit alternate-screen or mouse modes
+    /// from a TUI that died without restoring the terminal.
+    func resetForNewSession() {
+        resetToInitialState()
+        lastRenderKey = nil
+        appliedPalette = nil
+        setTUIInteractionActive(false)
+        configureRenderSettings(theme: renderTheme, backgroundAlpha: renderBackgroundAlpha)
+        if let pendingFontSnapshot {
+            TerminalRenderSettings.applyFont(to: self, snapshot: pendingFontSnapshot)
+        }
+        requestRedraw()
     }
 
     // MARK: - Keyboard & Mouse event monitors
 
     private var keyMonitor: Any?
-    private var mouseMonitor: Any?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        installNerdFontFallback()
         if window != nil {
+            setAccessibilityElement(true)
+            setAccessibilityRole(.textArea)
+            setAccessibilityLabel("终端")
+            setAccessibilityIdentifier("orbitTerminal")
             startSettingsObserver()
+            updateMetalRenderer()
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self = self,
                       self.window?.firstResponder == self else { return event }
+#if DEBUG
+                if ProcessInfo.processInfo.environment["ORBIT_TERMINAL_DIAGNOSTICS"] == "1",
+                   event.modifierFlags.intersection([.command, .option, .shift, .control]) == [.command, .option, .shift],
+                   event.charactersIgnoringModifiers?.lowercased() == "d" {
+                    self.copyDiagnostics()
+                    return nil
+                }
+#endif
                 if event.modifierFlags.contains(.command) {
                     let chars = event.charactersIgnoringModifiers
                     if chars == "c", self.selectionActive {
@@ -238,20 +351,10 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
                 }
                 return event
             }
-            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
-                guard let self = self,
-                      self.window?.firstResponder == self,
-                      TerminalRenderSettings.selectToCopyEnabled,
-                      self.selectionActive else { return event }
-                self.copy(self)
-                return event
-            }
         } else {
             stopSettingsObserver()
             if let m = keyMonitor { NSEvent.removeMonitor(m) }
-            if let m = mouseMonitor { NSEvent.removeMonitor(m) }
             keyMonitor = nil
-            mouseMonitor = nil
         }
     }
 
@@ -305,11 +408,79 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
     }
 
     private func handleTerminalSettingsChange() {
-        let snapshot = TerminalSettingsSnapshot.current()
-        guard snapshot != lastSettingsSnapshot else { return }
-        lastSettingsSnapshot = snapshot
-        configureRenderSettings(theme: renderTheme, backgroundAlpha: renderBackgroundAlpha)
-        needsDisplay = true
+        let theme = UserDefaults.standard.string(forKey: "theme").flatMap(AppTheme.init(rawValue:)) ?? renderTheme
+        configureRenderSettings(theme: theme, backgroundAlpha: renderBackgroundAlpha)
+        updateMetalRenderer()
+    }
+
+    func setTUIInteractionActive(_ active: Bool) {
+        guard isTUIInteractionActive != active else { return }
+        isTUIInteractionActive = active
+        TerminalRenderSettings.applyLinkConfiguration(to: self)
+        if !active, let pendingFontSnapshot {
+            TerminalRenderSettings.applyFont(to: self, snapshot: pendingFontSnapshot)
+        }
+    }
+
+#if DEBUG
+    private func copyDiagnostics() {
+        guard let state = terminalInputStateSnapshot() else { return }
+        let snapshot: [String: Any] = [
+            "cols": state.dimensions.cols,
+            "rows": state.dimensions.rows,
+            "isAlternateBuffer": state.isAlternateBuffer,
+            "mouseMode": String(describing: state.mouseMode),
+            "bracketedPasteMode": state.bracketedPasteMode,
+            "linkHighlightMode": String(describing: linkHighlightMode),
+            "keywordInjectionCount": keywordInjectionCount,
+            "errorScanCount": errorScanCount,
+            "sizeChangedCount": sizeChangedCount,
+            "isUsingMetalRenderer": isUsingMetalRenderer,
+            "isUsingRenderLoop": isUsingRenderLoop,
+            "fontSize": font.pointSize,
+            "selectionActive": selectionActive,
+            "visibleText": contextText()
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+#endif
+
+    private func updateMetalRenderer() {
+        guard window != nil else { return }
+        // Metal stays opt-in until the visual matrix (ligatures, transparency,
+        // IME overlay, selection, images, split resize) is accepted.
+        let environment = ProcessInfo.processInfo.environment["ORBIT_TERMINAL_METAL"]
+        let enabled: Bool
+        if let environment {
+            enabled = environment == "1"
+        } else {
+            enabled = UserDefaults.standard.object(forKey: "terminalUseMetal") as? Bool ?? false
+        }
+        guard enabled != isUsingMetalRenderer, !enabled || !metalFailureLogged else { return }
+        do {
+            try setUseMetal(enabled)
+            requestRedraw()
+        } catch {
+            if !metalFailureLogged {
+                print("[Orbit] Metal unavailable, using CoreGraphics: \(error)")
+                metalFailureLogged = true
+            }
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        if TerminalRenderSettings.selectToCopyEnabled, selectionActive {
+            copy(self)
+        }
     }
 
     // MARK: - Right-click context menu
@@ -380,10 +551,19 @@ class OrbitTerminalView: SwiftTerm.TerminalView {
 
     // MARK: - Menu actions
 
+    func contextText() -> String {
+        let rows = terminalDimensions.rows
+        return visibleRowsText(max(0, rows - 100)..<rows).joined(separator: "\n")
+    }
+
+    func clearScreenAndScrollback() {
+        feed(text: "\u{1b}[2J\u{1b}[H")
+        clearScrollback()
+        requestRedraw()
+    }
+
     @objc private func clearScreen(_ sender: Any) {
-        let term = getTerminal()
-        term.buffer.clear()
-        setNeedsDisplay(self.bounds)
+        clearScreenAndScrollback()
     }
 
     @objc private func searchTerminal(_ sender: Any) {
