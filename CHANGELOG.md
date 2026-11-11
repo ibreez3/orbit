@@ -7,7 +7,7 @@
 - Immediate update checks at launch when automatic checking is enabled; installation still requires user confirmation.
 
 ### Changed
-- Upgrade SwiftTerm to exact 1.99.3 for native TUI mouse handling, streaming selection and inline IME composition; builds require Xcode 26.3+.
+- Upgrade SwiftTerm to exact 1.99.3 for native TUI mouse handling, streaming selection and inline IME composition; builds require Xcode 27.2+.
 - Disable keyword highlighting, error detection and `! ` AI interception while alternate-screen or mouse-tracking applications are active. Plain shell behavior is preserved.
 - Require Command-click to open links in TUI applications. Font changes wait until the TUI exits; real window resizes still clear selections in SwiftTerm.
 - Keep Metal rendering opt-in while the visual matrix is validated: it is off by default and can be enabled with `terminalUseMetal` or `ORBIT_TERMINAL_METAL=1`; failures fall back to CoreGraphics.
