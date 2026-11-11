@@ -18,10 +18,22 @@ struct OrbitApp: App {
 }
 
 struct OrbitCommands: Commands {
+    @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var keyBindings = KeyBindings.shared
 
     var body: some Commands {
         SidebarCommands()
+        CommandGroup(replacing: .appInfo) {
+            Button("关于 Orbit") {
+                AboutWindowController.shared.open()
+            }
+        }
+        CommandGroup(after: .appInfo) {
+            Button("检查更新…") {
+                updateManager.checkForUpdates()
+            }
+            .disabled(!updateManager.canCheckForUpdates || updateManager.status == .checking)
+        }
         CommandGroup(after: .toolbar) {
             Button("快速终端") {
                 QuickTerminalController.shared.toggle()
@@ -75,10 +87,6 @@ struct OrbitCommands: Commands {
                 keyEquivalent(for: "settings"),
                 modifiers: eventModifiers(for: "settings")
             )
-
-            Button("检查更新...") {
-                NotificationCenter.default.post(name: .checkForUpdates, object: nil)
-            }
 
             Button("Reconnect Session") {
                 NotificationCenter.default.post(name: .reconnectSession, object: nil)
@@ -239,5 +247,4 @@ extension Notification.Name {
     static let toggleAIPanel = Notification.Name("toggleAIPanel")
     static let openBatchExecution = Notification.Name("openBatchExecution")
     static let askAI = Notification.Name("askAI")
-    static let checkForUpdates = Notification.Name("checkForUpdates")
 }

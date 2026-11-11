@@ -1,14 +1,8 @@
 import AppKit
 import Carbon
-import Sparkle
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: nil,
-        userDriverDelegate: nil
-    )
-
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         shouldTerminateAfterLastWindowClosed(
             activeAgentSessions: AgentGateway.shared.hasActiveSessions ? 1 : 0
@@ -16,6 +10,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if UpdateManager.shared.isInstallingUpdate {
+            return .terminateNow
+        }
         guard AgentGateway.shared.hasActiveSessions else {
             return .terminateNow
         }
@@ -40,12 +37,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = QuickTerminalController.shared
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(checkForUpdates),
-            name: .checkForUpdates,
-            object: nil
-        )
+        UpdateManager.shared.startAtLaunch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -53,13 +45,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         OrbitBridge.shared.shutdownPool()
     }
 
-    @objc private func checkForUpdates() {
-        updaterController.checkForUpdates(nil)
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
 }
 
 func shouldTerminateAfterLastWindowClosed(activeAgentSessions: Int) -> Bool {

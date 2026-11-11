@@ -86,6 +86,6 @@
 ## P3（macOS 产品化：更原生、更省心）
 
 - [ ] macOS 签名 + 公证（Notarization）
-- [ ] 自动更新机制（例如 Sparkle）与发布渠道（GitHub Releases）
+- [x] 自动更新机制（Sparkle）与发布渠道（GitHub Releases）：稳定版通道；预览版不更新 appcast
 - [ ] 快捷键体系完善（Tab/面板切换、执行 SQL、打开 DB/SFTP/监控）
 - [ ] UI 打磨（空状态/加载态/错误态）与可访问性（字体缩放/对比度）

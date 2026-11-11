@@ -6,9 +6,8 @@ on:
       tag:
         description: "Release tag to build and upload"
         required: true
-        default: "v0.0.6-pre"
       update_appcast:
-        description: "Update docs/appcast.xml when SPARKLE_PRIVATE_KEY is configured"
+        description: "Update stable appcast (ignored for preview tags)"
         required: true
         type: boolean
         default: true
@@ -18,6 +17,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: orbit-release
+  cancel-in-progress: false
 
 jobs:
   build-and-upload-dmg:
@@ -33,16 +36,29 @@ jobs:
       - name: Resolve release tag
         id: release
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
+            TAG="$RELEASE_TAG"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="v0.0.6-pre"
+            TAG="$INPUT_TAG"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Invalid release tag"
+            exit 1
           fi
           VERSION="${TAG#v}"
+          BASE_VERSION="${VERSION%%-*}"
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            STABLE="true"
+          else
+            STABLE="false"
+          fi
+          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "asset=Orbit-${TAG}-AppleSilicon.dmg" >> "$GITHUB_OUTPUT"
@@ -52,6 +68,72 @@ jobs:
         with:
           ref: ${{ steps.release.outputs.tag }}
           fetch-depth: 0
+
+      - name: Select Xcode 26.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.3.app
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          xcodebuild -version | grep -q "Xcode 26.3"
+
+      - name: Validate release versions
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          BASE_VERSION: ${{ steps.release.outputs.base_version }}
+          STABLE: ${{ steps.release.outputs.stable }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          def value(text, key):
+              match = re.search(r'^\s*' + key + r':\s*"?([^"\s]+)"?\s*$', text, re.MULTILINE)
+              if not match:
+                  raise SystemExit(f"::error::Missing {key} in project.yml")
+              return match.group(1)
+
+          tag = os.environ["TAG"]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", tag):
+              raise SystemExit("::error::Invalid release tag")
+          source = Path("orbit-app/project.yml").read_text()
+          marketing = value(source, "MARKETING_VERSION")
+          build = value(source, "CURRENT_PROJECT_VERSION")
+          if marketing != os.environ["BASE_VERSION"]:
+              raise SystemExit("::error::MARKETING_VERSION does not match the tag's base version")
+          if not re.fullmatch(r"[0-9]+", build) or int(build) <= 0:
+              raise SystemExit("::error::CURRENT_PROJECT_VERSION must be a positive integer")
+          parent = subprocess.run(["git", "rev-parse", "--verify", f"{tag}^"], capture_output=True, text=True)
+          previous_tag = ""
+          previous_build = ""
+          if parent.returncode == 0:
+              tags = subprocess.check_output(
+                  ["git", "tag", "--sort=-creatordate", "--merged", f"{tag}^"], text=True
+              ).splitlines()
+              previous_tag = next((candidate for candidate in tags if re.fullmatch(
+                  r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", candidate
+              )), "")
+          if previous_tag:
+              previous = subprocess.run(
+                  ["git", "show", f"{previous_tag}:orbit-app/project.yml"], capture_output=True, text=True
+              )
+              if previous.returncode == 0:
+                  previous_build = value(previous.stdout, "CURRENT_PROJECT_VERSION")
+                  if not re.fullmatch(r"[0-9]+", previous_build) or int(build) <= int(previous_build):
+                      raise SystemExit(f"::error::Build {build} must exceed {previous_tag} build {previous_build}")
+          if os.environ["STABLE"] == "true" and not os.environ.get("SPARKLE_PRIVATE_KEY", "").strip():
+              raise SystemExit("::error::Stable releases require SPARKLE_PRIVATE_KEY")
+          print(f"tag={tag} stable={os.environ['STABLE']} marketing={marketing} build={build} "
+                f"previous_tag={previous_tag or 'none'} previous_build={previous_build or 'none'}")
+          PYTHON
+
+      - name: Test appcast tooling
+        shell: bash
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -v
 
       - name: Prepare toolchain
         shell: bash
@@ -69,6 +151,27 @@ jobs:
           xcodegen --version
           gh --version
 
+      - name: Fetch release notes
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          STABLE: ${{ steps.release.outputs.stable }}
+        run: |
+          set -euo pipefail
+          NOTES="$RUNNER_TEMP/orbit-release-notes.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$NOTES"; then
+            :
+          elif [ "$STABLE" = "true" ]; then
+            echo "::error::Create the GitHub release with notes before dispatching a stable release"
+            exit 1
+          else
+            printf 'Orbit macOS preview release.\n' > "$NOTES"
+          fi
+          if [ -z "$(tr -d '[:space:]' < "$NOTES")" ]; then
+            echo "::error::Release notes are empty"
+            exit 1
+          fi
+
       - name: Build Rust static libraries
         shell: bash
         run: ./scripts/build-rust.sh
@@ -78,6 +181,13 @@ jobs:
         working-directory: orbit-app
         run: xcodegen generate
 
+      - name: Test Orbit
+        shell: bash
+        working-directory: orbit-app
+        run: |
+          xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Debug \
+            -skipPackagePluginValidation -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" test
+
       - name: Build Orbit.app
         shell: bash
         working-directory: orbit-app
@@ -86,6 +196,7 @@ jobs:
           xcodebuild \
             -project Orbit.xcodeproj \
             -scheme Orbit \
+            -skipPackagePluginValidation \
             -configuration Release \
             -arch arm64 \
             -derivedDataPath "$DERIVED_DATA" \
@@ -190,6 +301,10 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.release.outputs.tag }}"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
+              echo "::error::Create the GitHub release with notes before dispatching a stable release"
+              exit 1
+            fi
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Orbit $TAG" \
@@ -210,42 +325,38 @@ jobs:
           URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET"
           APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
           BUILD_VERSION="$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist")"
-          PUB_DATE="$(date -u '+%a, %d %b %Y %H:%M:%S +0000')"
-          export TAG VERSION URL BUILD_VERSION PUB_DATE
-          export SPARKLE_SIGNATURE="${{ steps.sparkle.outputs.signature }}"
-          export SPARKLE_LENGTH="${{ steps.sparkle.outputs.length }}"
+          SIGN_UPDATE="${{ steps.sparkle.outputs.sign_update }}"
+          SPARKLE_SIGNATURE="${{ steps.sparkle.outputs.signature }}"
+          SPARKLE_LENGTH="${{ steps.sparkle.outputs.length }}"
+          if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
+            APPCAST_PATH="docs/appcast.xml"
+            PREVIEW_FLAG=""
+          else
+            APPCAST_PATH="docs/appcast-preview.xml"
+            PREVIEW_FLAG="--allow-preview"
+          fi
+          mkdir -p "$RUNNER_TEMP/orbit-appcast-tools"
 
+          # 构建过程可能改写 tracked 的 Cargo.lock / cbindgen 头文件 / Xcode 工程；
+          # 强制丢弃这些改动，避免切换 develop 时被脏工作树阻塞。
           git fetch origin develop
-          git switch develop
+          git switch --discard-changes develop
           git pull --ff-only origin develop
+          # 用 develop 上最新的 appcast 工具，确保发布脚本的修复能用于已发布的 tag。
+          cp scripts/appcast_lib.py scripts/update-appcast.py "$RUNNER_TEMP/orbit-appcast-tools/"
+          # 旧 feed 可能来自上一把签名密钥；验签失败只告警，不能阻断密钥轮换。
+          if ! printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "$APPCAST_PATH"; then
+            echo "::warning::Existing appcast does not verify with the current Sparkle key (possible key rotation); regenerating with the current key."
+          fi
 
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          path = Path("docs/appcast.xml")
-          text = path.read_text()
-          tag = os.environ["TAG"]
-          version = os.environ["VERSION"]
-          url = os.environ["URL"]
-          build_version = os.environ["BUILD_VERSION"]
-          signature = os.environ["SPARKLE_SIGNATURE"]
-          length = os.environ["SPARKLE_LENGTH"]
-          pub_date = os.environ["PUB_DATE"]
-
-          text = re.sub(r"<title>Orbit [^<]+</title>", f"<title>Orbit {tag}</title>", text, count=1)
-          text = re.sub(r"<sparkle:releaseNotesLink>[^<]+</sparkle:releaseNotesLink>", f"<sparkle:releaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/{tag}</sparkle:releaseNotesLink>", text, count=1)
-          text = re.sub(r"<pubDate>[^<]+</pubDate>", f"<pubDate>{pub_date}</pubDate>", text, count=1)
-          enclosure = (
-              f'<enclosure url="{url}" sparkle:version="{build_version}" '
-              f'sparkle:shortVersionString="{version}" sparkle:minimumSystemVersion="13.0" '
-              f'sparkle:edSignature="{signature}" length="{length}" '
-              f'type="application/x-apple-diskimage"></enclosure>'
-          )
-          text = re.sub(r"<enclosure\b[^>]*></enclosure>", enclosure, text, count=1)
-          path.write_text(text)
-          PY
+          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" \
+            --appcast "$APPCAST_PATH" $PREVIEW_FLAG \
+            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" \
+            --url "$URL" --signature "$SPARKLE_SIGNATURE" --length "$SPARKLE_LENGTH" \
+            --notes-file "$RUNNER_TEMP/orbit-release-notes.md" \
+            --full-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify "$APPCAST_PATH" \
+            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" $PREVIEW_FLAG
 
       - name: Sign and push appcast
         if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
@@ -253,18 +364,32 @@ jobs:
         run: |
           set -euo pipefail
           SIGN_UPDATE="${{ steps.sparkle.outputs.sign_update }}"
-          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - docs/appcast.xml
-          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify docs/appcast.xml
+          if [ "${{ steps.release.outputs.stable }}" = "true" ]; then
+            APPCAST_PATH="docs/appcast.xml"
+            PREVIEW_FLAG=""
+          else
+            APPCAST_PATH="docs/appcast-preview.xml"
+            PREVIEW_FLAG="--allow-preview"
+          fi
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - "$APPCAST_PATH"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" --ed-key-file - --verify "$APPCAST_PATH"
+
+          TAG="${{ steps.release.outputs.tag }}"
+          VERSION="${{ steps.release.outputs.version }}"
+          APP_PATH="$DERIVED_DATA/Build/Products/Release/Orbit.app"
+          BUILD_VERSION="$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist")"
+          python3 "$RUNNER_TEMP/orbit-appcast-tools/update-appcast.py" --verify "$APPCAST_PATH" \
+            --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" --require-signature $PREVIEW_FLAG
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs/appcast.xml; then
+          if git diff --quiet -- "$APPCAST_PATH"; then
             echo "appcast unchanged"
             exit 0
           fi
-          git add docs/appcast.xml
+          git add "$APPCAST_PATH"
           git commit -m "chore: update appcast for ${{ steps.release.outputs.tag }}"
-          git push origin develop
+          git push origin develop || { git pull --rebase origin develop && git push origin develop; }
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
