@@ -7,12 +7,22 @@
 - Immediate update checks at launch when automatic checking is enabled; installation still requires user confirmation.
 
 ### Changed
+- Upgrade SwiftTerm to exact 1.99.3 for native TUI mouse handling, streaming selection and inline IME composition; builds require Xcode 26.3+.
+- Disable keyword highlighting, error detection and `! ` AI interception while alternate-screen or mouse-tracking applications are active. Plain shell behavior is preserved.
+- Require Command-click to open links in TUI applications. Font changes wait until the TUI exits; real window resizes still clear selections in SwiftTerm.
+- Keep Metal rendering opt-in while the visual matrix is validated: it is off by default and can be enabled with `terminalUseMetal` or `ORBIT_TERMINAL_METAL=1`; failures fall back to CoreGraphics.
 - Only stable `vX.Y.Z` tags publish the default signed appcast; preview releases stay outside the stable channel.
 - Preview releases update a separate `docs/appcast-preview.xml` for local verification; the default stable feed is unchanged.
 - Stable release notes are required and embedded as Markdown in the appcast.
 - Require signed Sparkle feeds and verify update archives before extraction.
 
 ### Fixed
+- Reset terminal modes when starting or reconnecting a session, so a TUI that exits without restoring the alternate screen or mouse tracking cannot leak those modes into the new shell.
+- Forward wheel, right-click, and middle-click input to full-screen TUI applications, keep selections alive during streaming output, and copy a selection only once.
+- Show inline IME pre-edit text for Chinese, Japanese, Korean, and other composed input.
+- Avoid redundant font resets and window-size changes when unrelated SwiftUI state updates; settings now apply only the fields that changed.
+- Show error banners only for the active tab and focused pane, including split-pane layouts.
+- Use installed Nerd Fonts as fallbacks for missing terminal prompt icons while preserving the selected text font.
 - Reject reused or decreasing build numbers across releases and prevent appcast rollback, while allowing same-tag publishing retries.
 - Avoid missed update prompts caused by the default check interval during short app sessions.
 - Preserve normal no-update status instead of treating Sparkle's no-update callback as a failure.

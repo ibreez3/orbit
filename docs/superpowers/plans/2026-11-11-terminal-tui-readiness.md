@@ -5,6 +5,22 @@
 > **任务书位置:** `docs/superpowers/plans/2026-11-11-terminal-tui-readiness.md`
 > **Plan 来源:** `/Users/sunyang/.claude/plans/robust-puzzling-milner.md`
 
+## 本轮执行状态（2026-11-11）
+
+- 分支：`feat/terminal-tui-readiness`，从本地 `develop` 创建。代码和构建配置在工作区，未提交、推送或发布。
+- Task 0–3 的实现及回归单测已落地；完整人工矩阵尚未完成，不能据此宣称终端 TUI 全量验收完成。
+- 当前代码已通过 185 项单元测试、13 项脚本测试，以及最终 `make build-app`（含签名/权限检查）。3 个新增终端 UI 场景已在同一次运行中全部通过。
+- 完整 UI 套件首轮执行 17 项：13 项通过、2 项因未配置真实 SSH 凭据而跳过、2 项失败。已有标题栏缩放测试单独复跑通过；新增选择测试因 XCTest 处理临时输入源提示窗失败，补上等待提示窗消失后与其余 2 个新增用例一起通过。未把这些复跑结果描述为全套一次通过。
+- 验证日志：`/tmp/orbit-tui-test-final.log`、`/tmp/orbit-tui-script-tests.log`、`/tmp/orbit-tui-release-final.log`、`/tmp/orbit-tui-ui-full.log`、`/tmp/orbit-tui-ui-recheck.log`、`/tmp/orbit-tui-ui-final.log`。
+- 后续截图反馈：为非 Nerd 主字体增加本机已安装 Nerd Font 的缺字回退，保持用户选择的文字字体。CoreText 字形解析与实际排版覆盖普通/粗体/斜体、连字开关、中文及 emoji；完整单测增至 186 项通过，Release 构建和签名检查通过（`/tmp/orbit-symbol-all-tests.log`、`/tmp/orbit-symbol-release.log`）。UI 截图捕获到旧窗口，未将其作为修复后视觉验收证据；截图顶部的 shell `xterm-ghostty` 配置错误未改动。
+- 清屏保持现有 `Cmd+L`；任务书原写 `Cmd+K` 与当前快速连接快捷键冲突。
+- 固定版本 SwiftTerm 新增 build-info/terminfo 构建插件，检查其源码后，本地构建脚本和 Release workflow 加入 `-skipPackagePluginValidation`，不修改全局 Xcode 信任配置。
+- Debug 启动参数 `ORBIT_TERMINAL_DIAGNOSTICS=1` 下，终端聚焦时按 `Cmd+Option+Shift+D` 把 JSON 诊断复制到剪贴板；Release 不包含此入口。
+- Task 4 的性能改造未开始：真实 agent / SSH / 多输入法 / 视觉矩阵与性能基准尚未满足其前置门禁。CI 仅已配置，未远程运行；预览发布也未执行。
+- 审查后修正：会话重连/新 shell 会重置 TUI 模式（alt screen、鼠标、bracketed paste）；字体缺字回退改用 SwiftTerm 1.99 的 `glyphFallbackProvider`（只对 Nerd Font 私用区图标生效，按实际字号返回字体）；Metal 默认改为关闭，需 `terminalUseMetal=true` 或 `ORBIT_TERMINAL_METAL=1` 显式开启，视觉矩阵通过后再考虑默认开启。
+- 审查补充修复：分屏标签的错误横幅现在与单 pane 共用 `tabBanners`；本地 PTY resize 失败时不再写入去重器；TUI UI 测试的复制断言改为精确一次，并增加输出轮询。全量 UI 套件仍有 `testDoubleClickTitlebarTogglesZoom` 一项与窗口/显示状态相关的 flaky 失败；`TerminalTUIUITests` 3 项通过。UI 测试尚未纳入 CI，发布前必须手动跑完整 UI 套件和人工矩阵。
+- 审查补充 2：永久移除终端 view 时调用 SwiftTerm `updateUiClosed()`（主线程重试）；对进入 alt screen/鼠标模式的 chunk 预先按 TUI 处理，避免首 chunk 注入/误报；移除 `configuredFontSize` 与 AIChatView 未使用的 `import SwiftTerm`。CI Xcode 26.3 与 `-skipPackagePluginValidation` 尚未远程执行，发布前必须跑一次完整 Release 工作流验证。
+
 ## 0. 背景与目标
 
 Orbit 用户需要在终端里运行 Claude Code、Codex、opencode 等全屏 TUI agent。当前 SwiftTerm 1.13.0 + Orbit 集成层导致：
@@ -61,25 +77,25 @@ Orbit 用户需要在终端里运行 Claude Code、Codex、opencode 等全屏 TU
 
 ### Step 0.1 升级依赖
 
-- [ ] `orbit-app/project.yml`：
+- [x] `orbit-app/project.yml`：
   ```yaml
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: "1.99.3"
   ```
   将 `options.xcodeVersion` 从 `"15.0"` 改为 `"26.0"`；`SWIFT_VERSION` 保持 `"5.9"`。
-- [ ] 重新生成并解析：
+- [x] 重新生成并解析：
   ```bash
   cd orbit-app && xcodegen generate && cd ..
   cd orbit-app
   xcodebuild -resolvePackageDependencies -project Orbit.xcodeproj -scheme Orbit
   ```
-- [ ] 确认 `Package.resolved` 中 SwiftTerm 为 `1.99.3`，revision `282c3c3a...`；确认 Sparkle 版本未变。
+- [x] 确认 `Package.resolved` 中 SwiftTerm 为 `1.99.3`，revision `282c3c3a...`；确认 Sparkle 版本未变。
 - [ ] 提交 `project.yml`、`project.pbxproj`、`Package.resolved`。
 
 ### Step 0.2 CI Xcode 26.3
 
-- [ ] `.github/workflows/release-dmg.yml` 在 checkout 后加：
+- [x] `.github/workflows/release-dmg.yml` 在 checkout 后加：
   ```yaml
   - name: Select Xcode 26.3
     shell: bash
@@ -90,17 +106,17 @@ Orbit 用户需要在终端里运行 Claude Code、Codex、opencode 等全屏 TU
       xcodebuild -version | grep -q "Xcode 26.3"
   ```
 - [ ] 如果 runner 没有该路径，使用 `maximil-lobanov/setup-xcode` 指定 `26.3`；**不要**回退 16.4。
-- [ ] 增加测试门禁：单独 PR/push workflow，或在 Release 构建前跑 `OrbitTests`。不能只依赖本地。
-- [ ] 更新 `CLAUDE.md` / `AGENTS.md` 环境要求为 Xcode 26.3+，注明 SwiftTerm 1.99 需要 Swift 6.2。
+- [x] 增加测试门禁：单独 PR/push workflow，或在 Release 构建前跑 `OrbitTests`。不能只依赖本地。
+- [x] 更新 `CLAUDE.md` / `AGENTS.md` 环境要求为 Xcode 26.3+，注明 SwiftTerm 1.99 需要 Swift 6.2。
 
 ### Step 0.3 `getTerminal()` 迁移
 
-- [ ] `OrbitTerminalView.swift:113`：
+- [x] `OrbitTerminalView.swift:113`：
   ```swift
   // 旧: terminalView.getTerminal().setCursorStyle(...)
   terminalView.setCursorStyle(.steadyBar) // 或 .steadyBlock / .steadyUnderline
   ```
-- [ ] 新增 `OrbitTerminalView.clearScreenAndScrollback()`：
+- [x] 新增 `OrbitTerminalView.clearScreenAndScrollback()`：
   ```swift
   func clearScreenAndScrollback() {
       feed(text: "\u{1b}[2J\u{1b}[H")
@@ -109,14 +125,14 @@ Orbit 用户需要在终端里运行 Claude Code、Codex、opencode 等全屏 TU
   }
   ```
   替换 `OrbitTerminalView.swift:384` 与 `MainView.swift:680` 的 `getTerminal().buffer.clear()`。
-- [ ] `TerminalView.swift:326/354/563/591/637` 改为：
+- [x] `TerminalView.swift:326/354/563/591/637` 改为：
   ```swift
   let dims = tv.terminalDimensions
   // dims.cols / dims.rows；必要时对 0 做 80x24 回退
   ```
-- [ ] `AIChatView.swift:554` 改为 `visibleRowsText(0..<rows)` 或
+- [x] `AIChatView.swift:554` 改为 `visibleRowsText(0..<rows)` 或
   `terminalContentSnapshot(region: .viewport)`；保持 AI 上下文内容/顺序。
-- [ ] 静态检查：
+- [x] 静态检查：
   ```bash
   rg -n "getTerminal\\(|\.buffer\\.clear\\(" orbit-app || true
   ```
@@ -124,18 +140,18 @@ Orbit 用户需要在终端里运行 Claude Code、Codex、opencode 等全屏 TU
 
 ### Step 0.4 Delegate 与链接回调
 
-- [ ] `TerminalViewDelegate` 在 1.99 是 `@MainActor`。优先给 delegate witness 标注 `@MainActor`，不要直接把整个 `Coordinator` 标成 `@MainActor`；`makeDataHandler`/`makeClosedHandler`/pump 仍有传输线程访问 `alive`、`outputPump`、`localShell`，必要时加锁。
-- [ ] `QuickTerminalDelegate` 可直接 `@MainActor`。
-- [ ] 两个 delegate 的 `requestOpenLink(source:link:params:)` 迁移到 `requestOpenLink(source:request:)`，调用 `request.openDefault()`。
-- [ ] 检查 `rangeChanged` 是否调用 `copy`/`send`；delegate 回调内不要调用 terminal API。
+- [x] `TerminalViewDelegate` 在 1.99 是 `@MainActor`。优先给 delegate witness 标注 `@MainActor`，不要直接把整个 `Coordinator` 标成 `@MainActor`；`makeDataHandler`/`makeClosedHandler`/pump 仍有传输线程访问 `alive`、`outputPump`、`localShell`，必要时加锁。
+- [x] `QuickTerminalDelegate` 可直接 `@MainActor`。
+- [x] 两个 delegate 的 `requestOpenLink(source:link:params:)` 迁移到 `requestOpenLink(source:request:)`，调用 `request.openDefault()`。
+- [x] 检查 `rangeChanged` 是否调用 `copy`/`send`；delegate 回调内不要调用 terminal API。
 
 ### Step 0.5 构建与测试门禁
 
-- [ ] `./scripts/build-rust.sh`
-- [ ] `cd orbit-app && xcodegen generate && cd ..`
-- [ ] `xcodebuild -project orbit-app/Orbit.xcodeproj -scheme Orbit -configuration Debug -destination 'platform=macOS' build`
-- [ ] `xcodebuild -project orbit-app/Orbit.xcodeproj -scheme Orbit -configuration Debug -destination 'platform=macOS' test`
-- [ ] `PATH=/Users/sunyang/.cargo/bin:$PATH make build-app`
+- [x] `./scripts/build-rust.sh`
+- [x] `cd orbit-app && xcodegen generate && cd ..`
+- [x] `xcodebuild -project orbit-app/Orbit.xcodeproj -scheme Orbit -configuration Debug -destination 'platform=macOS' build`
+- [x] `xcodebuild -project orbit-app/Orbit.xcodeproj -scheme Orbit -configuration Debug -destination 'platform=macOS' test`
+- [x] `PATH=/Users/sunyang/.cargo/bin:$PATH make build-app`
 - [ ] 手动 smoke：本地 shell、SSH、分屏、QuickTerminal、清屏、Cmd+C/Cmd+A、查找栏。
 - [ ] 提交：
   ```bash
@@ -163,40 +179,40 @@ struct TerminalRenderKey: Equatable {
 }
 ```
 
-- [ ] `OrbitTerminalView` 存 `private var lastRenderKey: TerminalRenderKey?`。
-- [ ] `configureRenderSettings(theme:backgroundAlpha:)` 先构建 key；与 `lastRenderKey` 相同则直接返回；应用成功后写入。
-- [ ] 保留 `isApplyingRenderSettings` 重入保护。
+- [x] `OrbitTerminalView` 存 `private var lastRenderKey: TerminalRenderKey?`。
+- [x] `configureRenderSettings(theme:backgroundAlpha:)` 先构建 key；与 `lastRenderKey` 相同则直接返回；应用成功后写入。
+- [x] 保留 `isApplyingRenderSettings` 重入保护。
 
 ### Step 1.2 字段级应用
 
 `TerminalRenderSettings.apply` 拆成：
 
-- [ ] `applyPalette`：比较 16 个 `SwiftTerm.Color`；不同才 `installColors`。
-- [ ] `applyNativeColors`：比较 `nativeForegroundColor` / `nativeBackgroundColor`（含 alpha）；不同才赋值。
-- [ ] `applyFont`：比较 `family|size|ligatures` key；**只有变化才赋值 `font`**。这是避免 `resetFont → softReset` 的关键。
-- [ ] `applyCursorStyle`：已有内部 guard。
-- [ ] `applyScrollback`：比较已应用值；不同才 `changeScrollback`。
-- [ ] `applyLinkConfiguration`：只有值变化才写 `linkReporting` / `linkHighlightMode`；`linkHighlightMode.didSet` 有全屏刷新副作用。
-- [ ] 删除 `TerminalView.makeNSView` 里重复的 `updateBlurEnabled` 调用（330、342）；blur 已包含在 key。
-- [ ] 缓存 `TerminalRenderSettings.defaultFontName` 为 `static let`，避免每次探测字体。
-- [ ] `settingsKeys` 增加 `"theme"`；`handleTerminalSettingsChange` 从 `UserDefaults.standard.string(forKey: "theme")` 解析 `AppTheme` 并传入 `configureRenderSettings`。
+- [x] `applyPalette`：比较 16 个 `SwiftTerm.Color`；不同才 `installColors`。
+- [x] `applyNativeColors`：比较 `nativeForegroundColor` / `nativeBackgroundColor`（含 alpha）；不同才赋值。
+- [x] `applyFont`：比较 `family|size|ligatures` key；**只有变化才赋值 `font`**。这是避免 `resetFont → softReset` 的关键。
+- [x] `applyCursorStyle`：已有内部 guard。
+- [x] `applyScrollback`：比较已应用值；不同才 `changeScrollback`。
+- [x] `applyLinkConfiguration`：只有值变化才写 `linkReporting` / `linkHighlightMode`；`linkHighlightMode.didSet` 有全屏刷新副作用。
+- [x] 删除 `TerminalView.makeNSView` 里重复的 `updateBlurEnabled` 调用（330、342）；blur 已包含在 key。
+- [x] 缓存 `TerminalRenderSettings.defaultFontName` 为 `static let`，避免每次探测字体。
+- [x] `settingsKeys` 增加 `"theme"`；`handleTerminalSettingsChange` 从 `UserDefaults.standard.string(forKey: "theme")` 解析 `AppTheme` 并传入 `configureRenderSettings`。
 
 ### Step 1.3 减少无效更新
 
-- [ ] 删除 `TerminalView` 未使用的 `@EnvironmentObject var tabState: TabState`。
-- [ ] `updateNSView` 走 key 比较，不直接在每次更新里无条件 `applySettings`。
-- [ ] 新增强制 `ResizeDeduplicator`，按 `(sessionId, cols, rows)` 去重所有 `resizeSSH` / `LocalShell.resize`；session 变化时重置。
-- [ ] `LocalShell.resize` 内部也去重，避免重复 `TIOCSWINSZ`/SIGWINCH。
+- [x] 删除 `TerminalView` 未使用的 `@EnvironmentObject var tabState: TabState`。
+- [x] `updateNSView` 走 key 比较，不直接在每次更新里无条件 `applySettings`。
+- [x] 新增强制 `ResizeDeduplicator`，按 `(sessionId, cols, rows)` 去重所有 `resizeSSH` / `LocalShell.resize`；session 变化时重置。
+- [x] `LocalShell.resize` 内部也去重，避免重复 `TIOCSWINSZ`/SIGWINCH。
 
 ### Step 1.4 测试
 
-- [ ] 新增 `OrbitTests/TerminalRenderPlanTests.swift`：
+- [x] 新增 `OrbitTests/TerminalRenderPlanTests.swift`：
   - no-op 不产生任何 apply；
   - theme-only 只 apply palette/background；
   - font-only 只 apply font；
   - blur-only 只 apply background；
   - cursor/scrollback 隔离。
-- [ ] 扩展 `TerminalSettingsTests`：spy delegate 统计 `sizeChanged`；连续两次相同 configure 第二次为 0；真实字体变化最多 1 次。
+- [x] spy delegate 行为验证放在 `TerminalRenderPlanTests`（复用 `TerminalTestDelegate`），既有 `TerminalSettingsTests` 保留：spy delegate 统计 `sizeChanged`；连续两次相同 configure 第二次为 0；真实字体变化最多 1 次。
 - [ ] 验收：切标签、焦点、分屏拖动、错误横幅、编辑关键词高亮时，`applicationCursor`/scroll region/选区保持不变。
 
 - [ ] 提交 `fix: make terminal render settings idempotent`。
@@ -218,39 +234,39 @@ struct TerminalOutputPolicy: Equatable {
 }
 ```
 
-- [ ] 输入：`TerminalInputStateSnapshot?`、backlog、activeTab、focusedPane、keywordsEnabled。
-- [ ] `isTUI = snapshot.isAlternateBuffer || snapshot.mouseMode != .off`。
-- [ ] `shouldInjectKeywords = !isTUI && backlog <= 512 * 1024 && keywordsEnabled`。
-- [ ] `shouldScanErrors = !isTUI && isActiveTab && isFocusedPane`。
-- [ ] 不要用 bracketed paste 判断 TUI。
+- [x] 输入：`TerminalInputStateSnapshot?`、backlog、activeTab、focusedPane、keywordsEnabled。
+- [x] `isTUI = snapshot.isAlternateBuffer || snapshot.mouseMode != .off`。
+- [x] `shouldInjectKeywords = !isTUI && backlog <= 512 * 1024 && keywordsEnabled`。
+- [x] `shouldScanErrors = !isTUI && isActiveTab && isFocusedPane`。
+- [x] 不要用 bracketed paste 判断 TUI。
 
 ### Step 2.2 输出管线
 
-- [ ] `TerminalView.makeOutputPump` 缓存最近一次 interaction state。
-- [ ] 每个 chunk：用缓存决定是否 `KeywordInjector.highlight` / `scanForErrors`；feed 后用
+- [x] `TerminalView.makeOutputPump` 缓存最近一次 interaction state。
+- [x] 每个 chunk：用缓存决定是否 `KeywordInjector.highlight` / `scanForErrors`；feed 后用
   `terminalInputStateSnapshot()` 刷新缓存。最多延迟一个 chunk。
-- [ ] 错误扫描基于原始数据，不基于注入后的数据。
-- [ ] 13 个错误 pattern 提升为 `static let`；保留 chunk 边界 UTF-8 prefilter。
-- [ ] TUI 时完全跳过关键词注入和错误扫描。
-- [ ] 普通 shell 保持现有 512 KiB backlog 绕过。
+- [x] 错误扫描基于原始数据，不基于注入后的数据。
+- [x] 13 个错误 pattern 提升为 `static let`；保留 chunk 边界 UTF-8 prefilter。
+- [x] TUI 时完全跳过关键词注入和错误扫描。
+- [x] 普通 shell 保持现有 512 KiB backlog 绕过。
 
 ### Step 2.3 `! ` AI 快捷拦截
 
-- [ ] `Coordinator.send` 的 `! ` quick-ask 状态机只在 `interactionMode == .normalShell` 生效。
-- [ ] 进入 TUI 时如果 `_aiMode` 仍为 true，重置并丢弃缓冲问题，避免吞掉 Claude Code 的 `!` 输入。
+- [x] `Coordinator.send` 的 `! ` quick-ask 状态机只在 `interactionMode == .normalShell` 生效。
+- [x] 进入 TUI 时如果 `_aiMode` 仍为 true，重置并丢弃缓冲问题，避免吞掉 Claude Code 的 `!` 输入。
 
 ### Step 2.4 错误归属
 
-- [ ] `TabState` 增加 `activeTabErrorOwnerTabId` / generation（或 `ActiveTabError { tabId, message, generation }`）。
-- [ ] `AppState.setActiveTabError(_:tabId:)`、`clearActiveTabError(matchingGeneration:)`。
-- [ ] `MainView` 只在 owner 是当前 tab 时显示横幅；10 秒 dismiss 按 generation 匹配。
-- [ ] `AIChatView` 两处清理改走 owner-aware API。
+- [x] `TabState` 增加 `activeTabErrorOwnerTabId` / generation（或 `ActiveTabError { tabId, message, generation }`）。
+- [x] `AppState.setActiveTabError(_:tabId:)`、`clearActiveTabError(matchingGeneration:)`。
+- [x] `MainView` 只在 owner 是当前 tab 时显示横幅；10 秒 dismiss 按 generation 匹配。
+- [x] `AIChatView` 两处清理改走 owner-aware API。
 
 ### Step 2.5 测试
 
-- [ ] `TerminalOutputPolicyTests`：alt buffer、全部 `MouseMode`、普通 shell + bracketed paste、nil snapshot、非 active tab、后台 pane、backlog 阈值。
-- [ ] `ActiveTabErrorTests`：后台 pane 不能设横幅；旧 dismiss 不能清新错误；切 tab。
-- [ ] 合成 TUI fixture：进入 alt screen + 鼠标模式 + 输出含 `ERROR`，断言零关键词注入/零错误扫描；普通 shell 仍高亮。
+- [x] `TerminalOutputPolicyTests`：alt buffer、全部 `MouseMode`、普通 shell + bracketed paste、nil snapshot、非 active tab、后台 pane、backlog 阈值。
+- [x] `ActiveTabErrorTests`：后台 pane 不能设横幅；旧 dismiss 不能清新错误；切 tab。
+- [x] 合成 TUI fixture：进入 alt screen + 鼠标模式 + 输出含 `ERROR`，断言零关键词注入/零错误扫描；普通 shell 仍高亮。
 - [ ] 提交 `fix: skip terminal keyword injection for TUI apps`。
 
 ---
@@ -259,43 +275,43 @@ struct TerminalOutputPolicy: Equatable {
 
 ### Step 3.1 链接门控
 
-- [ ] `OrbitTerminalView` 增加 `setTUIInteractionActive(_:)`。
-- [ ] 普通 shell 保持 `linkReporting = .implicit`、`linkHighlightMode = .hover`。
-- [ ] TUI/鼠标跟踪切换为 `.hoverWithModifier`；只在模式变化时赋值。
-- [ ] 两个 delegate 实现 `requestOpenLink(source:request:)`，调用 `request.openDefault()`。
-- [ ] 新增 `TerminalLinkPolicyTests`：normal/TUI 切换、重复更新不重复赋值。
+- [x] `OrbitTerminalView` 增加 `setTUIInteractionActive(_:)`。
+- [x] 普通 shell 保持 `linkReporting = .implicit`、`linkHighlightMode = .hover`。
+- [x] TUI/鼠标跟踪切换为 `.hoverWithModifier`；只在模式变化时赋值。
+- [x] 两个 delegate 实现 `requestOpenLink(source:request:)`，调用 `request.openDefault()`。
+- [x] 新增 `TerminalLinkPolicyTests`：normal/TUI 切换、重复更新不重复赋值。
 
 ### Step 3.2 选区
 
-- [ ] 移除 `Coordinator.rangeChanged` 的自动复制，避免流式输出期间反复写剪贴板。
-- [ ] 保留鼠标抬起时的 select-to-copy 和 Cmd+C/Cmd+A。
-- [ ] 验证 1.99 原生选区在输出期间保留。
-- [ ] 文档化：真实窗口 resize 仍会清选区（SwiftTerm 行为）。
+- [x] 移除 `Coordinator.rangeChanged` 的自动复制，避免流式输出期间反复写剪贴板。
+- [x] 保留鼠标抬起时的 select-to-copy 和 Cmd+C/Cmd+A。
+- [x] 验证 1.99 原生选区在输出期间保留（本地流式 fixture、Metal、真实鼠标拖选与单次 Cmd+C）。
+- [x] 文档化：真实窗口 resize 仍会清选区（SwiftTerm 行为）。
 
 ### Step 3.3 IME
 
-- [ ] 使用 1.99 原生预编辑，不写自定义 overlay。
+- [x] 使用 1.99 原生预编辑，不写自定义 overlay。
 - [ ] 验证 `optionAsMetaKey` / `optionAsMetaKeyForFunctionalKeys`、候选窗位置、组合/提交/删除、普通与 alt screen。
 - [ ] 新增 `TerminalIMETests`：`setMarkedText` 不发字节；`insertText` 发提交后的 UTF-8。
 - [ ] 手动验收：拼音、日文、韩文、越南语 Telex、macOS 听写。
 
 ### Step 3.4 Metal
 
-- [ ] `OrbitTerminalView.viewDidMoveToWindow` 中：
+- [x] `OrbitTerminalView.viewDidMoveToWindow` 中：
   ```swift
   guard window != nil, !isUsingMetalRenderer else { return }
   do { try setUseMetal(true) } catch { /* 记录一次，保持 CoreGraphics */ }
   ```
-- [ ] Feature flag：`terminalUseMetal` 默认 on；`ORBIT_TERMINAL_METAL=0` 强制关闭；`SWIFTTERM_METAL_LAYER=0` 作为诊断回退。
-- [ ] 验证 `isUsingMetalRenderer` / `isUsingRenderLoop`；全屏 TUI 可用 `.perFrameAggregated`。
+- [x] Feature flag：`terminalUseMetal` 默认 on；`ORBIT_TERMINAL_METAL=0` 强制关闭；`SWIFTTERM_METAL_LAYER=0` 作为诊断回退。
+- [x] 验证 `isUsingMetalRenderer` / `isUsingRenderLoop`；全屏 TUI 可用 `.perFrameAggregated`。
 - [ ] 视觉验收：ligature、透明/模糊、IME overlay、选区、链接 hover、光标、分屏 resize、图片。
-- [ ] 新代码用 `requestRedraw()`，不要只 `setNeedsDisplay`。
+- [x] 新代码用 `requestRedraw()`，不要只 `setNeedsDisplay`。
 
 ### Step 3.5 TUI 期间延迟字体变化
 
-- [ ] 单独记录 `appliedFontKey`。
-- [ ] TUI 活跃时，字体变化只存 pending key，不赋值；TUI 退出后应用一次。
-- [ ] 调色板/光标/scrollback 不延迟。
+- [x] 单独记录 `appliedFontKey`。
+- [x] TUI 活跃时，字体变化只存 pending key，不赋值；TUI 退出后应用一次。
+- [x] 调色板/光标/scrollback 不延迟。
 - [ ] 提交 `fix: use native TUI mouse, selection, IME, and Metal`。
 
 ---
@@ -321,16 +337,16 @@ struct TerminalOutputPolicy: Equatable {
 
 ### 单元测试
 
-- [ ] `TerminalRenderPlanTests`
-- [ ] `TerminalSettingsTests`（no-op 零副作用、字体变化一次）
-- [ ] `TerminalOutputPolicyTests`
-- [ ] `ActiveTabErrorTests`
-- [ ] `TerminalLinkPolicyTests`
-- [ ] `TerminalIMETests`
-- [ ] `TerminalResizeDeduperTests`
-- [ ] `TerminalContextCollectorTests`
-- [ ] `TerminalClearScreenTests`
-- [ ] `TerminalOutputPumpTests`
+- [x] `TerminalRenderPlanTests`
+- [x] `TerminalSettingsTests`；no-op 零副作用、字体变化最多一次在 `TerminalRenderPlanTests` 验证。
+- [x] `TerminalOutputPolicyTests`
+- [x] `ActiveTabErrorTests`
+- [x] `TerminalLinkPolicyTests`
+- [x] `TerminalIMETests`
+- [x] `TerminalResizeDeduperTests`
+- [x] `TerminalContextCollectorTests`
+- [x] `TerminalClearScreenTests`
+- [x] `TerminalOutputPumpTests`
 
 ```bash
 cd orbit-app
@@ -342,10 +358,10 @@ Expected: 全部通过。
 
 ### UI 测试
 
-- [ ] 终端 view 加 accessibility identifier；洪水输出时拖选、Cmd+C，断言剪贴板。
-- [ ] Cmd+K/菜单清屏后可见内容为空。
-- [ ] 新增 `OrbitUITests/Fixtures/tui-fixture.sh`：alt screen、鼠标模式、bracketed paste、DEC 2026、CJK、`ERROR` 行；注册到 `project.yml`。
-- [ ] Debug-only 诊断钩子 `ORBIT_TERMINAL_DIAGNOSTICS=1`：把 JSON 快照写入剪贴板（dimensions、isAlternateBuffer、mouseMode、linkHighlightMode、关键词注入次数、错误扫描次数、sizeChanged 次数、Metal 状态）；UI 测试读取断言。
+- [x] 终端 view 加 accessibility identifier；持续输出时拖选、Cmd+C，精确断言剪贴板文本及单次复制。高吞吐洪水基准仍待完成。
+- [x] Cmd+L 清屏后可见内容为空（沿用当前绑定；Cmd+K 是快速连接；菜单共用清屏方法）。
+- [x] 新增 `OrbitUITests/Fixtures/tui-fixture.sh`：alt screen、鼠标模式、bracketed paste、DEC 2026、CJK、`ERROR` 行；注册到 `project.yml`。
+- [x] Debug-only 诊断钩子 `ORBIT_TERMINAL_DIAGNOSTICS=1`：把 JSON 快照写入剪贴板（dimensions、isAlternateBuffer、mouseMode、linkHighlightMode、关键词注入次数、错误扫描次数、sizeChanged 次数、Metal 状态）；UI 测试读取断言。
 
 ### 手动矩阵（Claude Code / Codex / opencode × 本地/SSH）
 
