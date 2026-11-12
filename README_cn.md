@@ -159,6 +159,12 @@ cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration
 cargo test --manifest-path orbit-rs/Cargo.toml --release --target aarch64-apple-darwin
 ```
 
+SSH 主机指纹集成测试会启动临时的本机 SSH 服务，需要允许监听回环地址，不使用已有服务器或凭据：
+
+```bash
+cargo test --manifest-path orbit-rs/Cargo.toml direct_and_jump_handshakes -- --ignored
+```
+
 ## 项目结构
 
 ```text
@@ -189,8 +195,11 @@ orbit/
 
 ## 安全说明
 
-- 凭据使用 AES-256-GCM 本地加密。
-- 当前加密密钥绑定本机 hostname；将数据库迁移到其他 Mac 后需要重新输入凭据。
+- SSH 在认证前校验主机公钥，直连、跳板机和经跳板机连接的目标分别校验。首次连接（包括升级前保存的服务器）需在 Orbit 中核对并信任 SHA256 指纹；指纹变化默认阻止，核对新旧指纹并二次确认后才可替换。
+- 信任记录按主机地址和端口保存在本机数据库中，不依赖服务器名称或账号，也不自动导入 `~/.ssh/known_hosts`。确认后需手动重试连接或操作，不会自动重放命令。
+
+- 凭据使用 AES-256-GCM 本地加密，随机密钥保存在 macOS Keychain。旧凭据通过事务迁移；密钥不可用或密文损坏时保留原值并停止迁移。
+- 迁移加密数据需要匹配的 Keychain 密钥，详见[凭据恢复与 SFTP 行为](docs/credentials-and-sftp.md)。
 - AI Agent 网关只监听本机 Unix socket，每个新 Agent 会话都需要显式批准。
 - 读命令不逐条确认；写命令需要绑定「Agent 会话 + 服务器」的授权。
 - 命令守卫和授权流程是安全辅助层，不是沙箱：如果命令本身暴露了远端敏感信息，Agent 仍可能把它带进自己的上下文。

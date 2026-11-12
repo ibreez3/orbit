@@ -11,8 +11,12 @@ struct SftpView: View {
     @State private var lastClickTime: Date = .distantPast
     @State private var lastClickPath: String = ""
     @State private var pathHistory: [String] = []
-    @State private var transfer: TransferInfo?
-    @State private var transferTasks: [TransferTask] = []
+    let compact: Bool
+    @ObservedObject private var queue: SftpTransferQueue
+    @State private var search = ""
+    @State private var showHidden = true
+    @State private var pathInput = ""
+    @State private var overwriteItem: SftpTransferQueue.Item?
     @State private var showMkdirAlert = false
     @State private var mkdirName = ""
     @State private var showRenameAlert = false
@@ -21,43 +25,37 @@ struct SftpView: View {
     @State private var errorMessage: String?
     @State private var dropHighlighted = false
 
-    struct TransferInfo {
-        let direction: String
-        let fileName: String
-        var transferred: UInt64
-        var total: UInt64
+    init(tab: TabItem, appState: AppState, compact: Bool = false) {
+        self.tab = tab
+        self.appState = appState
+        self.compact = compact
+        self.queue = appState.sftpQueue(for: tab)
     }
 
-    struct TransferTask: Identifiable {
-        let id = UUID()
-        let direction: String
-        let fileName: String
-        let localPath: String?
-        let remotePath: String
-        var transferred: UInt64
-        var total: UInt64
-        var status: TransferStatus = .queued
-    }
-
-    enum TransferStatus: Equatable {
-        case queued
-        case transferring
-        case completed
-        case failed(String)
+    private var filteredEntries: [FileEntry] {
+        entries.filter { (showHidden || !$0.name.hasPrefix(".")) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
+            navigationBar
             fileTable
-            if transfer != nil || !transferTasks.isEmpty {
-                progressSection
-            }
+            if !queue.items.isEmpty { progressSection }
             statusBar
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { loadHome() }
-        .onDisappear { appState.setSftpTransferActive(false, for: tab.id) }
+        .onAppear { if path.isEmpty { loadHome() } }
+        .onChange(of: queue.revision) { _ in if !path.isEmpty { loadDir(path) } }
+        .alert("替换已有文件？", isPresented: Binding(get: { overwriteItem != nil }, set: { if !$0 { overwriteItem = nil } })) {
+            Button("取消", role: .cancel) { overwriteItem = nil }
+            Button("替换", role: .destructive) {
+                if let item = overwriteItem { queue.retry(item.id, overwrite: true) }
+                overwriteItem = nil
+            }
+        } message: {
+            Text("目标：\(overwriteItem?.destination ?? "")\n文件传输完成后才会替换原文件。")
+        }
         .alert("重命名", isPresented: $showRenameAlert) {
             TextField("新名称", text: $renameName)
             Button("确定") { handleRename() }
@@ -83,139 +81,99 @@ struct SftpView: View {
     }
 
     private var toolbar: some View {
-        HStack(spacing: 4) {
-            Button(action: goBack) {
-                Image(systemName: "arrow.left")
-                    .frame(width: 24, height: 24)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("文件").font(.system(size: compact ? 14 : 20, weight: .semibold))
+                if !compact {
+                    Text("\(tab.serverName) · SFTP").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.plain)
-            .help("返回")
-            .accessibilityLabel("返回上级目录")
-
-            Button(action: { loadDir(path) }) {
-                Image(systemName: "arrow.clockwise")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .help("刷新")
-            .accessibilityLabel("刷新目录")
-
-            Button(action: { navigateTo("/") }) {
-                Image(systemName: "house")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .help("根目录")
-            .accessibilityLabel("根目录")
-
-            pathBreadcrumb
-
             Spacer()
-
-            Button(action: handleDownload) {
-                Image(systemName: "arrow.down.to.line")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .disabled(selectedEntry == nil || selectedEntry!.is_dir || transfer != nil)
-            .help("下载")
-            .accessibilityLabel("下载选中文件")
-
-            Button(action: handleUpload) {
-                Image(systemName: "arrow.up.to.line")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .disabled(transfer != nil)
-            .help("上传")
-            .accessibilityLabel("上传文件")
-
-            Button(action: { showMkdirAlert = true }) {
-                Image(systemName: "folder.badge.plus")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .help("新建文件夹")
-            .accessibilityLabel("新建文件夹")
-
-            Button(action: handleDelete) {
-                Image(systemName: "trash")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(selectedEntry != nil ? .red : .secondary)
-            .disabled(selectedEntry == nil)
-            .help("删除")
-            .accessibilityLabel("删除选中项")
+            Menu {
+                Toggle("显示隐藏文件", isOn: $showHidden)
+                Button("新建文件夹") { showMkdirAlert = true }
+                Button("下载选中文件", action: handleDownload).disabled(selectedEntry == nil || selectedEntry?.is_dir == true)
+                Button("删除选中项", role: .destructive, action: handleDelete).disabled(selectedEntry == nil)
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).frame(width: 24)
+                .help("文件操作")
+            Button(action: handleUpload) { Label("上传文件", systemImage: "arrow.up.doc") }
+                .buttonStyle(.borderedProminent)
+                .disabled(path.isEmpty)
+                .accessibilityIdentifier("sftpUploadButton")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(compact ? 10 : 18)
     }
 
-    private var pathBreadcrumb: some View {
-        let segments = path.split(separator: "/").map(String.init)
-        return HStack(spacing: 2) {
-            ForEach(0..<segments.count, id: \.self) { i in
-                if i > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.secondary)
-                }
-                Button(segments[i]) {
-                    let target = "/" + segments[0...i].joined(separator: "/")
-                    navigateTo(target)
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
+    private var navigationBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: goBack) { Image(systemName: "chevron.left") }.disabled(pathHistory.count < 2).help("返回")
+                Button { navigateTo((path as NSString).deletingLastPathComponent.isEmpty ? "/" : (path as NSString).deletingLastPathComponent) } label: { Image(systemName: "arrow.up") }.help("上级目录")
+                Button(action: loadHome) { Image(systemName: "house") }.help("主目录")
+                TextField("远程路径", text: $pathInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .onSubmit { if !pathInput.isEmpty { navigateTo(pathInput) } }
+                    .accessibilityIdentifier("sftpPathField")
+                Button { loadDir(path) } label: { Image(systemName: "arrow.clockwise") }.disabled(path.isEmpty || loading).help("刷新目录")
             }
+            .buttonStyle(.plain)
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("筛选文件", text: $search).textFieldStyle(.plain)
+                if !search.isEmpty { Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
+            }
+            .font(.system(size: 12))
+            .padding(7)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Color(nsColor: .textBackgroundColor))
-        .cornerRadius(4)
+        .padding(.horizontal, compact ? 10 : 18)
+        .padding(.bottom, 12)
     }
 
     private var fileTable: some View {
-        Group {
-            if loading {
-                ProgressView("加载中...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(entries) { entry in
-                            row(for: entry)
-                        }
-                    }
-                }
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(dropHighlighted ? Color.accentColor : Color.clear, lineWidth: 2)
-                        .padding(2)
-                )
-                .background(dropHighlighted ? Color.accentColor.opacity(0.05) : Color.clear)
-                .onDrop(of: [.fileURL], isTargeted: $dropHighlighted) { providers in
-                    handleDrop(providers: providers)
+        VStack(spacing: 0) {
+            HStack {
+                Text("名称").frame(maxWidth: .infinity, alignment: .leading)
+                Text("大小").frame(width: compact ? 65 : 80, alignment: .trailing)
+                if !compact {
+                    Text("修改时间").frame(width: 140, alignment: .trailing)
+                    Text("权限").frame(width: 64, alignment: .trailing)
                 }
             }
+            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            .padding(.horizontal, compact ? 10 : 18).padding(.vertical, 8)
+            .background(Color(nsColor: .controlBackgroundColor))
+            Divider()
+            ZStack {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredEntries) { entry in row(for: entry) }
+                    }
+                }
+                if loading {
+                    ProgressView().padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                } else if filteredEntries.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: search.isEmpty ? "folder" : "magnifyingglass").font(.system(size: 28)).foregroundStyle(.tertiary)
+                        Text(search.isEmpty ? "此文件夹为空" : "没有匹配的文件").font(.system(size: 13, weight: .medium))
+                        Text(search.isEmpty ? "拖入文件，或点击上传文件" : "试试其他名称").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .background(dropHighlighted ? Color.accentColor.opacity(0.08) : Color.clear)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(dropHighlighted ? Color.accentColor : .clear, lineWidth: 2))
+            .onDrop(of: [.fileURL], isTargeted: $dropHighlighted, perform: handleDrop)
         }
     }
 
     private func row(for entry: FileEntry) -> some View {
         let isSelected = selectedEntry?.path == entry.path
         return HStack(spacing: 8) {
-            Button { selectOrNavigate(entry: entry) } label: {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .frame(width: 18)
-            }
-            .buttonStyle(.plain)
-
             Image(systemName: entryIcon(entry))
-                .foregroundStyle(entry.is_dir ? .yellow : .secondary)
+                .foregroundStyle(entry.is_dir ? Color.accentColor : Color.secondary)
                 .font(.system(size: 13))
                 .frame(width: 20)
 
@@ -225,18 +183,17 @@ struct SftpView: View {
 
             Text(entry.is_dir ? "-" : formatSize(entry.size))
                 .foregroundStyle(.secondary)
-                .frame(width: 80, alignment: .trailing)
+                .frame(width: compact ? 65 : 80, alignment: .trailing)
 
-            Text(entry.modified)
-                .foregroundStyle(.secondary)
-                .frame(width: 140, alignment: .trailing)
-
-            Text(entry.permissions)
-                .foregroundStyle(.secondary)
-                .frame(width: 80, alignment: .trailing)
+            if !compact {
+                Text(entry.modified).foregroundStyle(.secondary).frame(width: 140, alignment: .trailing)
+                Text(entry.permissions).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).frame(width: 64, alignment: .trailing)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .font(.system(size: 12))
+        .monospacedDigit()
+        .padding(.horizontal, compact ? 10 : 18)
+        .padding(.vertical, compact ? 7 : 9)
         .contentShape(Rectangle())
         .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         .onTapGesture { selectOrNavigate(entry: entry) }
@@ -333,73 +290,58 @@ struct SftpView: View {
     private var progressSection: some View {
         VStack(spacing: 0) {
             Divider()
-            if let t = transfer {
-                progressRow(direction: t.direction, fileName: t.fileName, transferred: t.transferred, total: t.total, status: nil)
+            HStack {
+                Label("传输队列", systemImage: "arrow.up.arrow.down").font(.system(size: 12, weight: .semibold))
+                Text("\(queue.items.count)").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Button("清除已结束", action: queue.clearFinished).buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            ForEach(transferTasks) { task in
-                progressRow(
-                    direction: task.direction,
-                    fileName: task.fileName,
-                    transferred: task.transferred,
-                    total: task.total,
-                    status: task.status
-                )
+            .padding(.horizontal, compact ? 10 : 18).padding(.vertical, 10)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(queue.items) { item in transferRow(item) }
+                }
             }
+            .frame(height: compact ? min(90, CGFloat(queue.items.count) * 64) : min(190, CGFloat(queue.items.count) * 80))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
     }
 
-    private func progressRow(direction: String, fileName: String, transferred: UInt64, total: UInt64, status: SftpView.TransferStatus?) -> some View {
-        let pct = total > 0 ? Int(Double(transferred) / Double(total) * 100) : 0
-        return HStack(spacing: 8) {
-            Image(systemName: direction == "download" ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(direction == "download" ? .blue : .green)
-
-            Text(fileName)
-                .font(.system(size: 11))
-                .lineLimit(1)
-                .frame(width: 120, alignment: .leading)
-
-            if let status = status, case .failed(let msg) = status {
-                Text("失败: \(msg)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-            } else if let status = status, case .completed = status {
-                Text("完成")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.green)
-            } else if let status = status, case .queued = status {
-                Text("排队中")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            } else {
-                ProgressView(value: Double(pct), total: 100)
-                    .frame(width: 100)
-                Text("\(formatSize(transferred))\(total > 0 ? " / \(formatSize(total))" : "")")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if status != nil {
-                Button(action: {
-                    transferTasks.removeAll { $0.id == transferTasks.first(where: { t in
-                        t.fileName == fileName && t.remotePath == transferTasks.first?.remotePath
-                    })?.id }
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+    private func transferRow(_ item: SftpTransferQueue.Item) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.upload ? "arrow.up.circle" : "arrow.down.circle")
+                .font(.system(size: 17)).foregroundStyle(Color.accentColor).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(item.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    Spacer()
+                    Text(item.status.label).font(.system(size: 10)).foregroundStyle(item.status == .completed ? Color.green : Color.secondary).lineLimit(1).help(item.status.label)
                 }
-                .buttonStyle(.plain)
+                Text(item.destination).font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                if item.status == .running || item.status == .cancelling {
+                    ProgressView(value: min(Double(item.transferred), Double(max(item.total, 1))), total: Double(max(item.total, 1)))
+                        .progressViewStyle(.linear)
+                    Text("\(formatSize(item.transferred)) / \(formatSize(item.total))").font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
+                }
             }
+            Group {
+                switch item.status {
+                case .conflict:
+                    Button("替换…") { overwriteItem = item }
+                    Button { queue.cancel(item.id) } label: { Image(systemName: "xmark") }.help("跳过此文件")
+                case .failed, .cancelled:
+                    Button("重试") { queue.retry(item.id) }
+                case .queued, .running:
+                    Button { queue.cancel(item.id) } label: { Image(systemName: "xmark.circle") }.help("取消传输")
+                case .cancelling:
+                    ProgressView().controlSize(.small)
+                case .completed:
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+            }
+            .buttonStyle(.borderless).font(.system(size: 11))
         }
-        .frame(height: 22)
+        .padding(.horizontal, compact ? 10 : 18).padding(.vertical, 9)
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
@@ -416,76 +358,20 @@ struct SftpView: View {
     }
 
     private func queueUpload(url: URL) {
-        let fileName = url.lastPathComponent
-        let remotePath = path == "/" ? "/\(fileName)" : "\(path)/\(fileName)"
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
-        let task = TransferTask(
-            direction: "upload",
-            fileName: fileName,
-            localPath: url.path,
-            remotePath: remotePath,
-            transferred: 0,
-            total: fileSize,
-            status: .queued
-        )
-        transferTasks.append(task)
-        processNextUpload()
-    }
-
-    private func processNextUpload() {
-        guard let serverId = tab.serverId else { return }
-        guard let idx = transferTasks.firstIndex(where: { $0.status == .queued }) else {
-            if transferTasks.allSatisfy({ $0.status != .transferring }) {
-                appState.setSftpTransferActive(false, for: tab.id)
-            }
+        guard !path.isEmpty else { return }
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &directory), !directory.boolValue else {
+            errorTitle = "无法上传"
+            errorMessage = "请选择普通文件；暂不支持文件夹传输。"
             return
         }
-        transferTasks[idx].status = .transferring
-        let task = transferTasks[idx]
-        let taskId = task.id
-        let localPath = task.localPath ?? ""
-        let remotePath = task.remotePath
-        let currentPath = path
-        let bridge = appState.bridge
-
-        appState.setSftpTransferActive(true, for: tab.id)
-
-        blockingAsync {
-            do {
-                try bridge.sftpUploadWithProgress(
-                    serverId: serverId,
-                    localPath: localPath,
-                    remotePath: remotePath,
-                    progress: { transferred, total in
-                        DispatchQueue.main.async {
-                            if let i = self.transferTasks.firstIndex(where: { $0.id == taskId }) {
-                                self.transferTasks[i].transferred = transferred
-                                self.transferTasks[i].total = total
-                            }
-                        }
-                    }
-                )
-                DispatchQueue.main.async {
-                    if let i = self.transferTasks.firstIndex(where: { $0.id == taskId }) {
-                        self.transferTasks[i].status = .completed
-                    }
-                    self.loadDir(currentPath)
-                    self.processNextUpload()
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    if let i = self.transferTasks.firstIndex(where: { $0.id == taskId }) {
-                        self.transferTasks[i].status = .failed(error.localizedDescription)
-                    }
-                    self.processNextUpload()
-                }
-            }
-        }
+        let remote = path == "/" ? "/\(url.lastPathComponent)" : "\(path)/\(url.lastPathComponent)"
+        queue.enqueue(local: url.path, remote: remote, upload: true)
     }
 
     private var statusBar: some View {
         HStack {
-            Text("\(entries.count) 项")
+            Text("\(filteredEntries.count) 项")
             if let sel = selectedEntry {
                 Text("已选: \(sel.name)")
             }
@@ -520,6 +406,7 @@ struct SftpView: View {
         guard let serverId = tab.serverId else { return }
         print("[SftpView] loadDir: \(dirPath)")
         path = dirPath
+        pathInput = dirPath
         loading = true
         selectedEntry = nil
         let bridge = appState.bridge
@@ -533,6 +420,7 @@ struct SftpView: View {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    guard self.path == dirPath else { return }
                     self.errorTitle = "加载目录失败"
                     self.errorMessage = error.localizedDescription
                     self.loading = false
@@ -560,100 +448,21 @@ struct SftpView: View {
     private func downloadFile(_ entry: FileEntry) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = entry.name
-        panel.beginSheetModal(for: NSApp.keyWindow!) { resp in
-            guard resp == .OK, let url = panel.url else { return }
-            guard let serverId = tab.serverId else { return }
-            transfer = TransferInfo(direction: "download", fileName: entry.name, transferred: 0, total: entry.size)
-            let remotePath = entry.path
-            let localPath = url.path
-            let bridge = appState.bridge
-            appState.setSftpTransferActive(true, for: tab.id)
-            OrbitBridge.shared.handlersLock.lock()
-            OrbitBridge.shared.progressHandlers[serverId] = { (transferred: UInt64, total: UInt64) in
-                DispatchQueue.main.async {
-                    self.transfer?.transferred = transferred
-                    self.transfer?.total = total
-                    if transferred >= total {
-                        self.transfer = nil
-                        self.appState.setSftpTransferActive(false, for: self.tab.id)
-                    }
-                }
-            }
-            OrbitBridge.shared.handlersLock.unlock()
-            blockingAsync {
-                do {
-                    try bridge.sftpDownload(serverId: serverId, remotePath: remotePath, localPath: localPath)
-                    DispatchQueue.main.async {
-                        self.transfer = nil
-                        self.appState.setSftpTransferActive(false, for: self.tab.id)
-                        OrbitBridge.shared.handlersLock.lock()
-                        OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
-                        OrbitBridge.shared.handlersLock.unlock()
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.errorTitle = "下载失败"
-                        self.errorMessage = error.localizedDescription
-                        self.transfer = nil
-                        self.appState.setSftpTransferActive(false, for: self.tab.id)
-                        OrbitBridge.shared.handlersLock.lock()
-                        OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
-                        OrbitBridge.shared.handlersLock.unlock()
-                    }
-                }
-            }
+        guard let window = NSApp.keyWindow else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            queue.enqueue(local: url.path, remote: entry.path, upload: false)
         }
     }
 
     private func handleUpload() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
-        panel.beginSheetModal(for: NSApp.keyWindow!) { resp in
-            guard resp == .OK, let url = panel.url else { return }
-            guard let serverId = tab.serverId else { return }
-            let fileName = url.lastPathComponent
-            let remotePath = path == "/" ? "/\(fileName)" : "\(path)/\(fileName)"
-            let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
-            transfer = TransferInfo(direction: "upload", fileName: fileName, transferred: 0, total: fileSize)
-            let localPath = url.path
-            let bridge = appState.bridge
-            let currentPath = path
-            appState.setSftpTransferActive(true, for: tab.id)
-            OrbitBridge.shared.handlersLock.lock()
-            OrbitBridge.shared.progressHandlers[serverId] = { (transferred: UInt64, total: UInt64) in
-                DispatchQueue.main.async {
-                    self.transfer?.transferred = transferred
-                    self.transfer?.total = total
-                    if transferred >= total {
-                        self.transfer = nil
-                        self.appState.setSftpTransferActive(false, for: self.tab.id)
-                    }
-                }
-            }
-            OrbitBridge.shared.handlersLock.unlock()
-            blockingAsync {
-                do {
-                    try bridge.sftpUpload(serverId: serverId, localPath: localPath, remotePath: remotePath)
-                    DispatchQueue.main.async {
-                        self.transfer = nil
-                        self.appState.setSftpTransferActive(false, for: self.tab.id)
-                        OrbitBridge.shared.handlersLock.lock()
-                        OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
-                        OrbitBridge.shared.handlersLock.unlock()
-                        self.loadDir(currentPath)
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.errorTitle = "上传失败"
-                        self.errorMessage = error.localizedDescription
-                        self.transfer = nil
-                        self.appState.setSftpTransferActive(false, for: self.tab.id)
-                        OrbitBridge.shared.handlersLock.lock()
-                        OrbitBridge.shared.progressHandlers.removeValue(forKey: serverId)
-                        OrbitBridge.shared.handlersLock.unlock()
-                    }
-                }
-            }
+        panel.allowsMultipleSelection = true
+        guard let window = NSApp.keyWindow else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK else { return }
+            panel.urls.forEach(queueUpload)
         }
     }
 

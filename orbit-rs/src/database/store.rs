@@ -1,4 +1,3 @@
-use crate::crypto;
 use crate::database::models::{
     DatabaseBackupRecord, DatabaseBackupRecordInput, DatabaseConnection, DatabaseConnectionInput,
 };
@@ -19,7 +18,7 @@ impl DatabaseStore {
             Self::CONNECTION_COLUMNS
         ))?;
         let connections = stmt
-            .query_map([], Self::row_to_connection)?
+            .query_map([], |row| Self::row_to_connection(db, row))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(connections)
     }
@@ -32,7 +31,7 @@ impl DatabaseStore {
                 Self::CONNECTION_COLUMNS
             ),
             [id],
-            Self::row_to_connection,
+            |row| Self::row_to_connection(db, row),
         )?;
         Ok(connection)
     }
@@ -44,7 +43,7 @@ impl DatabaseStore {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         let connection = Self::connection_from_input(id, now.clone(), now, input);
-        let enc_password = crypto::encrypt(&connection.password);
+        let enc_password = db.cipher.encrypt(&connection.password)?;
         let conn = db.conn.lock().unwrap();
         conn.execute(
             &format!(
@@ -80,7 +79,7 @@ impl DatabaseStore {
         let existing = Self::get_connection(db, id)?;
         let now = chrono::Utc::now().to_rfc3339();
         let connection = Self::connection_from_update(existing, now, input);
-        let enc_password = crypto::encrypt(&connection.password);
+        let enc_password = db.cipher.encrypt(&connection.password)?;
         let conn = db.conn.lock().unwrap();
         conn.execute(
             "UPDATE database_connections SET name=?1, group_name=?2, engine=?3, ssh_server_id=?4, use_ssh_tunnel=?5, host=?6, port=?7, database_name=?8, username=?9, password=?10, sqlite_path=?11, ssl_mode=?12, updated_at=?13 WHERE id=?14",
@@ -217,7 +216,7 @@ impl DatabaseStore {
         }
     }
 
-    fn row_to_connection(row: &rusqlite::Row) -> rusqlite::Result<DatabaseConnection> {
+    fn row_to_connection(db: &Database, row: &rusqlite::Row) -> rusqlite::Result<DatabaseConnection> {
         let port: u16 = row.get(7)?;
         let use_ssh_tunnel: i64 = row.get(5)?;
         Ok(DatabaseConnection {
@@ -231,7 +230,7 @@ impl DatabaseStore {
             port,
             database_name: row.get(8)?,
             username: row.get(9)?,
-            password: crypto::decrypt(&row.get::<_, String>(10)?),
+            password: db.cipher.decrypt(&row.get::<_, String>(10)?)?,
             sqlite_path: row.get(11)?,
             ssl_mode: row.get(12)?,
             created_at: row.get(13)?,

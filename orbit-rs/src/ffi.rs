@@ -24,12 +24,19 @@ use crate::ssh;
 use crate::{init_logging, OrbitApp};
 use tracing::{error, info, warn};
 
+pub type OrbitHostKeyCallback = extern "C" fn(*const c_char);
 pub type OrbitDataCallback = extern "C" fn(*const c_char, *const u8, usize, *mut c_void);
 pub type OrbitClosedCallback = extern "C" fn(*const c_char, *mut c_void);
 pub type OrbitProgressCallback = extern "C" fn(*const c_char, u64, u64, *mut c_void);
 
 #[no_mangle]
 pub extern "C" fn orbit_app_new(db_path: *const c_char) -> *mut OrbitApp {
+    orbit_app_new_with_error(db_path, ptr::null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_app_new_with_error(db_path: *const c_char, out_error: *mut *mut c_char) -> *mut OrbitApp {
+    if !out_error.is_null() { unsafe { *out_error = ptr::null_mut(); } }
     if db_path.is_null() {
         return ptr::null_mut();
     }
@@ -45,7 +52,65 @@ pub extern "C" fn orbit_app_new(db_path: *const c_char) -> *mut OrbitApp {
 
     match OrbitApp::new(db_path_str) {
         Ok(app) => Box::into_raw(Box::new(app)),
-        Err(_) => ptr::null_mut(),
+        Err(error) => {
+            if !out_error.is_null() {
+                if let Ok(message) = CString::new(error.to_string()) { unsafe { *out_error = message.into_raw(); } }
+            }
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_set_host_key_callback(
+    app: *mut OrbitApp,
+    callback: Option<extern "C" fn(*const c_char)>,
+) -> i32 {
+    if app.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    match app.db.host_keys.set_callback(callback) {
+        Ok(()) => 0,
+        Err(error) => {
+            app.set_error(error.to_string());
+            -2
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_resolve_host_key(
+    app: *mut OrbitApp,
+    request_id: *const c_char,
+    trust: bool,
+) -> i32 {
+    if app.is_null() || request_id.is_null() {
+        return -1;
+    }
+    let app = unsafe { &*app };
+    let id = match unsafe { CStr::from_ptr(request_id) }.to_str() {
+        Ok(id) => id,
+        Err(_) => return -1,
+    };
+    match app.db.host_keys.resolve(&app.db, id, trust) {
+        Ok(()) => 0,
+        Err(error) => {
+            app.set_error(error.to_string());
+            -2
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_credential_transform(app: *mut OrbitApp, value: *const c_char, encrypt: bool, out_json: *mut *mut c_char) -> i32 {
+    if app.is_null() || value.is_null() || out_json.is_null() { return -1; }
+    let app = unsafe { &*app };
+    let value = match unsafe { CStr::from_ptr(value) }.to_str() { Ok(value) => value, Err(_) => return -1 };
+    let result = if encrypt { app.db.cipher.migrate(value) } else { app.db.cipher.decrypt(value).map_err(anyhow::Error::from) };
+    match result {
+        Ok(value) => json_to_out(&value, out_json),
+        Err(error) => { app.set_error(error.to_string()); -2 }
     }
 }
 
@@ -839,6 +904,7 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
         created_at: String::new(),
         updated_at: String::new(),
     };
+    app.clear_error();
     match crate::transport::create_session(&server, &app.db) {
         Ok(guard) => {
             if guard.session.authenticated() {
@@ -847,7 +913,10 @@ pub extern "C" fn orbit_test_connection(app: *mut OrbitApp, json_input: *const c
                 0
             }
         }
-        Err(_) => 0,
+        Err(error) => {
+            app.set_error(error.to_string());
+            0
+        }
     }
 }
 
@@ -1362,7 +1431,55 @@ pub extern "C" fn orbit_sftp_list_full(
     };
     match SftpManager::list_dir_full(&app.pool, &server, &app.db, path_str) {
         Ok(entries) => json_to_out(&entries, out_json),
-        Err(_) => -4,
+        Err(error) => { app.set_error(error.to_string()); -4 },
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_sftp_reserve_transfer(app: *mut OrbitApp, out_json: *mut *mut c_char) -> i32 {
+    if app.is_null() || out_json.is_null() { return -1; }
+    match unsafe { &*app }.transfers.reserve() { Ok(id) => json_to_out(&id, out_json), Err(_) => -2 }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_sftp_cancel_transfer(app: *mut OrbitApp, id: *const c_char) -> i32 {
+    if app.is_null() || id.is_null() { return -1; }
+    let id = match unsafe { CStr::from_ptr(id) }.to_str() { Ok(id) => id, Err(_) => return -1 };
+    match unsafe { &*app }.transfers.cancel(id) { Ok(()) => 0, Err(_) => -2 }
+}
+
+#[no_mangle]
+pub extern "C" fn orbit_sftp_transfer(app: *mut OrbitApp, json: *const c_char, progress_cb: OrbitProgressCallback, userdata: *mut c_void, out_error: *mut *mut c_char) -> i32 {
+    if app.is_null() || json.is_null() || out_error.is_null() { return -1; }
+    unsafe { *out_error = ptr::null_mut(); }
+    let app = unsafe { &*app };
+    let request = match parse_json_input::<crate::sftp_transfer::TransferRequest>(json) { Ok(request) => request, Err(_) => return -1 };
+    let control = match app.transfers.start(&request.id) {
+        Ok(control) => control,
+        Err(error) => {
+            if let Ok(message) = CString::new(error.to_string()) { unsafe { *out_error = message.into_raw(); } }
+            return -4;
+        }
+    };
+    let result = (|| -> anyhow::Result<()> {
+        let server = app.db.get_server(&request.server_id)?;
+        let id = CString::new(request.id.clone())?;
+        let userdata = userdata as usize;
+        let progress: sftp::ProgressCallback = Box::new(move |done, total| progress_cb(id.as_ptr(), done, total, userdata as *mut c_void));
+        crate::sftp_transfer::transfer(&app.db, &server, &request, &control, Some(&progress))
+    })();
+    app.transfers.finish(&request.id);
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            let code = match error.downcast_ref::<crate::sftp_transfer::TransferFailure>() {
+                Some(crate::sftp_transfer::TransferFailure::Conflict) => -5,
+                Some(crate::sftp_transfer::TransferFailure::Cancelled) => -6,
+                None => -4,
+            };
+            if let Ok(message) = CString::new(error.to_string()) { unsafe { *out_error = message.into_raw(); } }
+            code
+        }
     }
 }
 

@@ -66,6 +66,15 @@ struct TabBarView: View {
             )
         }
 
+        if tab.type == .sftp {
+            return AnyView(
+                Label("按需连接", systemImage: "arrow.left.arrow.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .help("SFTP 文件操作按需建立 SSH 连接")
+            )
+        }
+
         let isConnected = tab.sessionId != nil
         return AnyView(
             HStack(spacing: 4) {

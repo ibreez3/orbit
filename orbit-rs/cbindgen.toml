@@ -6,7 +6,9 @@ style = "both"
 usize_is_size_t = true
 
 [export]
+exclude = ["SecKeychainFindGenericPassword", "SecKeychainAddGenericPassword", "SecKeychainItemFreeContent", "SecKeychainItemDelete", "CFRelease"]
 include = [
+    "OrbitHostKeyCallback",
     "OrbitDataCallback",
     "OrbitClosedCallback",
     "OrbitProgressCallback",

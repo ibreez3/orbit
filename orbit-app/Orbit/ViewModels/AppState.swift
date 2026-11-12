@@ -14,6 +14,15 @@ class AppState: ObservableObject {
     let aiState = AIState()
 
     let sftpDrawer = SftpDrawerState()
+    private var sftpQueues: [String: SftpTransferQueue] = [:]
+
+    func sftpQueue(for tab: TabItem) -> SftpTransferQueue {
+        if let queue = sftpQueues[tab.id] { return queue }
+        let queue = SftpTransferQueue(serverId: tab.serverId ?? "", client: bridge)
+        queue.activityChanged = { [weak self] active in self?.setSftpTransferActive(active, for: tab.id) }
+        sftpQueues[tab.id] = queue
+        return queue
+    }
 
     private var pendingQuitTabId: String? = nil
     private var autoReconnectTasks: [String: Task<Void, Never>] = [:]
@@ -443,6 +452,7 @@ class AppState: ObservableObject {
                     let tabsToRemove = tabs.filter { $0.serverId == id }
                     let dockerTabIdsToRemove = Set(tabsToRemove.filter { $0.type == .docker }.map(\.id))
                     for tab in tabsToRemove {
+                        sftpQueues.removeValue(forKey: tab.id)?.cancelAll()
                         disconnectAllChannels(tab: tab)
                     }
                     servers.removeAll { $0.id == id }
@@ -1931,6 +1941,7 @@ class AppState: ObservableObject {
     }
 
     private func performRemoveTab(_ id: String) {
+        sftpQueues.removeValue(forKey: id)?.cancelAll()
         cancelAutoReconnect(tabId: id)
         let removedIndex = tabs.firstIndex(where: { $0.id == id }) ?? 0
         if let tab = tabs.first(where: { $0.id == id }) {
@@ -2438,18 +2449,32 @@ class AppState: ObservableObject {
     func loadAIConfig() {
         guard let data = UserDefaults.standard.data(forKey: "aiConfig") else { return }
         do {
-            aiConfig = try Self.decoder.decode(AIConfig.self, from: data)
+            var config = try Self.decoder.decode(AIConfig.self, from: data)
+            if !config.apiKey.isEmpty {
+                let encrypted = try bridge.transformCredential(config.apiKey, encrypt: true)
+                config.apiKey = try bridge.transformCredential(encrypted, encrypt: false)
+                var persisted = config
+                persisted.apiKey = encrypted
+                UserDefaults.standard.set(try Self.encoder.encode(persisted), forKey: "aiConfig")
+            }
+            aiConfig = config
         } catch {
-            print("[Orbit] Failed to load AI config: \(error)")
+            aiConfig = .defaults
+            alertTitle = "AI 凭据加载失败"
+            alertMessage = error.localizedDescription
         }
     }
 
     func saveAIConfig() {
         do {
-            let data = try Self.encoder.encode(aiConfig)
-            UserDefaults.standard.set(data, forKey: "aiConfig")
+            var persisted = aiConfig
+            if !persisted.apiKey.isEmpty {
+                persisted.apiKey = try bridge.transformCredential(persisted.apiKey, encrypt: true)
+            }
+            UserDefaults.standard.set(try Self.encoder.encode(persisted), forKey: "aiConfig")
         } catch {
-            print("[Orbit] Failed to save AI config: \(error)")
+            alertTitle = "AI 凭据保存失败"
+            alertMessage = error.localizedDescription
         }
     }
 

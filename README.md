@@ -159,6 +159,12 @@ cd orbit-app && xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration
 cargo test --manifest-path orbit-rs/Cargo.toml --release --target aarch64-apple-darwin
 ```
 
+The SSH host-key integration test starts isolated loopback SSH servers and requires local networking permission. It does not use existing servers or credentials:
+
+```bash
+cargo test --manifest-path orbit-rs/Cargo.toml direct_and_jump_handshakes -- --ignored
+```
+
 ## Project layout
 
 ```text
@@ -189,8 +195,11 @@ orbit/
 
 ## Security notes
 
-- Credentials are encrypted locally with AES-256-GCM.
-- The encryption key is currently tied to the local machine hostname; moving the database to another Mac requires re-entering credentials.
+- SSH host keys are checked before authentication for direct connections, jump hosts, and tunneled targets. First use (including previously saved servers) requires SHA256 fingerprint approval in Orbit. Changed keys block the connection and require reviewing both fingerprints and confirming replacement twice.
+- Trust is stored locally by host and port, independent of server name or username; `~/.ssh/known_hosts` is not imported automatically. After approval, manually retry the connection or operation. Commands are not replayed automatically.
+
+- Credentials are encrypted locally with AES-256-GCM using a random key stored in macOS Keychain. Legacy credentials migrate transactionally; unavailable keys or damaged ciphertext stop migration without replacing the original values.
+- Moving encrypted data requires the matching Keychain key. See [credential recovery and SFTP behavior](docs/credentials-and-sftp.md).
 - The AI agent gateway listens on a local Unix socket only and requires explicit approval for every new agent session.
 - Read commands run without per-command confirmation. Write commands require a grant that is scoped to one agent session and one server.
 - The command guard and approval flow are safety layers, not a sandbox: an agent can still read remote secrets into its own context if a command exposes them.
