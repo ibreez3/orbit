@@ -1,10 +1,5 @@
-use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
-
 use crate::db::Database;
-use crate::models::{expand_tilde, FileEntry, Server};
+use crate::models::{FileEntry, Server};
 use crate::ssh;
 use crate::transport;
 use anyhow::Result;
@@ -33,67 +28,28 @@ impl SftpManager {
         result
     }
 
-    fn should_report(last: &AtomicU64, transferred: u64, total: u64) -> bool {
-        if total == 0 {
-            return false;
-        }
-        let prev = last.load(Ordering::Relaxed);
-        let old_pct = prev * 100 / total;
-        let new_pct = transferred * 100 / total;
-        new_pct > old_pct
-    }
-
     pub fn list_dir_full(
         pool: &transport::SessionPool,
         server: &Server,
         db: &Database,
         path: &str,
     ) -> Result<Vec<FileEntry>> {
-        let escaped = path.replace("'", "'\\''");
-        let cmd = format!(
-            "find '{}' -maxdepth 1 -mindepth 1 -printf '%y\\t%f\\t%s\\t%T@\\t%m\\n' 2>/dev/null",
-            escaped
-        );
-        let output = ssh::SshManager::exec_command(pool, server, db, &cmd)?;
-        let mut entries = Vec::new();
-        for line in output.lines() {
-            let parts: Vec<&str> = line.splitn(5, '\t').collect();
-            if parts.len() < 5 {
-                continue;
+        Self::with_sftp(pool, server, db, |sftp| {
+            let mut entries = Vec::new();
+            for (entry_path, stat) in sftp.readdir(std::path::Path::new(path))? {
+                let name = entry_path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                if name == "." || name == ".." { continue; }
+                let modified = stat.mtime.and_then(|time| chrono::DateTime::from_timestamp(time as i64, 0))
+                    .map(|time| time.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+                entries.push(FileEntry {
+                    name, path: entry_path.to_string_lossy().into_owned(), is_dir: stat.is_dir(),
+                    size: stat.size.unwrap_or(0), modified,
+                    permissions: stat.perm.map(|mode| format!("{:03o}", mode & 0o777)).unwrap_or_default(),
+                });
             }
-            let type_char = parts[0];
-            let name = parts[1].to_string();
-            if name.is_empty() || name == "." || name == ".." {
-                continue;
-            }
-            let is_dir = type_char == "d";
-            let size: u64 = parts[2].parse().unwrap_or(0);
-            let mtime_str = parts[3];
-            let mtime_epoch: i64 = mtime_str
-                .split('.')
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-            let permissions = parts[4].to_string();
-            let full_path = if path == "/" {
-                format!("/{}", name)
-            } else {
-                format!("{}/{}", path, name)
-            };
-            let modified = chrono::DateTime::from_timestamp(mtime_epoch, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_default();
-            entries.push(FileEntry {
-                name,
-                path: full_path,
-                is_dir,
-                size,
-                modified,
-                permissions,
-            });
-        }
-        entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-        Ok(entries)
+            entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
+            Ok(entries)
+        })
     }
 
     pub fn download_file(
@@ -104,103 +60,20 @@ impl SftpManager {
         local_path: &str,
         progress_cb: Option<&ProgressCallback>,
     ) -> Result<()> {
-        info!(server = %server.name, remote_path, local_path, "开始下载文件");
-        let _lease = pool.acquire_scoped(server, db)?;
-        let result = pool.with_session_mut(&server.id, |session| {
-            let sftp = session.sftp()?;
-            let mut remote_file = sftp.open(std::path::Path::new(remote_path))?;
-            let stat = remote_file.stat()?;
-            let total = stat.size.unwrap_or(0);
-            let expanded = expand_tilde(local_path);
-            let mut local_file = std::fs::File::create(&expanded)?;
-
-            let mut buf = [0u8; 32768];
-            let mut transferred: u64 = 0;
-            let last_reported = Arc::new(AtomicU64::new(0));
-            let mut last_time = Instant::now();
-            loop {
-                let n = remote_file.read(&mut buf)?;
-                if n == 0 {
-                    break;
-                }
-                local_file.write_all(&buf[..n])?;
-                transferred += n as u64;
-                if let Some(cb) = progress_cb {
-                    let now = Instant::now();
-                    let elapsed = now.duration_since(last_time).as_millis() as u64;
-                    if (elapsed >= 300 || transferred == total)
-                        && Self::should_report(&last_reported, transferred, total)
-                    {
-                        last_reported.store(transferred, Ordering::Relaxed);
-                        last_time = now;
-                        cb(transferred, total);
-                    }
-                }
-            }
-            if let Some(cb) = progress_cb {
-                cb(transferred, total);
-            }
-            info!(remote_path, transferred, total, "文件下载完成");
-            Ok(())
-        });
-        if let Err(ref e) = result {
-            error!(remote_path, error = %e, "文件下载失败");
-        }
-        result
+        let _ = pool;
+        crate::sftp_transfer::transfer(db, server, &crate::sftp_transfer::TransferRequest {
+            id: String::new(), server_id: server.id.clone(), local_path: local_path.to_string(), remote_path: remote_path.to_string(), upload: false, overwrite: false,
+        }, &crate::sftp_transfer::TransferControl::default(), progress_cb)
     }
 
     pub fn upload_file(
-        pool: &transport::SessionPool,
-        server: &Server,
-        db: &Database,
-        local_path: &str,
-        remote_path: &str,
-        progress_cb: Option<&ProgressCallback>,
+        pool: &transport::SessionPool, server: &Server, db: &Database,
+        local_path: &str, remote_path: &str, progress_cb: Option<&ProgressCallback>,
     ) -> Result<()> {
-        let expanded = expand_tilde(local_path);
-        let metadata = std::fs::metadata(&expanded)?;
-        let total = metadata.len();
-        info!(server = %server.name, local_path, remote_path, total, "开始上传文件");
-
-        let _lease = pool.acquire_scoped(server, db)?;
-        let result = pool.with_session_mut(&server.id, |session| {
-            let sftp = session.sftp()?;
-            let mut local_file = std::fs::File::open(&expanded)?;
-            let mut remote_file = sftp.create(std::path::Path::new(remote_path))?;
-
-            let mut buf = [0u8; 32768];
-            let mut transferred: u64 = 0;
-            let last_reported = Arc::new(AtomicU64::new(0));
-            let mut last_time = Instant::now();
-            loop {
-                let n = local_file.read(&mut buf)?;
-                if n == 0 {
-                    break;
-                }
-                remote_file.write_all(&buf[..n])?;
-                transferred += n as u64;
-                if let Some(cb) = progress_cb {
-                    let now = Instant::now();
-                    let elapsed = now.duration_since(last_time).as_millis() as u64;
-                    if (elapsed >= 300 || transferred == total)
-                        && Self::should_report(&last_reported, transferred, total)
-                    {
-                        last_reported.store(transferred, Ordering::Relaxed);
-                        last_time = now;
-                        cb(transferred, total);
-                    }
-                }
-            }
-            if let Some(cb) = progress_cb {
-                cb(transferred, total);
-            }
-            info!(remote_path, transferred, total, "文件上传完成");
-            Ok(())
-        });
-        if let Err(ref e) = result {
-            error!(remote_path, error = %e, "文件上传失败");
-        }
-        result
+        let _ = pool;
+        crate::sftp_transfer::transfer(db, server, &crate::sftp_transfer::TransferRequest {
+            id: String::new(), server_id: server.id.clone(), local_path: local_path.to_string(), remote_path: remote_path.to_string(), upload: true, overwrite: false,
+        }, &crate::sftp_transfer::TransferControl::default(), progress_cb)
     }
 
     pub fn mkdir(

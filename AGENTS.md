@@ -222,9 +222,10 @@ NSViewRepresentable 创建 SwiftTerm.TerminalView
 ### 凭据加密（crypto.rs）
 
 ```
-加密：encrypt(plaintext) → "ORB1" + nonce + AES-256-GCM 密文 → Base64
-解密：decrypt(ciphertext) → Base64 解码 → 检查 "ORB1" 前缀 → 解密
-密钥：SHA256(salt + hostname)，绑定本机
+加密：encrypt(plaintext) → "ORB2:" + Base64(nonce + AES-256-GCM 密文)
+解密：decrypt(ciphertext) → 检查 "ORB2:" 前缀 → Base64 解码 → 验证解密
+密钥：macOS Keychain 保存随机 256 位密钥
+迁移：旧明文/ORB1 在事务中验证并重加密；失败保留原凭据
 ```
 
 ### 主题系统
@@ -296,7 +297,7 @@ NSViewRepresentable 创建 SwiftTerm.TerminalView
 
 ## 已知限制
 
-- 凭据加密密钥绑定本机 hostname，换机器需重新输入凭据
+- 迁移加密数据库需要匹配的 macOS Keychain 密钥；旧 ORB1 迁移仍需要原 hostname
 - 监控数据通过 SSH 执行 shell 脚本采集（依赖 Linux，不兼容 macOS/BSD）
 - 跳板机依赖 `AllowTcpForwarding yes`
 - macOS 未签名，需右键打开或 `xattr -cr` 绕过 Gatekeeper

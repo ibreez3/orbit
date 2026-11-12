@@ -17,7 +17,17 @@ typedef void (*OrbitClosedCallback)(const char*, void*);
 
 typedef void (*OrbitProgressCallback)(const char*, uint64_t, uint64_t, void*);
 
+typedef void (*OrbitHostKeyCallback)(const char*);
+
 ORBIT_API struct OrbitApp *orbit_app_new(const char *db_path);
+
+ORBIT_API struct OrbitApp *orbit_app_new_with_error(const char *db_path, char **out_error);
+
+ORBIT_API int32_t orbit_set_host_key_callback(struct OrbitApp *app, void (*callback)(const char*));
+
+ORBIT_API int32_t orbit_resolve_host_key(struct OrbitApp *app, const char *request_id, bool trust);
+
+ORBIT_API int32_t orbit_credential_transform(struct OrbitApp *app, const char *value, bool encrypt, char **out_json);
 
 ORBIT_API void orbit_app_free(struct OrbitApp *app);
 
@@ -102,6 +112,12 @@ ORBIT_API int32_t orbit_disconnect_ssh(struct OrbitApp *app, const char *session
 ORBIT_API int32_t orbit_get_ssh_traffic(struct OrbitApp *app, const char *session_id, uint64_t *out_read, uint64_t *out_written);
 
 ORBIT_API int32_t orbit_sftp_list_full(struct OrbitApp *app, const char *server_id, const char *path, char **out_json);
+
+ORBIT_API int32_t orbit_sftp_reserve_transfer(struct OrbitApp *app, char **out_json);
+
+ORBIT_API int32_t orbit_sftp_cancel_transfer(struct OrbitApp *app, const char *id);
+
+ORBIT_API int32_t orbit_sftp_transfer(struct OrbitApp *app, const char *json, OrbitProgressCallback progress_cb, void *userdata, char **out_error);
 
 ORBIT_API int32_t orbit_sftp_download(struct OrbitApp *app, const char *server_id, const char *remote_path, const char *local_path, OrbitProgressCallback progress_cb, void *userdata);
 
