@@ -4,11 +4,12 @@ struct SftpDrawerView: View {
     let tab: TabItem
     let appState: AppState
     @EnvironmentObject var drawerState: SftpDrawerState
+    @State private var dragStartHeight: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
             dragHandle
-            SftpView(tab: tab, appState: appState)
+            SftpView(tab: tab, appState: appState, compact: true)
         }
         .frame(height: drawerState.height)
         .background(.ultraThinMaterial)
@@ -39,9 +40,11 @@ struct SftpDrawerView: View {
         .gesture(
             DragGesture()
                 .onChanged { value in
-                    let newHeight = drawerState.height - value.translation.height
-                    drawerState.height = max(160, min(newHeight, 600))
+                    if dragStartHeight == nil { dragStartHeight = drawerState.height }
+                    let newHeight = (dragStartHeight ?? drawerState.height) - value.translation.height
+                    drawerState.height = max(360, min(newHeight, 600))
                 }
+                .onEnded { _ in dragStartHeight = nil }
         )
     }
 }

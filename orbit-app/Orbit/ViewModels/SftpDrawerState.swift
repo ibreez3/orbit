@@ -4,7 +4,7 @@ import SwiftUI
 /// full view-tree re-evaluation in AppState.
 class SftpDrawerState: ObservableObject {
     @Published var tabId: String? = nil
-    @Published var height: CGFloat = 280
+    @Published var height: CGFloat = 420
 
     func toggle(for tab: String) {
         if tabId == tab {

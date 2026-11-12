@@ -485,6 +485,7 @@ fn create_direct_session(server: &Server, db: &Database) -> Result<SessionGuard>
         error!(error = %e, "SSH 握手失败");
         anyhow!("SSH 握手失败 {}:{} - {}", server.host, server.port, e)
     })?;
+    db.host_keys.verify(db, server, &session, "direct")?;
     authenticate_session(server, db, &mut session)?;
     let _ = apply_keepalive(&mut session, settings.keepalive_seconds);
     session.set_timeout(0);
@@ -525,6 +526,7 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
         error!(error = %e, "跳板机 SSH 握手失败");
         anyhow!("跳板机 SSH 握手失败: {}", e)
     })?;
+    db.host_keys.verify(db, &jump_server, &jump_session, "jump")?;
     authenticate_session(&jump_server, db, &mut jump_session)?;
     let _ = apply_keepalive(&mut jump_session, settings.keepalive_seconds);
     jump_session.set_blocking(true);
@@ -565,6 +567,10 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
     jump_session.set_timeout(0);
     let (proxy_port, proxy_handle, proxy_running) =
         start_local_proxy(tunnel, jump_session)?;
+    let proxy = ProxyGuard {
+        handle: Some(proxy_handle),
+        running: proxy_running,
+    };
     debug!(proxy_port, "本地代理已启动");
 
     let tcp = connect_tcp_with_timeout("127.0.0.1", proxy_port, settings.connect_timeout)
@@ -585,6 +591,7 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
             e
         )
     })?;
+    db.host_keys.verify(db, server, &session, "target")?;
     authenticate_session(server, db, &mut session)?;
     let _ = apply_keepalive(&mut session, settings.keepalive_seconds);
     session.set_timeout(0);
@@ -592,10 +599,7 @@ fn create_jump_session(server: &Server, db: &Database) -> Result<SessionGuard> {
     info!("跳板机会话建立成功");
     Ok(SessionGuard {
         session,
-        _proxy: Some(ProxyGuard {
-            handle: Some(proxy_handle),
-            running: proxy_running,
-        }),
+        _proxy: Some(proxy),
     })
 }
 
@@ -609,15 +613,24 @@ fn start_local_proxy(
         .local_addr()
         .map_err(|error| anyhow!("读取本地代理端口失败: {}", error))?
         .port();
+    listener.set_nonblocking(true)?;
     let running = std::sync::Arc::new(AtomicBool::new(true));
     let run = running.clone();
 
     let handle = std::thread::spawn(move || {
-        let (mut local_tcp, _) = match listener.accept() {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(error = %e, "代理线程 accept 失败");
+        let (mut local_tcp, _) = loop {
+            if !run.load(Ordering::Relaxed) {
                 return;
+            }
+            match listener.accept() {
+                Ok(s) => break s,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => {
+                    warn!(error = %e, "代理线程 accept 失败");
+                    return;
+                }
             }
         };
         drop(listener);
@@ -639,7 +652,7 @@ fn start_local_proxy(
                 Ok(n) if n > 0 => {
                     did_work = true;
                     let mut written = 0;
-                    while written < n {
+                    while written < n && run.load(Ordering::Relaxed) {
                         match local_tcp.write(&buf_down[written..n]) {
                             Ok(w) => written += w,
                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -671,7 +684,7 @@ fn start_local_proxy(
                 Ok(n) if n > 0 => {
                     did_work = true;
                     let mut written = 0;
-                    while written < n {
+                    while written < n && run.load(Ordering::Relaxed) {
                         match tunnel.write(&buf_up[written..n]) {
                             Ok(w) => written += w,
                             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

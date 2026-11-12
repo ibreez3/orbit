@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+## [v0.0.14] - 2026-11-12
+
+### Added
+- Store the credential encryption key in macOS Keychain; transactionally migrate legacy credentials, encrypt saved AI API keys, and preserve original data on migration or Keychain failures.
+- Add persistent SFTP transfer queues with cancellation, retry, explicit overwrite confirmation, and staged atomic replacement.
+- Redesign full and compact SFTP views with a shared file browser, filtering, and actionable transfer status.
+- Verify SSH host keys before authentication for direct connections, jump hosts, and tunneled targets. Persist trust by host and port, require explicit first-use approval, and show old/new SHA256 fingerprints with a second confirmation for key replacement. Existing server configurations remain compatible; trust approval requires a manual connection retry.
+
+### Fixed
+- Clean up jump-host proxy threads when target verification or authentication fails.
+
 ## [v0.0.13] - 2026-11-11
 
 ### Added

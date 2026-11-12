@@ -4,10 +4,12 @@ pub mod database;
 mod db;
 mod docker;
 mod ffi;
+mod host_key;
 mod models;
 mod monitor;
 pub mod server_organization;
 mod sftp;
+mod sftp_transfer;
 mod ssh;
 mod transport;
 
@@ -15,6 +17,7 @@ use std::sync::Mutex;
 
 pub struct OrbitApp {
     pub db: db::Database,
+    pub transfers: sftp_transfer::TransferRegistry,
     pub db_path: String,
     pub ssh: Mutex<ssh::SshManager>,
     pub pool: transport::SessionPool,
@@ -27,6 +30,7 @@ impl OrbitApp {
         let database = db::Database::new(db_path)?;
         Ok(Self {
             db: database,
+            transfers: sftp_transfer::TransferRegistry::default(),
             db_path: db_path.to_string(),
             ssh: Mutex::new(ssh::SshManager::new()),
             pool: transport::SessionPool::new(),

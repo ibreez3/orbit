@@ -27,7 +27,16 @@ private func orbitProgressCallback(serverId: UnsafePointer<CChar>?, transferred:
     manager.handleProgress(serverId: sid, transferred: transferred, total: total)
 }
 
-class OrbitBridge {
+@_cdecl("orbitHostKeyCallback")
+private func orbitHostKeyCallback(json: UnsafePointer<CChar>?) {
+    guard let json,
+          let request = try? JSONDecoder().decode(SSHHostKeyRequest.self, from: Data(String(cString: json).utf8)) else { return }
+    DispatchQueue.main.async {
+        SSHHostKeyVerification.shared.enqueue(request)
+    }
+}
+
+class OrbitBridge: SftpTransferClient {
     static let shared = OrbitBridge()
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
@@ -108,12 +117,16 @@ class OrbitBridge {
             withIntermediateDirectories: true
         )
         let dbPath = databaseURL.path
+        var initializationError: UnsafeMutablePointer<CChar>?
         app = dbPath.withCString { path in
-            orbit_app_new(path)
+            orbit_app_new_with_error(path, &initializationError)
         }
-        guard app != nil else {
-            throw OrbitError.initializationFailed
+        if let initializationError {
+            defer { orbit_free_string(initializationError) }
+            throw OrbitError.apiErrorWithMessage(-1, String(cString: initializationError))
         }
+        guard app != nil else { throw OrbitError.initializationFailed }
+        _ = orbit_set_host_key_callback(app, orbitHostKeyCallback)
         applyConnectionPreferencesUnlocked()
     }
 
@@ -598,12 +611,30 @@ class OrbitBridge {
         return try decodeWorkspaceResponse(Server.self, rc: rc, outJson: outJson)
     }
 
+    func transformCredential(_ value: String, encrypt: Bool) throws -> String {
+        try ensureInitialized()
+        var output: UnsafeMutablePointer<CChar>?
+        let rc = value.withCString { orbit_credential_transform(app, $0, encrypt, &output) }
+        guard rc == 0, let output else { throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage()) }
+        defer { orbit_free_string(output) }
+        return try Self.decodeJSON(String.self, from: output)
+    }
+
+    func resolveHostKey(id: String, trust: Bool) throws {
+        try ensureInitialized()
+        let rc = id.withCString { orbit_resolve_host_key(app, $0, trust) }
+        guard rc == 0 else { throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage()) }
+    }
+
     func testConnection(input: ServerInput) throws -> Bool {
         try ensureInitialized()
         let jsonData = try Self.encoder.encode(input)
         let jsonString = String(data: jsonData, encoding: .utf8)!
         let rc = jsonString.withCString { inputPtr in
             orbit_test_connection(app, inputPtr)
+        }
+        if rc != 1, let message = lastErrorMessage() {
+            throw OrbitError.apiErrorWithMessage(rc, message)
         }
         return rc == 1
     }
@@ -1049,12 +1080,52 @@ class OrbitBridge {
         }
         guard rc == 0, let json = outJson else {
             print("[OrbitBridge] sftpListFull FAILED rc=\(rc)")
-            throw OrbitError.apiError(rc)
+            throw OrbitError.apiErrorWithMessage(rc, lastErrorMessage())
         }
         defer { orbit_free_string(json) }
         let result = try Self.decodeJSON([FileEntry].self, from: json)
         print("[OrbitBridge] sftpListFull OK path=\(path) entries=\(result.count)")
         return result
+    }
+
+    func reserveSftpTransfer() throws -> String {
+        try ensureInitialized()
+        var output: UnsafeMutablePointer<CChar>?
+        let rc = orbit_sftp_reserve_transfer(app, &output)
+        guard rc == 0, let output else { throw SftpTransferError.failed("无法创建传输任务") }
+        defer { orbit_free_string(output) }
+        return try Self.decodeJSON(String.self, from: output)
+    }
+
+    func cancelSftpTransfer(_ id: String) {
+        guard let app else { return }
+        _ = id.withCString { orbit_sftp_cancel_transfer(app, $0) }
+    }
+
+    func runSftpTransfer(_ request: SftpTransferRequest, progress: @escaping (UInt64, UInt64) -> Void) throws {
+        try ensureInitialized()
+        final class ProgressContext {
+            let callback: (UInt64, UInt64) -> Void
+            init(_ callback: @escaping (UInt64, UInt64) -> Void) { self.callback = callback }
+        }
+        let context = Unmanaged.passRetained(ProgressContext(progress))
+        defer { context.release() }
+        let json = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = json.withCString {
+            orbit_sftp_transfer(app, $0, { _, done, total, userdata in
+                guard let userdata else { return }
+                Unmanaged<ProgressContext>.fromOpaque(userdata).takeUnretainedValue().callback(done, total)
+            }, context.toOpaque(), &error)
+        }
+        let message = error.map { String(cString: $0) }
+        if let error { orbit_free_string(error) }
+        switch rc {
+        case 0: return
+        case -5: throw SftpTransferError.conflict
+        case -6: throw SftpTransferError.cancelled
+        default: throw SftpTransferError.failed(message ?? "文件传输失败")
+        }
     }
 
     func sftpDownload(serverId: String, remotePath: String, localPath: String) throws {
