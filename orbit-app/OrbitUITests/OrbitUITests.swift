@@ -42,15 +42,15 @@ final class OrbitUITests: XCTestCase {
         XCTAssertTrue(mainWindow.waitForExistence(timeout: 5))
         let mainFrame = mainWindow.frame
 
-        let appMenu = app.menuBars.menuBarItems["Orbit"]
+        let appMenu = app.menuBars.menuBarItems["Hostwren"]
         XCTAssertTrue(appMenu.waitForExistence(timeout: 5))
         appMenu.click()
 
-        let aboutItem = app.menuItems["关于 Orbit"]
+        let aboutItem = app.menuItems["关于 Hostwren"]
         XCTAssertTrue(aboutItem.waitForExistence(timeout: 5))
         aboutItem.click()
 
-        let about = app.windows["关于 Orbit"]
+        let about = app.windows["关于 Hostwren"]
         XCTAssertTrue(about.waitForExistence(timeout: 10))
         XCTAssertEqual(about.frame.midX, mainFrame.midX, accuracy: 40)
         XCTAssertEqual(about.frame.midY, mainFrame.midY, accuracy: 40)
@@ -253,7 +253,7 @@ final class OrbitUITests: XCTestCase {
     }
 
     func testDoubleClickTitlebarTogglesZoom() {
-        let window = app.windows["Orbit"]
+        let window = app.windows["Hostwren"]
         XCTAssertTrue(window.waitForExistence(timeout: 10))
         let initialFrame = window.frame
 

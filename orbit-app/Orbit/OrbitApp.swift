@@ -24,7 +24,7 @@ struct OrbitCommands: Commands {
     var body: some Commands {
         SidebarCommands()
         CommandGroup(replacing: .appInfo) {
-            Button("关于 Orbit") {
+            Button("关于 Hostwren") {
                 AboutWindowController.shared.open()
             }
         }

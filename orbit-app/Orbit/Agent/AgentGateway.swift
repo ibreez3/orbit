@@ -233,7 +233,7 @@ final class AgentGateway {
         lock.lock()
         guard let approval else {
             lock.unlock()
-            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+            return errorResponse(request.id, .orbitUnavailable, "Hostwren agent gateway is not configured")
         }
         pendingAdmissions[requestId] = PendingAdmission(status: .pending)
         let generation = gatewayGeneration
@@ -245,7 +245,7 @@ final class AgentGateway {
             guard self.isCurrentGeneration(generation) else {
                 let body = AgentErrorBody(
                     code: .admissionDenied,
-                    message: "Orbit stopped the agent gateway before approval completed"
+                    message: "Hostwren stopped the agent gateway before approval completed"
                 )
                 self.setAdmission(
                     requestId,
@@ -377,7 +377,7 @@ final class AgentGateway {
         sessions.touch(sessionId)
 
         guard let execService else {
-            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+            return errorResponse(request.id, .orbitUnavailable, "Hostwren agent gateway is not configured")
         }
 
         switch tool {
@@ -464,7 +464,7 @@ final class AgentGateway {
                 return ok(request.id, .object([
                     "status": .string("pending_approval"),
                     "requestId": .string(requestId),
-                    "message": .string("Approve the write operation in Orbit, then retry the same call.")
+                    "message": .string("Approve the write operation in Hostwren, then retry the same call.")
                 ]))
             case .denied(let error):
                 return AgentResponse(id: request.id, ok: false, result: nil, error: error)
@@ -544,7 +544,7 @@ final class AgentGateway {
         sessionId: String
     ) async -> AgentResponse {
         guard let manager = currentShellManager() else {
-            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+            return errorResponse(request.id, .orbitUnavailable, "Hostwren agent gateway is not configured")
         }
         guard let serverQuery = request.args?.objectValue?["server"]?.stringValue,
               !serverQuery.isEmpty else {
@@ -576,7 +576,7 @@ final class AgentGateway {
                 return ok(request.id, .object([
                     "status": .string("pending_approval"),
                     "requestId": .string(requestId),
-                    "message": .string("Approve shell access in Orbit, then retry the same call.")
+                    "message": .string("Approve shell access in Hostwren, then retry the same call.")
                 ]))
             case .denied(let error):
                 return AgentResponse(id: request.id, ok: false, result: nil, error: error)
@@ -639,7 +639,7 @@ final class AgentGateway {
         sessionId: String
     ) async -> AgentResponse {
         guard let manager = currentShellManager() else {
-            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+            return errorResponse(request.id, .orbitUnavailable, "Hostwren agent gateway is not configured")
         }
         guard let object = request.args?.objectValue,
               let shellId = object["shellId"]?.stringValue,
@@ -694,7 +694,7 @@ final class AgentGateway {
         sessionId: String
     ) async -> AgentResponse {
         guard let manager = currentShellManager() else {
-            return errorResponse(request.id, .orbitUnavailable, "Orbit agent gateway is not configured")
+            return errorResponse(request.id, .orbitUnavailable, "Hostwren agent gateway is not configured")
         }
         guard let shellId = request.args?.objectValue?["shellId"]?.stringValue else {
             return errorResponse(request.id, .invalidRequest, "orbit_shell_close requires shellId")
@@ -798,7 +798,7 @@ final class AgentGateway {
             lock.unlock()
             return .denied(AgentErrorBody(
                 code: .orbitUnavailable,
-                message: "Orbit agent gateway is not configured"
+                message: "Hostwren agent gateway is not configured"
             ))
         }
         pendingWrites[requestId] = PendingWrite(
@@ -1124,7 +1124,7 @@ enum AgentGatewayError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "Orbit agent gateway is not configured"
+            return "Hostwren agent gateway is not configured"
         }
     }
 }

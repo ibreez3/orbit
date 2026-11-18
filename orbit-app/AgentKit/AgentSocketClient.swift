@@ -12,15 +12,15 @@ public enum AgentSocketClientError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .notConnected:
-            return "Orbit agent gateway is not connected"
+            return "Hostwren agent gateway is not connected"
         case .connectFailed(let message):
-            return "Could not connect to Orbit: \(message)"
+            return "Could not connect to Hostwren: \(message)"
         case .io(let message):
-            return "Orbit agent socket error: \(message)"
+            return "Hostwren agent socket error: \(message)"
         case .timeout:
-            return "Orbit agent request timed out"
+            return "Hostwren agent request timed out"
         case .invalidResponse:
-            return "Orbit returned an invalid agent response"
+            return "Hostwren returned an invalid agent response"
         case .remote(let error):
             return error.message
         }
@@ -135,7 +135,7 @@ public final class AgentSocketClient: AgentGatewayCalling {
         if response.ok == false {
             return .denied(response.error ?? AgentErrorBody(
                 code: .admissionDenied,
-                message: "Orbit denied agent admission"
+                message: "Hostwren denied agent admission"
             ))
         }
         guard case .object(let object)? = response.result else {
@@ -158,7 +158,7 @@ public final class AgentSocketClient: AgentGatewayCalling {
         }
         return .denied(AgentErrorBody(
             code: .admissionDenied,
-            message: "Orbit denied agent admission"
+            message: "Hostwren denied agent admission"
         ))
     }
 
@@ -211,7 +211,7 @@ public final class AgentSocketClient: AgentGatewayCalling {
         if !response.ok {
             throw AgentSocketClientError.remote(response.error ?? AgentErrorBody(
                 code: .invalidRequest,
-                message: "Orbit rejected the tool call"
+                message: "Hostwren rejected the tool call"
             ))
         }
         return response.result ?? .null

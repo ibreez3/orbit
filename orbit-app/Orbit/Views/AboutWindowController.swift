@@ -30,7 +30,7 @@ final class AboutWindowController: NSObject, NSWindowDelegate {
         hosting.sizingOptions = [.preferredContentSize]
 
         let window = NSWindow(contentViewController: hosting)
-        window.title = "关于 Orbit"
+        window.title = "关于 Hostwren"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = false
