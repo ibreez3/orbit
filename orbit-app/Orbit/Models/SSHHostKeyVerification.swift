@@ -28,7 +28,7 @@ struct SSHHostKeyRequest: Decodable, Equatable {
         if let previousFingerprint {
             text += "\n原指纹：\(previousFingerprint)\n\n服务器可能已重装或更换密钥，也可能连接到了其他主机。"
         }
-        text += "\n\n请通过可信渠道向管理员核对指纹。当前连接已停止；保存信任后请手动重试，Orbit 不会自动重放操作。"
+        text += "\n\n请通过可信渠道向管理员核对指纹。当前连接已停止；保存信任后请手动重试，Hostwren 不会自动重放操作。"
         return text
     }
 }

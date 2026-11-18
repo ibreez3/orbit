@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128">
+  <title>Hostwren — wren and terminal cursor</title>
+  <defs>
+    <linearGradient id="field" x2=".7" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#214e52"/><stop offset="1" stop-color="#102b38"/>
+    </linearGradient>
+  </defs>
+  <rect x="7" y="7" width="114" height="114" rx="28" fill="url(#field)"/>
+  <path fill="#f6ecd4" d="M21 34 47 52Q56 43 69 45Q72 31 85 31Q97 30 100 42L112 46 99 50Q97 70 78 78Q61 85 46 74Q36 68 32 57Z"/>
+  <path d="m46 55 18 6-12 7" fill="none" stroke="#28565a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="89" cy="41" r="2.6" fill="#173a40"/>
+  <rect x="68" y="87" width="28" height="6" rx="3" fill="#79d7b0"/>
+</svg>

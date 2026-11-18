@@ -494,7 +494,7 @@ struct MainView: View {
                         .font(.system(size: 28))
                         .foregroundStyle(.secondary)
 
-                    Text("退出 Orbit")
+                    Text("退出 Hostwren")
                         .font(.system(size: 16, weight: .semibold))
 
                     Text("关闭所有标签页后将退出应用程序。")

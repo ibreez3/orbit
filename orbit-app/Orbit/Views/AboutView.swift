@@ -30,7 +30,7 @@ struct AboutView: View {
             .frame(width: 64, height: 64)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Orbit").font(.title.bold())
+                Text("Hostwren").font(.title.bold())
                 Text("原生 macOS SSH 终端").foregroundStyle(.secondary)
                 Text(updateManager.currentVersion.displayText)
                     .font(.caption)

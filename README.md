@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="app-icon.png" width="128" height="128" alt="Orbit app icon" />
+<img src="app-icon.png" width="128" height="128" alt="Hostwren app icon" />
 
-# Orbit
+# Hostwren
 
 A native macOS SSH workspace for developers and operators.
 
@@ -17,15 +17,15 @@ A native macOS SSH workspace for developers and operators.
 
 ---
 
-Orbit brings the tools you use to run Linux servers into a single native macOS app: SSH terminals, SFTP, remote editing, resource monitoring, Docker, databases, batch execution, and AI-assisted operations. The UI is built with SwiftUI and AppKit; SSH, SFTP, storage, and the AI agent gateway run in a Rust core linked as a static library.
+Hostwren brings the tools you use to run Linux servers into a single native macOS app: SSH terminals, SFTP, remote editing, resource monitoring, Docker, databases, batch execution, and AI-assisted operations. The UI is built with SwiftUI and AppKit; SSH, SFTP, storage, and the AI agent gateway run in a Rust core linked as a static library.
 
-Orbit is designed for developers and operators who work with many servers every day and would rather keep one focused workspace open than juggle a terminal, a file browser, a monitor, and a chat window.
+Hostwren is designed for developers and operators who work with many servers every day and would rather keep one focused workspace open than juggle a terminal, a file browser, a monitor, and a chat window.
 
 ## Highlights
 
 - **Native, not Electron** — a SwiftUI/AppKit app with a Rust core, packaged for Apple Silicon.
 - **One workspace for daily operations** — terminal tabs and split panes, SFTP, monitoring, Docker, database queries, batch execution, snippets, jump hosts, and port forwarding.
-- **AI under your control** — a built-in assistant for any OpenAI-compatible endpoint, plus an opt-in MCP/CLI gateway that lets local agents run commands through Orbit's approval and audit layer.
+- **AI under your control** — a built-in assistant for any OpenAI-compatible endpoint, plus an opt-in MCP/CLI gateway that lets local agents run commands through Hostwren's approval and audit layer.
 - **Credentials stay local** — passwords and private keys are encrypted with AES-256-GCM and are never handed to AI agents.
 
 ## Features
@@ -60,12 +60,12 @@ Orbit is designed for developers and operators who work with many servers every 
 ### AI assistant
 
 - A built-in AI panel that works with any OpenAI-compatible endpoint, including OpenAI, DeepSeek, Qwen, Kimi, and Ollama.
-- The assistant can propose shell commands in ```` ```execute ```` blocks; Orbit asks for confirmation before running them.
+- The assistant can propose shell commands in ```` ```execute ```` blocks; Hostwren asks for confirmation before running them.
 - AI activity is recorded in the per-session audit trail shown in the AI panel.
 
 ### AI Agent gateway (MCP + CLI)
 
-Orbit can expose selected servers to local AI agents such as Claude Code, Codex, or any agent with shell access. Agents never receive SSH credentials; every command goes through Orbit's admission, approval, and audit layer.
+Hostwren can expose selected servers to local AI agents such as Claude Code, Codex, or any agent with shell access. Agents never receive SSH credentials; every command goes through Hostwren's admission, approval, and audit layer.
 
 - **MCP bridge** — `orbit-mcp` exposes tools for server listing, read/write execution, long-running jobs, persistent shells, and approval status.
 - **CLI** — `orbit-cli` provides `auth`, `servers`, `exec`, `job`, and `shell` subcommands for agents without MCP support.
@@ -74,9 +74,11 @@ Orbit can expose selected servers to local AI agents such as Claude Code, Codex,
 
 See [docs/agent-mcp-setup.md](docs/agent-mcp-setup.md) for the full setup and security model.
 
-## Screenshots
+## Workspace layout
 
-Screenshots are not committed yet. Contributions that add representative screenshots or a short demo GIF are welcome.
+![Hostwren workspace layout diagram](docs/brand/workspace.svg)
+
+Layout guide, not a screenshot: open a recent connection from Home and split its terminal into panes. The SFTP card follows the selected session and can expand into its own tab. Choose a local folder to queue a download under its remote filename; replacing an existing file requires confirmation.
 
 ## Requirements
 
@@ -89,11 +91,13 @@ Using the app:
 Development:
 
 - macOS 13.0 or later
-- Xcode 15 or later
+- Xcode 27.2 or later
 - Rust 1.77 or later with the `aarch64-apple-darwin` target
 - XcodeGen (`brew install xcodegen`)
 
 ## Install
+
+Hostwren was previously called Orbit. The repository URL, `Orbit.app` bundle path, CLI commands, Keychain identifiers and Sparkle feed stay unchanged; existing configurations need no migration.
 
 Download the latest release from [GitHub Releases](https://github.com/ibreez3/orbit/releases).
 
@@ -108,9 +112,13 @@ Release builds are ad-hoc signed but not Apple-notarized yet. On first launch, r
 xattr -cr /Applications/Orbit.app
 ```
 
+## First connection
+
+Choose **Add Server** on Home and enter the SSH host, port, username and authentication method. Verify the SHA256 host fingerprint through a trusted channel, approve it, then reconnect. Open SFTP or Monitor from the terminal session to browse files or inspect server resources.
+
 ## AI agent setup
 
-Enable **Settings → AI Agent → 允许 MCP / CLI Agent 接入 Orbit** (Allow MCP / CLI agent access), then expose the servers the agent may use. The first connection requires approval in Orbit.
+Enable **Settings → AI Agent → 允许 MCP / CLI Agent 接入 Hostwren** (Allow MCP / CLI agent access), then expose the servers the agent may use. The first connection requires approval in Hostwren.
 
 Claude Code:
 
@@ -140,9 +148,6 @@ Use `--mode write` for changes. The first write to a server opens a one-time app
 ```bash
 git clone https://github.com/ibreez3/orbit.git
 cd orbit
-
-# Build the Rust arm64 static libraries.
-./scripts/build-rust.sh
 
 # Generate the Xcode project, build Release, and verify signing/entitlements.
 make build-app
@@ -195,7 +200,7 @@ orbit/
 
 ## Security notes
 
-- SSH host keys are checked before authentication for direct connections, jump hosts, and tunneled targets. First use (including previously saved servers) requires SHA256 fingerprint approval in Orbit. Changed keys block the connection and require reviewing both fingerprints and confirming replacement twice.
+- SSH host keys are checked before authentication for direct connections, jump hosts, and tunneled targets. First use (including previously saved servers) requires SHA256 fingerprint approval in Hostwren. Changed keys block the connection and require reviewing both fingerprints and confirming replacement twice.
 - Trust is stored locally by host and port, independent of server name or username; `~/.ssh/known_hosts` is not imported automatically. After approval, manually retry the connection or operation. Commands are not replayed automatically.
 
 - Credentials are encrypted locally with AES-256-GCM using a random key stored in macOS Keychain. Legacy credentials migrate transactionally; unavailable keys or damaged ciphertext stop migration without replacing the original values.
@@ -226,4 +231,4 @@ See [AGENTS.md](AGENTS.md) for architecture notes, FFI conventions, build comman
 
 ## License
 
-Orbit is released under the [MIT License](LICENSE).
+Hostwren is released under the [MIT License](LICENSE).

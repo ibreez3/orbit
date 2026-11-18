@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="app-icon.png" width="128" height="128" alt="Orbit app icon" />
+<img src="app-icon.png" width="128" height="128" alt="Hostwren app icon" />
 
-# Orbit
+# Hostwren
 
 原生 macOS SSH 工作台，面向开发者与运维人员。
 
@@ -17,15 +17,15 @@
 
 ---
 
-Orbit 把日常管理 Linux 服务器所需的工具集中到一个原生 macOS 应用里：SSH 终端、SFTP、远程编辑、资源监控、Docker、数据库、批量执行和 AI 辅助运维。界面基于 SwiftUI 与 AppKit，SSH、SFTP、存储和 AI Agent 网关由 Rust 核心实现，并以静态库方式链接进 App。
+Hostwren 把日常管理 Linux 服务器所需的工具集中到一个原生 macOS 应用里：SSH 终端、SFTP、远程编辑、资源监控、Docker、数据库、批量执行和 AI 辅助运维。界面基于 SwiftUI 与 AppKit，SSH、SFTP、存储和 AI Agent 网关由 Rust 核心实现，并以静态库方式链接进 App。
 
-Orbit 面向每天需要操作多台服务器的开发者与运维人员：与其在终端、文件浏览器、监控面板和聊天窗口之间来回切换，不如把工作集中在一个专注的桌面应用里。
+Hostwren 面向每天需要操作多台服务器的开发者与运维人员：与其在终端、文件浏览器、监控面板和聊天窗口之间来回切换，不如把工作集中在一个专注的桌面应用里。
 
 ## 核心亮点
 
 - **原生实现，不是 Electron** —— SwiftUI/AppKit 界面 + Rust 核心，面向 Apple Silicon 打包。
 - **一个工作台覆盖日常运维** —— 终端标签页与分屏、SFTP、资源监控、Docker、数据库查询、批量执行、命令片段、跳板机和端口转发。
-- **AI 能力可控** —— 内置兼容 OpenAI 接口的 AI 助手；可选开启 MCP/CLI 网关，让本机 AI Agent 经过 Orbit 的授权与审计层执行命令。
+- **AI 能力可控** —— 内置兼容 OpenAI 接口的 AI 助手；可选开启 MCP/CLI 网关，让本机 AI Agent 经过 Hostwren 的授权与审计层执行命令。
 - **凭据留在本地** —— 密码和私钥使用 AES-256-GCM 加密，不会交给 AI Agent。
 
 ## 功能特性
@@ -60,12 +60,12 @@ Orbit 面向每天需要操作多台服务器的开发者与运维人员：与�
 ### AI 助手
 
 - 内置 AI 面板，可接入任意兼容 OpenAI 的接口，包括 OpenAI、DeepSeek、Qwen、Kimi 和 Ollama。
-- AI 可以在 ```` ```execute ```` 代码块中给出命令建议；Orbit 会在执行前请求确认。
+- AI 可以在 ```` ```execute ```` 代码块中给出命令建议；Hostwren 会在执行前请求确认。
 - AI 活动会写入会话审计记录，并在 AI 面板中显示。
 
 ### AI Agent 网关（MCP + CLI）
 
-Orbit 可以把指定服务器开放给本机 AI Agent，例如 Claude Code、Codex，或任何具备 shell 能力的 Agent。Agent 不会拿到 SSH 凭据，所有命令都要经过 Orbit 的接入、授权和审计层。
+Hostwren 可以把指定服务器开放给本机 AI Agent，例如 Claude Code、Codex，或任何具备 shell 能力的 Agent。Agent 不会拿到 SSH 凭据，所有命令都要经过 Hostwren 的接入、授权和审计层。
 
 - **MCP bridge** —— `orbit-mcp` 提供服务器列表、读写执行、长任务、持久 shell 和授权状态等工具。
 - **CLI** —— `orbit-cli` 提供 `auth`、`servers`、`exec`、`job` 和 `shell` 子命令，供不支持 MCP 的 Agent 使用。
@@ -74,9 +74,11 @@ Orbit 可以把指定服务器开放给本机 AI Agent，例如 Claude Code、Co
 
 完整接入方式与安全模型见 [docs/agent-mcp-setup.md](docs/agent-mcp-setup.md)。
 
-## 截图
+## 工作区布局
 
-仓库暂未提交截图。欢迎贡献能展示主要工作流的截图或简短演示 GIF。
+![Hostwren 工作区布局示意图](docs/brand/workspace.svg)
+
+布局示意（非截图）：从首页的最近连接进入服务器，在标签页中分屏操作。SFTP 工具卡绑定当前会话，可以展开成独立标签。下载时选择本地目录，按远程原文件名加入队列；同名文件需确认替换。
 
 ## 环境要求
 
@@ -89,11 +91,13 @@ Orbit 可以把指定服务器开放给本机 AI Agent，例如 Claude Code、Co
 开发环境：
 
 - macOS 13.0 或更高版本
-- Xcode 15 或更高版本
+- Xcode 27.2 或更高版本
 - Rust 1.77 或更高版本，并安装 `aarch64-apple-darwin` target
 - XcodeGen（`brew install xcodegen`）
 
 ## 安装
+
+Hostwren 原名 Orbit。仓库地址、`Orbit.app`、CLI 命令、Keychain 标识和 Sparkle 更新地址保持不变；现有配置无需迁移。
 
 前往 [GitHub Releases](https://github.com/ibreez3/orbit/releases) 下载最新版本。
 
@@ -108,9 +112,13 @@ Orbit 可以把指定服务器开放给本机 AI Agent，例如 Claude Code、Co
 xattr -cr /Applications/Orbit.app
 ```
 
+## 第一次连接
+
+在首页选择「添加服务器」，填写主机、端口、用户名和认证方式。首次连接时，从独立可信渠道核对 SHA256 指纹，确认信任后重新连接。在终端会话中可打开 SFTP 浏览文件，或打开监控查看服务器资源。
+
 ## AI Agent 接入
 
-先打开 **设置 → AI Agent → 允许 MCP / CLI Agent 接入 Orbit**，再按服务器逐台开放。首次连接需要在 Orbit 中批准。
+先打开 **设置 → AI Agent → 允许 MCP / CLI Agent 接入 Hostwren**，再按服务器逐台开放。首次连接需要在 Hostwren 中批准。
 
 Claude Code：
 
@@ -140,9 +148,6 @@ command = "/Applications/Orbit.app/Contents/MacOS/orbit-mcp"
 ```bash
 git clone https://github.com/ibreez3/orbit.git
 cd orbit
-
-# 构建 Rust arm64 静态库
-./scripts/build-rust.sh
 
 # 生成 Xcode 工程、构建 Release，并验证签名和关键权限
 make build-app
@@ -195,7 +200,7 @@ orbit/
 
 ## 安全说明
 
-- SSH 在认证前校验主机公钥，直连、跳板机和经跳板机连接的目标分别校验。首次连接（包括升级前保存的服务器）需在 Orbit 中核对并信任 SHA256 指纹；指纹变化默认阻止，核对新旧指纹并二次确认后才可替换。
+- SSH 在认证前校验主机公钥，直连、跳板机和经跳板机连接的目标分别校验。首次连接（包括升级前保存的服务器）需在 Hostwren 中核对并信任 SHA256 指纹；指纹变化默认阻止，核对新旧指纹并二次确认后才可替换。
 - 信任记录按主机地址和端口保存在本机数据库中，不依赖服务器名称或账号，也不自动导入 `~/.ssh/known_hosts`。确认后需手动重试连接或操作，不会自动重放命令。
 
 - 凭据使用 AES-256-GCM 本地加密，随机密钥保存在 macOS Keychain。旧凭据通过事务迁移；密钥不可用或密文损坏时保留原值并停止迁移。
@@ -226,4 +231,4 @@ orbit/
 
 ## 许可证
 
-Orbit 使用 [MIT License](LICENSE) 开源。
+Hostwren 使用 [MIT License](LICENSE) 开源。

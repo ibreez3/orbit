@@ -45,10 +45,10 @@ struct AgentPane: View {
 
                 SettingsGroup("AI Agent 接入") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Toggle("允许 MCP / CLI Agent 接入 Orbit", isOn: $gatewayEnabled)
+                        Toggle("允许 MCP / CLI Agent 接入 Hostwren", isOn: $gatewayEnabled)
                             .toggleStyle(.switch)
                             .accessibilityIdentifier("agentGatewayEnabledToggle")
-                        Text("接入需要在本机由用户批准；凭据只保留在 Orbit 中。")
+                        Text("接入需要在本机由用户批准；凭据只保留在 Hostwren 中。")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                         if let errorMessage {

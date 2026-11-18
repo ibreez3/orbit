@@ -51,8 +51,8 @@ final class AgentApprovalController: NSObject, AgentApprovalPresenting {
 
         switch pending.kind {
         case .admission(let request):
-            title = "AI Agent 请求接入 Orbit"
-            message = "允许 \(request.agentName) 使用 Orbit 的服务器执行能力？"
+            title = "AI Agent 请求接入 Hostwren"
+            message = "允许 \(request.agentName) 使用 Hostwren 的服务器执行能力？"
             details = """
             Agent: \(request.agentName)
             Client: \(request.clientVersion.isEmpty ? "unknown" : request.clientVersion)

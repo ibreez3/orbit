@@ -17,7 +17,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
         let alert = NSAlert()
-        alert.messageText = "有 AI 会话正在使用 Orbit"
+        alert.messageText = "有 AI 会话正在使用 Hostwren"
         alert.informativeText = "退出会终止当前所有 AI 会话、命令和 shell。"
         alert.addButton(withTitle: "退出")
         alert.addButton(withTitle: "取消")
