@@ -4,7 +4,7 @@ import AppKit
 
 final class TerminalOutputPump {
     private static let defaultMaxBufferedBytes = 2 * 1024 * 1024
-    private static let defaultChunkBytes = 64 * 1024
+    private static let defaultChunkBytes = 8 * 1024
     private static let defaultMaxChunksPerFrame = 4
 
     private let maxBufferedBytes: Int
@@ -75,28 +75,20 @@ final class TerminalOutputPump {
     }
 
     private func drainOnMain() {
-        var chunks: [(Data, Int)] = []
-
-        condition.lock()
-        guard !invalidated else {
-            scheduled = false
+        let deadline = DispatchTime.now() + .milliseconds(4)
+        for _ in 0..<maxChunksPerFrame {
+            condition.lock()
+            guard !invalidated, pendingBytes > 0 else {
+                scheduled = false
+                condition.unlock()
+                return
+            }
+            let chunk = popPendingBytes(min(pendingBytes, chunkBytes))
+            let queuedBytes = pendingBytes
             condition.broadcast()
             condition.unlock()
-            return
-        }
-
-        var processed = 0
-        while processed < maxChunksPerFrame && pendingBytes > 0 {
-            let take = min(pendingBytes, chunkBytes)
-            let chunk = popPendingBytes(take)
-            chunks.append((chunk, pendingBytes))
-            processed += 1
-        }
-        condition.broadcast()
-        condition.unlock()
-
-        for (chunk, queuedBytes) in chunks where !chunk.isEmpty {
             handleChunk(chunk, queuedBytes)
+            if DispatchTime.now() >= deadline { break }
         }
 
         condition.lock()
