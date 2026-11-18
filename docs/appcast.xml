@@ -7,13 +7,15 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit 0.0.15</title>
-      <description sparkle:format="markdown"><![CDATA[## Orbit v0.0.15
+      <title>Orbit 0.0.16</title>
+      <description sparkle:format="markdown"><![CDATA[## Orbit v0.0.16
 
 ### 修复
 
-- 终端输出洪峰（如 `cat` 大文件、日志狂刷、全屏 TUI 高频刷新）期间，主线程可能被大量输出分片长时间占用，导致界面卡顿、输入响应变慢。本次将输出泵改为按时间预算调度：每轮主队列处理最多约 4ms，单块从 64KB 降到 8KB，每帧最多 4 块，剩余数据留到下一帧继续处理，让 UI 在输出突发时保持可响应。
-- 分片粒度调整后仍严格保持字节顺序与完整性，输出内容不会丢失或乱序；新增回归测试，验证输出突发期间主队列能被正常服务。
+- 重做 SFTP 下载的保存方式：选中远程文件后选择本地目录，点击「下载到此目录」，文件会按原文件名加入传输队列，不再需要预先指定另存文件名。
+- 取消目录选择不会创建任何传输任务。
+- 目标目录已有同名文件时不会自动覆盖；任务会停在「等待覆盖确认」，需在传输队列中点击「替换…」并确认后才会覆盖，且替换会在下载完成后执行。
+- 新增回归测试，覆盖按原文件名下载到所选目录的行为。
 
 ### 安装
 
@@ -22,13 +24,13 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
 - 从 v0.0.8 及更早版本升级：由于 Sparkle 公钥轮换，需要手动安装一次本版本，之后可继续自动更新。
 - DMG 由 Release DMG workflow 构建、验证并附加到此 Release。
 
-**Full Changelog**: https://github.com/ibreez3/orbit/compare/v0.0.14...v0.0.15]]></description>
-      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.15</sparkle:fullReleaseNotesLink>
-      <pubDate>Wed, 18 Nov 2026 08:39:55 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.15/Orbit-v0.0.15-AppleSilicon.dmg" sparkle:version="16" sparkle:shortVersionString="0.0.15" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="gaE4UXIG5bWClOmGrqiADDyOFpmhD2VUK/rbQEAfxmmFPux4coIWhDY8WMqT3eF2n5HxAf3UT7Nmd3/0TtkfDw==" length="15874287" type="application/x-apple-diskimage"></enclosure>
+**Full Changelog**: https://github.com/ibreez3/orbit/compare/v0.0.15...v0.0.16]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.16</sparkle:fullReleaseNotesLink>
+      <pubDate>Wed, 18 Nov 2026 09:28:05 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.16/Orbit-v0.0.16-AppleSilicon.dmg" sparkle:version="17" sparkle:shortVersionString="0.0.16" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="xuTCf/VrlUK+iOf462TG7S/7il8kzJcWksbR18v8z9LTSRQqyRzmOALeXBLqtFivKHyTlUvhzICzOyGMP6OdCw==" length="15874427" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: BA5wMZk+ds4vBFJCA+54ACVbwGikxf+rQDIttMtaPtVWWHRmWSICkItbbtNZCVjf6ftoSOZFBzj9C4oyLu7FDQ==
-length: 2408
+edSignature: D8BT1OorIhARXCos9Mt1ASVls0AzJ4URNIvG6iSsj1LsvgaF7wOXq3Pt5QTRYS16My79TOk4zn9nqnZspohEBw==
+length: 2360
 -->
