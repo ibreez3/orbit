@@ -2,6 +2,30 @@ import XCTest
 @testable import Orbit
 
 final class TerminalOutputPumpTests: XCTestCase {
+    @MainActor
+    func testLogBurstYieldsMainQueueBeforeFinishing() {
+        let terminal = OrbitTerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        let line = "\u{1b}[32mINFO\u{1b}[0m " + String(repeating: "a", count: 140) + "\r\n"
+        let expected = Data(String(repeating: line, count: 1352).utf8)
+        let done = expectation(description: "burst drained")
+        let yielded = expectation(description: "main queue serviced during burst")
+        var received = Data()
+        let pump = TerminalOutputPump { chunk, _ in
+            if received.isEmpty {
+                DispatchQueue.main.async {
+                    XCTAssertLessThan(received.count, expected.count)
+                    yielded.fulfill()
+                }
+            }
+            TerminalOutputPump.feed(chunk, to: terminal)
+            received.append(chunk)
+            if received.count == expected.count { done.fulfill() }
+        }
+        pump.enqueue(expected)
+        wait(for: [yielded, done], timeout: 10)
+        XCTAssertEqual(received, expected)
+    }
+
     func testFragmentedOutputPreservesEveryByteAndOrder() {
         let done = expectation(description: "all output drained")
         let expected = Data((0..<10000).map { UInt8($0 % 256) })
