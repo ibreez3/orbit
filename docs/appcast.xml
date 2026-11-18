@@ -7,30 +7,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit 0.0.16</title>
-      <description sparkle:format="markdown"><![CDATA[## Orbit v0.0.16
+      <title>Orbit 0.0.17</title>
+      <description sparkle:format="markdown"><![CDATA[Orbit 现更名为 Hostwren。本版更新应用图标、菜单和授权提示，并更新中英文 README、工作区布局说明与首次连接指南。应用包路径、CLI、Keychain 凭据和 Sparkle 更新源保持兼容，无需迁移已有配置。
 
-### 修复
-
-- 重做 SFTP 下载的保存方式：选中远程文件后选择本地目录，点击「下载到此目录」，文件会按原文件名加入传输队列，不再需要预先指定另存文件名。
-- 取消目录选择不会创建任何传输任务。
-- 目标目录已有同名文件时不会自动覆盖；任务会停在「等待覆盖确认」，需在传输队列中点击「替换…」并确认后才会覆盖，且替换会在下载完成后执行。
-- 新增回归测试，覆盖按原文件名下载到所选目录的行为。
-
-### 安装
-
-- Apple Silicon（arm64），macOS 13.0+。
-- 本版本为 ad-hoc 签名，暂未 Apple 公证；首次打开如被 Gatekeeper 拦截，请右键 → 打开，或执行 `xattr -cr /Applications/Orbit.app`。
-- 从 v0.0.8 及更早版本升级：由于 Sparkle 公钥轮换，需要手动安装一次本版本，之后可继续自动更新。
-- DMG 由 Release DMG workflow 构建、验证并附加到此 Release。
-
-**Full Changelog**: https://github.com/ibreez3/orbit/compare/v0.0.15...v0.0.16]]></description>
-      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.16</sparkle:fullReleaseNotesLink>
-      <pubDate>Wed, 18 Nov 2026 09:28:05 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.16/Orbit-v0.0.16-AppleSilicon.dmg" sparkle:version="17" sparkle:shortVersionString="0.0.16" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="xuTCf/VrlUK+iOf462TG7S/7il8kzJcWksbR18v8z9LTSRQqyRzmOALeXBLqtFivKHyTlUvhzICzOyGMP6OdCw==" length="15874427" type="application/x-apple-diskimage"></enclosure>
+Apple Silicon · macOS 13+ · build 18。v0.0.8 及更早版本因更新签名公钥已轮换，请手动下载安装一次。]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.17</sparkle:fullReleaseNotesLink>
+      <pubDate>Wed, 18 Nov 2026 10:20:27 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.17/Orbit-v0.0.17-AppleSilicon.dmg" sparkle:version="18" sparkle:shortVersionString="0.0.17" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="sRbuRJrywCbiWfvL/AjzvRvW/O2t9dxJBG3qtDiGyF6S2j+p1KYKD2iOZ9r26vH15gIflw9g5U7/nWr63FVPAg==" length="15874518" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: D8BT1OorIhARXCos9Mt1ASVls0AzJ4URNIvG6iSsj1LsvgaF7wOXq3Pt5QTRYS16My79TOk4zn9nqnZspohEBw==
-length: 2360
+edSignature: JhW92Q8IO6h3eqq8clZeI3b4uW8qtc/YFkdSU5yIe7g2C7IF11FKofULNudLDcapgtAJEw2Zm8iXEwyJWiC1BQ==
+length: 1667
 -->
