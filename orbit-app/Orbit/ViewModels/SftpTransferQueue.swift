@@ -71,6 +71,11 @@ final class SftpTransferQueue: ObservableObject {
         self.client = client
     }
 
+    func enqueueDownload(remote: String, to directory: URL) {
+        let destination = directory.appendingPathComponent((remote as NSString).lastPathComponent, isDirectory: false)
+        enqueue(local: destination.path, remote: remote, upload: false)
+    }
+
     func enqueue(local: String, remote: String, upload: Bool) {
         items.append(Item(localPath: local, remotePath: remote, upload: upload))
         advance()

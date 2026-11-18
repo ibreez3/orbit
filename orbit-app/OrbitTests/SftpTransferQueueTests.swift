@@ -39,6 +39,19 @@ final class SftpTransferQueueTests: XCTestCase {
         XCTAssertEqual(queue.revision, 1)
     }
 
+    func testDownloadUsesFilenameInsideChosenDirectory() async {
+        let client = TransferClient()
+        client.run = { request, _ in
+            XCTAssertEqual(request.local_path, "/tmp/下载目录/日志 1.log")
+            XCTAssertEqual(request.remote_path, "/var/log/日志 1.log")
+            XCTAssertFalse(request.upload)
+            XCTAssertFalse(request.overwrite)
+        }
+        let queue = SftpTransferQueue(serverId: "server", client: client)
+        queue.enqueueDownload(remote: "/var/log/日志 1.log", to: URL(fileURLWithPath: "/tmp/下载目录", isDirectory: true))
+        await eventually { queue.items.first?.status == .completed }
+    }
+
     func testConflictRequiresExplicitOverwriteAndRetriesGetNewIDs() async {
         let client = TransferClient()
         client.run = { request, _ in

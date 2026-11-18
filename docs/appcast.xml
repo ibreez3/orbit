@@ -7,33 +7,28 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit 0.0.14</title>
-      <description sparkle:format="markdown"><![CDATA[## Orbit v0.0.14
+      <title>Orbit 0.0.15</title>
+      <description sparkle:format="markdown"><![CDATA[## Orbit v0.0.15
 
-### 安全与凭据
-- SSH 直连、跳板机及隧道目标均在认证前验证主机指纹；首次连接需确认，指纹变化时展示新旧值并二次确认。
-- 使用 macOS Keychain 保存随机加密密钥，旧明文和 ORB1 凭据自动迁移到 ORB2；跨表迁移失败回滚，密钥缺失或密文损坏时保留原数据。
-- 保存的 AI API Key 同样加密。
+### 修复
 
-### SFTP
-- 重做完整页面、抽屉和快捷浮层，共用文件浏览与传输队列，支持筛选、路径输入、多选上传和拖拽上传。
-- 支持取消、失败重试、明确的覆盖确认；上传与下载先写同目录临时文件，完成后替换目标，避免传输中断截断已有文件。
-- 关闭浮层保留任务；关闭标签或删除服务器请求取消。
+- 终端输出洪峰（如 `cat` 大文件、日志狂刷、全屏 TUI 高频刷新）期间，主线程可能被大量输出分片长时间占用，导致界面卡顿、输入响应变慢。本次将输出泵改为按时间预算调度：每轮主队列处理最多约 4ms，单块从 64KB 降到 8KB，每帧最多 4 块，剩余数据留到下一帧继续处理，让 UI 在输出突发时保持可响应。
+- 分片粒度调整后仍严格保持字节顺序与完整性，输出内容不会丢失或乱序；新增回归测试，验证输出突发期间主队列能被正常服务。
 
-### 升级说明
-- 已保存服务器首次使用新指纹校验时，需要在 Orbit 中确认 SHA256 指纹，再手动重试。
-- 首次升级可能需要允许 Orbit 访问登录钥匙串。请在升级前备份数据；迁移后的数据库需要匹配的 Keychain 密钥，旧版 Orbit 不支持 ORB2。
-- 远端覆盖要求支持 `posix-rename@openssh.com`；不支持时安全失败，不先删除目标。重试从头传输，不是断点续传；断网可能留下临时文件，提交阶段断线后应刷新核对目标。
-- 本次安全替换适用于上传/下载；现有远程文本编辑器保存逻辑不在此次传输队列改造范围内。
-- v0.0.8 及更早版本因 Sparkle 公钥轮换仍需手动下载安装一次；后续可正常自动更新。
+### 安装
 
-支持 Apple Silicon，macOS 13.0+。DMG 由 Release DMG 工作流构建并校验；应用尚未完成 Apple 公证。]]></description>
-      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.14</sparkle:fullReleaseNotesLink>
-      <pubDate>Thu, 12 Nov 2026 06:33:44 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.14/Orbit-v0.0.14-AppleSilicon.dmg" sparkle:version="15" sparkle:shortVersionString="0.0.14" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="JTgwHvZk9/P/y4Ha2Zn1qr85kkQtOzqU4puSJPsUIYguuBNgJH1QZPq1MfBOCEN4bCrQVuf4UPW1Fk9tS2ZNAg==" length="15874359" type="application/x-apple-diskimage"></enclosure>
+- Apple Silicon（arm64），macOS 13.0+。
+- 本版本为 ad-hoc 签名，暂未 Apple 公证；首次打开如被 Gatekeeper 拦截，请右键 → 打开，或执行 `xattr -cr /Applications/Orbit.app`。
+- 从 v0.0.8 及更早版本升级：由于 Sparkle 公钥轮换，需要手动安装一次本版本，之后可继续自动更新。
+- DMG 由 Release DMG workflow 构建、验证并附加到此 Release。
+
+**Full Changelog**: https://github.com/ibreez3/orbit/compare/v0.0.14...v0.0.15]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.15</sparkle:fullReleaseNotesLink>
+      <pubDate>Wed, 18 Nov 2026 08:39:55 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.15/Orbit-v0.0.15-AppleSilicon.dmg" sparkle:version="16" sparkle:shortVersionString="0.0.15" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="gaE4UXIG5bWClOmGrqiADDyOFpmhD2VUK/rbQEAfxmmFPux4coIWhDY8WMqT3eF2n5HxAf3UT7Nmd3/0TtkfDw==" length="15874287" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: 0fv865kY7Y0iKD1BkqKx6LRjvr0m8KkpP/tzNeUrVSVup+BXs4mA5Yr6gDzYKMvOUpOL2UnYfY6ETDzaD9zTCA==
-length: 2970
+edSignature: BA5wMZk+ds4vBFJCA+54ACVbwGikxf+rQDIttMtaPtVWWHRmWSICkItbbtNZCVjf6ftoSOZFBzj9C4oyLu7FDQ==
+length: 2408
 -->

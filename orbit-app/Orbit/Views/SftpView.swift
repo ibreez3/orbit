@@ -446,12 +446,15 @@ struct SftpView: View {
     }
 
     private func downloadFile(_ entry: FileEntry) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = entry.name
-        guard let window = NSApp.keyWindow else { return }
-        panel.beginSheetModal(for: window) { response in
-            guard response == .OK, let url = panel.url else { return }
-            queue.enqueue(local: url.path, remote: entry.path, upload: false)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = "下载到此目录"
+        panel.message = "选择保存「\(entry.name)」的目录"
+        panel.begin { response in
+            guard response == .OK, let directory = panel.url else { return }
+            queue.enqueueDownload(remote: entry.path, to: directory)
         }
     }
 
