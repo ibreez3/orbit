@@ -6,7 +6,7 @@ $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 $vs = if (Test-Path $vswhere) { & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath } elseif (Test-Path 'C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat') { 'C:\BuildTools' } else { $env:VSINSTALLDIR }
 if (!$vs) { throw 'Install Visual Studio C++ Build Tools and Windows SDK first.' }
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
-& cmd.exe /s /c "`"`"$vcvars`" >nul && set`"" | ForEach-Object {
+& cmd.exe /d /c "call `"$vcvars`" >nul && set" | ForEach-Object {
     if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
 }
 if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize the MSVC environment.' }
