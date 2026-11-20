@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct DatabaseImportMappingView: View {
     let appState: AppState
     let initialTargetConnectionId: String?
+    var initialDatabaseName: String = ""
+    @State private var databaseName = ""
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var inventoryState: InventoryState
@@ -22,10 +24,15 @@ struct DatabaseImportMappingView: View {
             Divider()
             content
             Divider()
+            if let target = inventoryState.databaseConnections.first(where: { $0.id == targetConnectionId }), target.engine == "mysql" {
+                DatabaseCatalogPicker(appState: appState, connection: target, selection: $databaseName).padding(12)
+            }
             footer
         }
         .frame(width: 820, height: 640)
-        .onAppear(perform: applyInitialSelection)
+        .onAppear { applyInitialSelection(); databaseName = initialDatabaseName }
+        .onChange(of: databaseName) { _ in clearPreparedPlan() }
+        .onChange(of: targetConnectionId) { _ in databaseName = targetConnectionId == initialTargetConnectionId ? initialDatabaseName : "" }
     }
 
     private var header: some View {
@@ -376,7 +383,8 @@ struct DatabaseImportMappingView: View {
             plan = try await appState.prepareDatabaseImport(
                 backupPath: backupPath,
                 targetConnectionId: targetConnectionId,
-                mode: mode
+                mode: mode,
+                databaseName: databaseName
             )
         } catch {
             plan = nil
@@ -394,7 +402,7 @@ struct DatabaseImportMappingView: View {
         let importedTables = importedTableCount(in: importPlan)
         do {
             let skipped = skippedFieldCount(in: importPlan)
-            let result = try await appState.runDatabaseImport(request: DatabaseImportRequest(plan: importPlan))
+            let result = try await appState.runDatabaseImport(request: DatabaseImportRequest(plan: importPlan), databaseName: databaseName)
             resultSummary = ImportRunSummary(
                 ok: result.ok,
                 tableCount: importedTables,

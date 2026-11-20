@@ -2,6 +2,11 @@ import Foundation
 
 /// Applies the "自动添加 LIMIT" preference to ad-hoc SQL.
 enum DatabaseQueryPolicy {
+    static func quoteIdentifier(_ value: String, engine: String) -> String {
+        let quote = engine == "mysql" ? "`" : "\""
+        return quote + value.replacingOccurrences(of: quote, with: quote + quote) + quote
+    }
+
     static func applyingAutoLimit(
         to sql: String,
         limit: Int,

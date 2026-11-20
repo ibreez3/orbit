@@ -144,7 +144,6 @@
 		D7D532615E67DB652461D152 /* ToolState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95478DCB1F885FA5798B86BF /* ToolState.swift */; };
 		D829F5266DC99154B0EC5E9A /* SpotlightView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452C79E5111500BF24C41C53 /* SpotlightView.swift */; };
 		DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */; };
-		DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1530B85453C445BFC0E5E860 /* DockerView.swift */; };
 		DAE7F6E609EA79B75390ABD6 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64825B472441C790427EFF55 /* AppState.swift */; };
 		DB1816F3844C0279FB06D071 /* AboutWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C0F838B955D5FCB5464CA74 /* AboutWindowController.swift */; };
 		E0CFB77D44CDC491C5FCBBFD /* TerminalTUIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE497619D4AC19A57BD230E /* TerminalTUIUITests.swift */; };
@@ -229,7 +228,6 @@
 		0E4D5B5478AA913E96958A1B /* CredentialGroupDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialGroupDialog.swift; sourceTree = "<group>"; };
 		0E97EC52FF7DA064F912A6E2 /* AgentServerDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentServerDirectoryTests.swift; sourceTree = "<group>"; };
 		1215EB4D1327CCE06E1D9C04 /* ThemeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeState.swift; sourceTree = "<group>"; };
-		1530B85453C445BFC0E5E860 /* DockerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockerView.swift; sourceTree = "<group>"; };
 		15318C78359712DC60075326 /* AgentSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSocketClient.swift; sourceTree = "<group>"; };
 		1645C6C0C81FDAFDC4902413 /* AgentPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPaths.swift; sourceTree = "<group>"; };
 		169765ADEA67B3C5FC437745 /* LocalTerminalSplitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTerminalSplitTests.swift; sourceTree = "<group>"; };
@@ -590,7 +588,6 @@
 				D411BF8F3AE0E37D237CE570 /* DatabaseConnectionDialog.swift */,
 				829C6E0E378F6105FD7D4738 /* DatabaseImportMappingView.swift */,
 				1E3983C4735026A30426864D /* DatabaseView.swift */,
-				1530B85453C445BFC0E5E860 /* DockerView.swift */,
 				3A077C2A4F488B4506E01E04 /* FloatingToolCard.swift */,
 				495DCA72659439056D676B45 /* HomeView.swift */,
 				20E9630F023416DA2028BB98 /* MainView.swift */,
@@ -941,7 +938,6 @@
 				A397E134F5726742E4EA6B6E /* DatabaseImportMappingView.swift in Sources */,
 				75EB9A0BF0315533B0C92242 /* DatabaseQueryPolicy.swift in Sources */,
 				CC2B5B3A1ECCC9504D34B84F /* DatabaseView.swift in Sources */,
-				DA915F001718EA75BD8F77AD /* DockerView.swift in Sources */,
 				DA42164DFDE1060B6E3D0158 /* FloatingToolCard.swift in Sources */,
 				0B108A04325E375330215A8F /* HomeView.swift in Sources */,
 				4E8BDFC0CB0B3CFDD5DA84AB /* InventoryState.swift in Sources */,

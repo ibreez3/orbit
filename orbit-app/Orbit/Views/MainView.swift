@@ -178,6 +178,9 @@ struct MainView: View {
             headerFlexibleSpace
 
             Menu {
+                Button("快速连接") { appState.openWorkspaceEntry(.quickConnect) }
+                Button("本地终端") { appState.addLocalTerminalTab() }
+                Divider()
                 Button("添加服务器") { appState.openDialog() }
                 Button("新建凭据组") { appState.openCgDialog() }
             } label: {
@@ -375,8 +378,6 @@ struct MainView: View {
         case .database:
             DatabaseView(tab: tab, appState: appState)
                 .id(tab.id)
-        case .docker:
-            DockerView(appState: appState, tab: tab)
                 .id(tab.id)
         }
     }

@@ -105,7 +105,7 @@ struct DatabaseConnectionDialog: View {
                                 .frame(width: 110)
                         }
                         fieldRow("数据库") {
-                            TextField("app", text: $databaseName)
+                            TextField(engine == .mysql ? "可选；留空可切换数据库" : "app", text: $databaseName)
                                 .textFieldStyle(.roundedBorder)
                         }
                         fieldRow("用户") {
@@ -227,7 +227,7 @@ struct DatabaseConnectionDialog: View {
         }
         guard UInt16(portText) != nil else { return false }
         if useSSHTunnel && trimmed(sshServerId).isEmpty { return false }
-        return !trimmed(host).isEmpty && !trimmed(databaseName).isEmpty
+        return !trimmed(host).isEmpty && (engine == .mysql || !trimmed(databaseName).isEmpty)
     }
 
     private func loadInitialValues() {

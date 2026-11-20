@@ -104,7 +104,7 @@ impl Database {
         #[cfg(test)]
         let key = { let _ = required; [42u8; 32] };
         #[cfg(not(test))]
-        let key = crypto::load_key(&crypto::MacKeychain { account: "master-key".to_string() }, required)?;
+        let key = crypto::platform_key(path, required)?;
         let db = Self {
             cipher: crypto::CredentialCipher::new(key),
             conn: Mutex::new(conn),

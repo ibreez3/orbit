@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 #[cfg(test)]
 use std::os::raw::c_char;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
@@ -32,7 +32,7 @@ struct HostKeyRequest {
 
 #[derive(Default)]
 pub struct HostKeyVerifier {
-    callback: Mutex<Option<OrbitHostKeyCallback>>,
+    callback: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
     pending: Mutex<HashMap<String, HostKeyRequest>>,
 }
 
@@ -42,10 +42,15 @@ fn fingerprint(key: &[u8]) -> String {
 
 impl HostKeyVerifier {
     pub fn set_callback(&self, callback: Option<OrbitHostKeyCallback>) -> Result<()> {
-        *self
-            .callback
-            .lock()
-            .map_err(|_| anyhow!("主机指纹回调锁定失败"))? = callback;
+        self.set_handler(callback.map(|callback| Arc::new(move |json: String| {
+            if let Ok(json) = CString::new(json) {
+                callback(json.as_ptr());
+            }
+        }) as Arc<dyn Fn(String) + Send + Sync>))
+    }
+
+    pub fn set_handler(&self, callback: Option<Arc<dyn Fn(String) + Send + Sync>>) -> Result<()> {
+        *self.callback.lock().map_err(|_| anyhow!("主机指纹回调锁定失败"))? = callback;
         Ok(())
     }
 
@@ -101,10 +106,10 @@ impl HostKeyVerifier {
         } else {
             format!("SSH 主机指纹尚未信任，连接已阻止：{}:{}（{}）。请在 Orbit 中核对并确认指纹，然后重试连接。", host, port, current_fingerprint)
         };
-        let callback = *self
+        let callback = self
             .callback
             .lock()
-            .map_err(|_| anyhow!("主机指纹回调锁定失败"))?;
+            .map_err(|_| anyhow!("主机指纹回调锁定失败"))?.clone();
         if let Some(callback) = callback {
             let request = {
                 let mut pending = self
@@ -137,8 +142,7 @@ impl HostKeyVerifier {
                     request
                 }
             };
-            let json = CString::new(serde_json::to_string(&request)?)?;
-            callback(json.as_ptr());
+            callback(serde_json::to_string(&request)?);
         }
         bail!(message)
     }

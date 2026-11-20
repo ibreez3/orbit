@@ -170,6 +170,18 @@ fn atomic_remote_replace(session: &ssh2::Session, source: &str, destination: &st
     Ok(())
 }
 
+fn remote_temporary_path(path: &str, id: &str) -> Result<std::path::PathBuf> {
+    if path.is_empty() || path.ends_with('/') {
+        bail!("远程文件路径无效");
+    }
+    let directory = path.rsplit_once('/').map(|(parent, _)| parent);
+    let name = format!(".orbit-transfer-{}.part", id);
+    Ok(match directory {
+        Some(parent) => std::path::PathBuf::from(format!("{}/{}", parent, name)),
+        None => std::path::PathBuf::from(name),
+    })
+}
+
 pub fn transfer(
     db: &Database,
     server: &Server,
@@ -204,8 +216,7 @@ pub fn transfer(
         if !metadata.is_file() {
             bail!("暂不支持文件夹传输");
         }
-        let parent = remote.parent().ok_or_else(|| anyhow!("远程路径无效"))?;
-        let temporary = parent.join(format!(".orbit-transfer-{}.part", uuid::Uuid::new_v4()));
+        let temporary = remote_temporary_path(&request.remote_path, &uuid::Uuid::new_v4().to_string())?;
         let result = (|| -> Result<()> {
             let mut destination = sftp.open_mode(
                 &temporary,
@@ -279,12 +290,14 @@ pub fn transfer(
         let parent = local.parent().ok_or_else(|| anyhow!("本地路径无效"))?;
         let temporary = parent.join(format!(".orbit-transfer-{}.part", uuid::Uuid::new_v4()));
         let result = (|| -> Result<()> {
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut destination = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&temporary)?;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut destination = options.open(&temporary)?;
             copy_stream(&mut source, &mut destination, total, control, progress)?;
             if let Some(metadata) = existing {
                 destination.set_permissions(metadata.permissions())?;
@@ -315,6 +328,19 @@ pub fn transfer(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_temporary_names_always_use_posix_separators() {
+        for (path, expected) in [
+            ("/home/dev/file.txt", "/home/dev/.orbit-transfer-test.part"),
+            ("/file.txt", "/.orbit-transfer-test.part"),
+            ("file.txt", ".orbit-transfer-test.part"),
+            ("./file.txt", "./.orbit-transfer-test.part"),
+        ] {
+            assert_eq!(super::remote_temporary_path(path, "test").unwrap().to_str().unwrap(), expected);
+        }
+        assert!(super::remote_temporary_path("/", "test").is_err());
+    }
+
     use super::*;
     #[test]
     fn cancel_before_start_is_not_lost_and_ids_cannot_be_reused() {

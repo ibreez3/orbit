@@ -72,17 +72,6 @@ struct AssetTreeView: View {
 
             // Bottom toolbar
             HStack {
-                Button(action: { appState.openDialog() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("添加服务器")
-                            .font(.system(size: 11))
-                    }
-                }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("添加服务器")
                 Spacer()
                 Button {
                     uiState.assetTreeCollapsed = true
@@ -137,13 +126,7 @@ struct AssetTreeView: View {
 
             Spacer()
 
-            Button { appState.openDialog() } label: {
-                Image(systemName: "plus")
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            .help("添加服务器")
-            .accessibilityLabel("添加服务器")
+
         }
         .padding(.vertical, 8)
         .frame(width: 48)
@@ -353,13 +336,6 @@ struct AssetTreeView: View {
                     Text("命令片段")
                         .font(.system(size: 12, weight: .semibold))
                     Spacer()
-                    Button(action: { appState.openTool(.snippets) }) {
-                        Image(systemName: "rectangle.on.rectangle")
-                            .font(.system(size: 9, weight: .bold))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("打开片段面板")
                     Button(action: { appState.openSnippetEditor() }) {
                         Image(systemName: "plus")
                             .font(.system(size: 9, weight: .bold))
@@ -503,7 +479,6 @@ struct ServerNodeRow: View {
             Button("SSH 终端") { appState.addTab(server: server, type: .terminal) }
             Button("SFTP") { appState.addTab(server: server, type: .sftp) }
             Button("监控") { appState.addTab(server: server, type: .monitor) }
-            Button("Docker") { appState.addTab(server: server, type: .docker) }
             Divider()
             Button("编辑") { appState.openDialog(server: server) }
             Button(server.is_pinned ? "取消置顶" : "置顶") {

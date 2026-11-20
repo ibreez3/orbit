@@ -111,6 +111,8 @@ pub struct DatabaseQueryResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseBackupSource {
+    #[serde(default)]
+    pub database_name: String,
     pub engine: String,
     pub connection_name: String,
 }
@@ -245,6 +247,7 @@ impl DatabaseBackupArtifact {
         Self {
             format_version: 1,
             source: DatabaseBackupSource {
+                database_name: String::new(),
                 engine: "remote_sqlite".into(),
                 connection_name: "test sqlite".into(),
             },

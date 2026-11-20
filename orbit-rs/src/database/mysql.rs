@@ -15,6 +15,10 @@ use crate::database::sql::is_write_statement;
 pub struct MysqlEngine;
 
 impl MysqlEngine {
+    pub fn list_databases(connection: &DatabaseConnection) -> Result<Vec<String>> {
+        Ok(Self::connect(connection)?.query("SHOW DATABASES")?)
+    }
+
     pub fn test_connection(connection: &DatabaseConnection) -> Result<DatabaseOperationResult> {
         let mut conn = Self::connect(connection)?;
         conn.query_drop("SELECT 1")?;

@@ -1,8 +1,8 @@
 pub mod agent;
 mod crypto;
+mod credential_file;
 pub mod database;
 mod db;
-mod docker;
 mod ffi;
 mod host_key;
 mod models;
@@ -11,6 +11,9 @@ pub mod server_organization;
 mod sftp;
 mod sftp_transfer;
 mod ssh;
+mod service;
+pub mod desktop;
+mod desktop_config;
 mod transport;
 
 use std::sync::Mutex;

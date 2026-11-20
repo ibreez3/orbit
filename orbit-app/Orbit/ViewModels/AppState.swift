@@ -221,10 +221,6 @@ class AppState: ObservableObject {
         get { toolState.activeSftpTransferTabIds }
         set { toolState.activeSftpTransferTabIds = newValue }
     }
-    var dockerPanelSnapshots: [String: DockerPanelSnapshot] {
-        get { toolState.dockerPanelSnapshots }
-        set { toolState.dockerPanelSnapshots = newValue }
-    }
     var aiPanelOpen: Bool {
         get { toolState.aiPanelOpen }
         set { toolState.aiPanelOpen = newValue }
@@ -450,16 +446,12 @@ class AppState: ObservableObject {
                 try bridge.deleteServer(id: id)
                 await MainActor.run {
                     let tabsToRemove = tabs.filter { $0.serverId == id }
-                    let dockerTabIdsToRemove = Set(tabsToRemove.filter { $0.type == .docker }.map(\.id))
                     for tab in tabsToRemove {
                         sftpQueues.removeValue(forKey: tab.id)?.cancelAll()
                         disconnectAllChannels(tab: tab)
                     }
                     servers.removeAll { $0.id == id }
                     tabs.removeAll { $0.serverId == id }
-                    for tabId in dockerTabIdsToRemove {
-                        dockerPanelSnapshots.removeValue(forKey: tabId)
-                    }
                     if let active = activeTabId, !tabs.contains(where: { $0.id == active }) {
                         closeSessionScopedTools()
                         activeTabId = tabs.last?.id
@@ -972,10 +964,10 @@ class AppState: ObservableObject {
     }
 
     @MainActor
-    func backupDatabaseConnectionResult(_ connection: DatabaseConnection) async throws -> DatabaseOperationResult {
+    func backupDatabaseConnectionResult(_ connection: DatabaseConnection, databaseName: String? = nil) async throws -> DatabaseOperationResult {
         databaseOperationLoading = true
         defer { databaseOperationLoading = false }
-        let result = try await bridge.backupDatabaseAsync(connectionId: connection.id)
+        let result = try await bridge.backupDatabaseAsync(connectionId: connection.id, databaseName: databaseName)
         if let records = try? await bridge.listDatabaseBackupRecordsAsync() {
             databaseBackupRecords = records
         }
@@ -983,10 +975,10 @@ class AppState: ObservableObject {
     }
 
     @MainActor
-    func restoreDatabaseBackup(request: DatabaseRestoreRequest) async throws -> DatabaseOperationResult {
+    func restoreDatabaseBackup(request: DatabaseRestoreRequest, databaseName: String? = nil) async throws -> DatabaseOperationResult {
         databaseOperationLoading = true
         defer { databaseOperationLoading = false }
-        let result = try await bridge.restoreDatabaseAsync(request: request)
+        let result = try await bridge.restoreDatabaseAsync(request: request, databaseName: databaseName)
         if let records = try? await bridge.listDatabaseBackupRecordsAsync() {
             databaseBackupRecords = records
         }
@@ -995,21 +987,22 @@ class AppState: ObservableObject {
     }
 
     @MainActor
-    func prepareDatabaseImport(backupPath: String, targetConnectionId: String, mode: String) async throws -> DatabaseImportPlan {
+    func prepareDatabaseImport(backupPath: String, targetConnectionId: String, mode: String, databaseName: String? = nil) async throws -> DatabaseImportPlan {
         databaseOperationLoading = true
         defer { databaseOperationLoading = false }
         return try await bridge.prepareDatabaseImportAsync(
             backupPath: backupPath,
             targetConnectionId: targetConnectionId,
-            mode: mode
+            mode: mode,
+            databaseName: databaseName
         )
     }
 
     @MainActor
-    func runDatabaseImport(request: DatabaseImportRequest) async throws -> DatabaseOperationResult {
+    func runDatabaseImport(request: DatabaseImportRequest, databaseName: String? = nil) async throws -> DatabaseOperationResult {
         databaseOperationLoading = true
         defer { databaseOperationLoading = false }
-        let result = try await bridge.runDatabaseImportAsync(request: request)
+        let result = try await bridge.runDatabaseImportAsync(request: request, databaseName: databaseName)
         if let records = try? await bridge.listDatabaseBackupRecordsAsync() {
             databaseBackupRecords = records
         }
@@ -1396,7 +1389,7 @@ class AppState: ObservableObject {
     }
 
     func addTab(server: Server, type: TabType) {
-        if type == .monitor || type == .docker {
+        if type == .monitor {
             if let existing = tabs.first(where: { $0.type == type && $0.serverId == server.id }) {
                 requestActivateTab(existing.id)
                 return
@@ -1407,7 +1400,6 @@ class AppState: ObservableObject {
             .terminal: "SSH: \(server.name)",
             .sftp: "SFTP: \(server.name)",
             .monitor: "Monitor: \(server.name)",
-            .docker: "Docker: \(server.name)",
             .database: "Database: \(server.name)",
         ]
         var tab = TabItem(id: id, type: type, serverId: server.id, serverName: server.name, title: titles[type] ?? "")
@@ -1509,14 +1501,6 @@ class AppState: ObservableObject {
             sqlText: sqlText,
             resultSummary: resultSummary
         )
-    }
-
-    func saveDockerPanelSnapshot(_ snapshot: DockerPanelSnapshot, for tabId: String) {
-        dockerPanelSnapshots[tabId] = snapshot
-    }
-
-    func dockerPanelSnapshot(for tabId: String) -> DockerPanelSnapshot? {
-        dockerPanelSnapshots[tabId]
     }
 
     func saveDatabasePanelSnapshot(_ snapshot: DatabasePanelSnapshot, for tabId: String) {
@@ -1947,7 +1931,6 @@ class AppState: ObservableObject {
         if let tab = tabs.first(where: { $0.id == id }) {
             disconnectAllChannels(tab: tab)
         }
-        dockerPanelSnapshots.removeValue(forKey: id)
         databasePanelSnapshots.removeValue(forKey: id)
         clearTemporaryDraft(tabId: id)
         tabs.removeAll { $0.id == id }

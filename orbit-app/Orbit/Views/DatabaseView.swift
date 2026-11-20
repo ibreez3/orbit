@@ -3,6 +3,9 @@ import SwiftUI
 struct DatabaseView: View {
     let tab: TabItem
     let appState: AppState
+    @State private var browsing = false
+    @State private var browseResult: DatabaseQueryResult?
+    @State private var databaseName = ""
     @State private var schema: DatabaseSchema?
     @State private var queryResult: DatabaseQueryResult?
     @State private var errorMessage: String?
@@ -28,9 +31,17 @@ struct DatabaseView: View {
     }
 
     var body: some View {
-        HSplitView {
-            tableListPanel
-            editorAndResultsPanel
+        VStack(spacing: 0) {
+            if let connection, connection.engine == "mysql" {
+                DatabaseCatalogPicker(appState: appState, connection: connection, selection: Binding(get: { databaseName }, set: switchDatabase))
+                    .disabled(isExecuting || isLoadingSchema || isBackupRunning)
+                    .padding(8)
+                Divider()
+            }
+            HSplitView {
+                tableListPanel
+                editorAndResultsPanel
+            }
         }
         .onAppear {
             restoreSnapshot()
@@ -54,11 +65,11 @@ struct DatabaseView: View {
         .onChange(of: dbDefaultLimit) { _ in applyDatabaseSettings() }
         .onChange(of: dbAutoLimit) { _ in applyDatabaseSettings() }
         .sheet(isPresented: $showRestoreSheet) {
-            DatabaseBackupSheet(appState: appState, initialTargetConnectionId: connection?.id)
+            DatabaseBackupSheet(appState: appState, initialTargetConnectionId: connection?.id, initialDatabaseName: databaseName)
                 .environmentObject(appState.inventoryState)
         }
         .sheet(isPresented: $showImportMapping) {
-            DatabaseImportMappingView(appState: appState, initialTargetConnectionId: connection?.id)
+            DatabaseImportMappingView(appState: appState, initialTargetConnectionId: connection?.id, initialDatabaseName: databaseName)
                 .environmentObject(appState.inventoryState)
         }
     }
@@ -122,21 +133,24 @@ struct DatabaseView: View {
             } else if filteredTables.isEmpty {
                 emptyPanel(schema == nil ? "尚未加载 Schema" : "没有匹配的表")
             } else {
-                List(selection: $selectedTable) {
+                List {
                     ForEach(filteredTables) { table in
-                        TableSchemaRow(table: table)
-                            .tag(table.name)
+                        Button {
+                            selectTable(table.name)
+                        } label: {
+                            TableSchemaRow(table: table)
+                                .contentShape(Rectangle())
+                        }
+                            .buttonStyle(.plain)
+                            .listRowBackground(selectedTable == table.name ? Color.accentColor.opacity(0.12) : Color.clear)
                             .contextMenu {
-                                Button("查询前 \(Int(dbDefaultLimit)) 行") {
-                                    selectTable(table.name, replaceSQL: true)
+                                Button("查看前 200 行") {
+                                    selectTable(table.name)
                                 }
                                 Button("复制表名") {
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(table.name, forType: .string)
                                 }
-                            }
-                            .onTapGesture {
-                                selectTable(table.name, replaceSQL: false)
                             }
                         if selectedTable == table.name {
                             ForEach(table.columns) { column in
@@ -160,6 +174,7 @@ struct DatabaseView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .disabled(isExecuting)
             }
         }
         .frame(minWidth: 210, idealWidth: 250, maxWidth: 340)
@@ -167,7 +182,24 @@ struct DatabaseView: View {
 
     private var editorAndResultsPanel: some View {
         VStack(spacing: 0) {
-            sqlEditor
+            HStack {
+                Picker("视图", selection: $browsing) {
+                    Text("表数据").tag(true)
+                    Text("SQL 查询").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+                .disabled(isExecuting)
+                if browsing, let selectedTable {
+                    Text("\(selectedTable) · 前 200 行").font(.caption)
+                    Button("刷新数据") { selectTable(selectedTable) }
+                        .disabled(isExecuting)
+                }
+                Spacer()
+            }.padding(8)
+            if !browsing { sqlEditor }
+            if browsing, let errorMessage { Text(errorMessage).foregroundStyle(.red).padding(8) }
             Divider()
             resultsPanel
         }
@@ -259,8 +291,8 @@ struct DatabaseView: View {
                 ProgressView("执行 SQL…")
                     .font(.system(size: 12))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let queryResult {
-                queryResultView(queryResult)
+            } else if let result = browsing ? browseResult : queryResult {
+                queryResultView(result)
             } else {
                 emptyPanel("执行 SQL 查看结果")
             }
@@ -346,12 +378,12 @@ struct DatabaseView: View {
 
     private var canExecuteQuery: Bool {
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard !trimmed.isEmpty, connection?.engine != "mysql" || !(connection?.database_name ?? "").isEmpty || !databaseName.isEmpty else { return false }
         return !dbReadOnlyMode || !isWriteStatement(trimmed)
     }
 
     private var statusText: String {
-        if let queryResult {
+        if let queryResult = browsing ? browseResult : queryResult {
             if !queryResult.columns.isEmpty {
                 return "\(queryResult.rows.count) 行，\(queryResult.columns.count) 列，\(queryResult.elapsed_ms) ms"
             }
@@ -373,13 +405,14 @@ struct DatabaseView: View {
             publishAIContext()
             return
         }
+        guard connection.engine != "mysql" || !connection.database_name.isEmpty || !databaseName.isEmpty else { return }
         isLoadingSchema = true
         errorMessage = nil
         do {
-            let loaded = try await appState.bridge.listDatabaseSchemaAsync(connectionId: connection.id)
+            let loaded = try await appState.bridge.listDatabaseSchemaAsync(connectionId: connection.id, databaseName: databaseName)
             guard isCurrentSchemaRequest(schemaRevision, invalidationToken: schemaInvalidationToken) else { return }
             schema = loaded
-            if selectedTable == nil {
+            if !loaded.tables.contains(where: { $0.name == selectedTable }) {
                 selectedTable = loaded.tables.first?.name
             }
             saveSnapshot()
@@ -412,7 +445,7 @@ struct DatabaseView: View {
                 read_only: dbReadOnlyMode,
                 timeout_ms: UInt32(dbQueryTimeout * 1000)
             )
-            let result = try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request)
+            let result = try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request, databaseName: databaseName)
             guard isCurrentQueryRequest(queryRevision, invalidationToken: queryInvalidationToken) else { return }
             queryResult = result
             saveSnapshot()
@@ -426,12 +459,28 @@ struct DatabaseView: View {
         publishAIContext()
     }
 
-    private func selectTable(_ tableName: String, replaceSQL: Bool) {
+    private func selectTable(_ tableName: String) {
+        guard !isExecuting, let connection, schema?.tables.contains(where: { $0.name == tableName }) == true else { return }
         selectedTable = tableName
-        let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if replaceSQL || trimmed.isEmpty || trimmed.hasPrefix("SELECT * FROM") {
-            let limitClause = dbAutoLimit ? " LIMIT \(Int(dbDefaultLimit))" : ""
-            sqlText = "SELECT * FROM \(quoteIdentifier(tableName))\(limitClause);"
+        browsing = true
+        browseResult = nil
+        errorMessage = nil
+        isExecuting = true
+        queryRequestRevision += 1
+        let revision = queryRequestRevision
+        let token = appState.databasePanelInvalidationToken(for: tab.id)
+        let database = databaseName
+        Task { @MainActor in
+            defer { if isCurrentQueryRequest(revision, invalidationToken: token) { isExecuting = false } }
+            do {
+                let request = DatabaseQueryRequest(sql: "SELECT * FROM \(quoteIdentifier(tableName)) LIMIT 200;", read_only: true, timeout_ms: UInt32(dbQueryTimeout * 1000))
+                let result = try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request, databaseName: database)
+                guard isCurrentQueryRequest(revision, invalidationToken: token) else { return }
+                browseResult = result
+            } catch {
+                guard isCurrentQueryRequest(revision, invalidationToken: token) else { return }
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -458,7 +507,7 @@ struct DatabaseView: View {
     }
 
     private func quoteIdentifier(_ value: String) -> String {
-        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        DatabaseQueryPolicy.quoteIdentifier(value, engine: connection?.engine ?? "remote_sqlite")
     }
 
     @MainActor
@@ -468,7 +517,7 @@ struct DatabaseView: View {
         backupStatusMessage = nil
         backupStatusIsError = false
         do {
-            let result = try await appState.backupDatabaseConnectionResult(connection)
+            let result = try await appState.backupDatabaseConnectionResult(connection, databaseName: databaseName)
             backupStatusIsError = !result.ok
             backupStatusMessage = appState.databaseOperationMessage(result)
         } catch {
@@ -478,8 +527,18 @@ struct DatabaseView: View {
         isBackupRunning = false
     }
 
+    private func switchDatabase(_ name: String) {
+        guard name != databaseName else { return }
+        databaseName = name
+        clearLoadedState()
+        sqlText = ""
+        saveSnapshot()
+        Task { await loadSchema() }
+    }
+
     private func restoreSnapshot() {
         guard let snapshot = appState.databasePanelSnapshot(for: tab.id) else { return }
+        databaseName = snapshot.databaseName
         schema = snapshot.schema
         selectedTable = snapshot.selectedTable
         if !snapshot.sqlText.isEmpty {
@@ -495,6 +554,8 @@ struct DatabaseView: View {
         isLoadingSchema = false
         isExecuting = false
         schema = nil
+        browsing = false
+        browseResult = nil
         selectedTable = nil
         queryResult = nil
         errorMessage = nil
@@ -515,6 +576,7 @@ struct DatabaseView: View {
     private func saveSnapshot() {
         appState.saveDatabasePanelSnapshot(
             DatabasePanelSnapshot(
+                databaseName: databaseName,
                 schema: schema,
                 selectedTable: selectedTable,
                 sqlText: sqlText,
@@ -592,6 +654,36 @@ private struct ResultRow: View {
                     .background(isHeader ? Color.primary.opacity(0.07) : Color.clear)
                     .border(Color.primary.opacity(0.08), width: 0.5)
             }
+        }
+    }
+}
+
+struct DatabaseCatalogPicker: View {
+    let appState: AppState
+    let connection: DatabaseConnection
+    @Binding var selection: String
+    @State private var databases: [String] = []
+    @State private var error: String?
+
+    var body: some View {
+        HStack {
+            if connection.database_name.isEmpty {
+                Picker("数据库", selection: $selection) {
+                    Text("选择数据库").tag("")
+                    ForEach(databases, id: \.self) { Text($0).tag($0) }
+                }
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            } else {
+                Text("数据库：\(connection.database_name)（固定）")
+            }
+            Spacer()
+        }
+        .task(id: connection.id + connection.database_name) {
+            guard connection.database_name.isEmpty else { selection = connection.database_name; return }
+            do {
+                databases = try await appState.bridge.listDatabaseCatalogsAsync(connectionId: connection.id)
+                error = nil
+            } catch { self.error = error.localizedDescription }
         }
     }
 }

@@ -24,8 +24,8 @@ pub fn backup_path_for(connection: &DatabaseConnection) -> Result<PathBuf> {
     let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
     let safe_name = sanitize_filename(&connection.name);
     Ok(backup_directory()?.join(format!(
-        "{}-{}-{}.orbit-db-backup.json",
-        timestamp, connection.engine, safe_name
+        "{}-{}-{}-{}-{}.orbit-db-backup.json",
+        timestamp, connection.engine, safe_name, sanitize_filename(&connection.database_name), uuid::Uuid::new_v4()
     )))
 }
 
@@ -59,6 +59,7 @@ pub fn artifact_from_tables(
         source: DatabaseBackupSource {
             engine: connection.engine.clone(),
             connection_name: connection.name.clone(),
+            database_name: connection.database_name.clone(),
         },
         created_at: chrono::Utc::now().to_rfc3339(),
         tables,

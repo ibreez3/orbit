@@ -41,8 +41,11 @@ impl SftpManager {
                 if name == "." || name == ".." { continue; }
                 let modified = stat.mtime.and_then(|time| chrono::DateTime::from_timestamp(time as i64, 0))
                     .map(|time| time.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+                let entry_name = entry_path.to_string_lossy().into_owned();
+                #[cfg(windows)]
+                let entry_name = entry_name.replace('\\', "/");
                 entries.push(FileEntry {
-                    name, path: entry_path.to_string_lossy().into_owned(), is_dir: stat.is_dir(),
+                    name, path: entry_name, is_dir: stat.is_dir(),
                     size: stat.size.unwrap_or(0), modified,
                     permissions: stat.perm.map(|mode| format!("{:03o}", mode & 0o777)).unwrap_or_default(),
                 });

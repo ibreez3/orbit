@@ -11,7 +11,6 @@ use crate::database::models::{
     DatabaseImportRequest, DatabaseQueryRequest, DatabaseRestoreRequest,
 };
 use crate::database::{DatabaseConnectionInput, DatabaseManager, DatabaseStore};
-use crate::docker;
 use crate::models::*;
 use crate::monitor;
 use crate::server_organization::{
@@ -780,6 +779,15 @@ pub extern "C" fn orbit_db_test_connection(
 }
 
 #[no_mangle]
+pub extern "C" fn orbit_db_request(app: *mut OrbitApp, action: *const c_char, args: *const c_char, out_json: *mut *mut c_char) -> i32 {
+    database_json_operation(app, out_json, |app| {
+        let action = cstr_to_str(action, "数据库操作")?;
+        let args = parse_json_input_with_error::<serde_json::Value>(args).map_err(anyhow::Error::msg)?;
+        DatabaseManager::request(&app.db, &app.pool, action, &args)
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn orbit_db_list_schema(
     app: *mut OrbitApp,
     connection_id: *const c_char,
@@ -954,33 +962,6 @@ fn fail_connection(
     status
 }
 
-fn open_server_terminal_channel(
-    guard: &crate::transport::SessionGuard,
-    session_lock: &Arc<std::sync::Mutex<()>>,
-) -> anyhow::Result<ssh2::Channel> {
-    let _lock = session_lock
-        .lock()
-        .map_err(|error| anyhow::anyhow!("SSH session lock failed: {}", error))?;
-    guard.session.set_blocking(true);
-    let channel_result = (|| {
-        let mut channel = guard
-            .session
-            .channel_session()
-            .map_err(|error| anyhow::anyhow!("创建 SSH channel 失败: {}", error))?;
-        let _ = channel.setenv("LANG", "en_US.UTF-8");
-        let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
-        channel
-            .request_pty("xterm-256color", None, None)
-            .map_err(|error| anyhow::anyhow!("请求远端 PTY 失败: {}", error))?;
-        channel
-            .shell()
-            .map_err(|error| anyhow::anyhow!("启动远端 shell 失败: {}", error))?;
-        Ok(channel)
-    })();
-    guard.session.set_blocking(false);
-    channel_result
-}
-
 fn connect_server_session(
     app: &OrbitApp,
     server: Server,
@@ -990,42 +971,6 @@ fn connect_server_session(
     closed_cb: OrbitClosedCallback,
     userdata: *mut c_void,
 ) -> anyhow::Result<String> {
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let reused = match pool_key.as_deref() {
-        Some(pool_key) => {
-            let mut manager = app
-                .ssh
-                .lock()
-                .map_err(|error| anyhow::anyhow!("SSH 会话管理器锁定失败: {}", error))?;
-            manager.take_idle_session(pool_key)
-        }
-        None => None,
-    };
-
-    let reusable_channel = reused.and_then(|(guard, session_lock)| {
-        match open_server_terminal_channel(&guard, &session_lock) {
-            Ok(channel) => Some((guard, session_lock, channel)),
-            Err(error) => {
-                info!(
-                    pool_key = pool_key.as_deref().unwrap_or_default(),
-                    error = %error,
-                    "空闲连接已失效，创建新连接"
-                );
-                None
-            }
-        }
-    });
-
-    let (guard, session_lock, channel) = match reusable_channel {
-        Some(reused) => reused,
-        None => {
-            let guard = crate::transport::create_session(&server, &app.db)?;
-            let session_lock = Arc::new(std::sync::Mutex::new(()));
-            let channel = open_server_terminal_channel(&guard, &session_lock)?;
-            (guard, session_lock, channel)
-        }
-    };
-
     let userdata = userdata as usize;
     let ffi_data_cb: ssh::DataCallback = Box::new(move |session_id: &str, data: &[u8]| {
         let c_session_id = match CString::new(session_id) {
@@ -1046,28 +991,7 @@ fn connect_server_session(
         };
         closed_cb(c_session_id.as_ptr(), userdata as *mut c_void);
     });
-    let active_channel = ssh::spawn_channel_reader(
-        &session_id,
-        channel,
-        ffi_data_cb,
-        ffi_closed_cb,
-        session_lock.clone(),
-    )?;
-
-    let mut manager = app
-        .ssh
-        .lock()
-        .map_err(|error| anyhow::anyhow!("SSH 会话管理器锁定失败: {}", error))?;
-    manager.register_session(
-        &session_id,
-        pool_key,
-        temporary,
-        guard,
-        active_channel,
-        session_lock,
-    );
-    info!(session_id, server = %server.name, "SSH 终端连接成功");
-    Ok(session_id)
+    crate::service::connect_server_session(app, server, pool_key, temporary, ffi_data_cb, ffi_closed_cb)
 }
 
 #[no_mangle]
@@ -1849,143 +1773,6 @@ pub extern "C" fn orbit_get_server_processes(
 }
 
 #[no_mangle]
-pub extern "C" fn orbit_docker_list_containers(
-    app: *mut OrbitApp,
-    server_id: *const c_char,
-    out_json: *mut *mut c_char,
-) -> i32 {
-    if app.is_null() || server_id.is_null() || out_json.is_null() {
-        return -1;
-    }
-    let app = unsafe { &*app };
-    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(_) => return -3,
-    };
-    match docker::DockerManager::list_containers(&app.pool, &server, &app.db) {
-        Ok(containers) => json_to_out(&containers, out_json),
-        Err(e) => {
-            error!(target: "orbit::ffi", server_id = %sid, error = %e, "Docker 容器列表获取失败");
-            -4
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn orbit_docker_stats(
-    app: *mut OrbitApp,
-    server_id: *const c_char,
-    out_json: *mut *mut c_char,
-) -> i32 {
-    if app.is_null() || server_id.is_null() || out_json.is_null() {
-        return -1;
-    }
-    let app = unsafe { &*app };
-    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(_) => return -3,
-    };
-    match docker::DockerManager::stats(&app.pool, &server, &app.db) {
-        Ok(stats) => json_to_out(&stats, out_json),
-        Err(e) => {
-            error!(target: "orbit::ffi", server_id = %sid, error = %e, "Docker stats 获取失败");
-            -4
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn orbit_docker_logs(
-    app: *mut OrbitApp,
-    server_id: *const c_char,
-    container_id: *const c_char,
-    tail: u32,
-    out_logs: *mut *mut c_char,
-) -> i32 {
-    if app.is_null() || server_id.is_null() || container_id.is_null() || out_logs.is_null() {
-        return -1;
-    }
-    let app = unsafe { &*app };
-    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let cid = match unsafe { CStr::from_ptr(container_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(_) => return -3,
-    };
-    match docker::DockerManager::logs(&app.pool, &server, &app.db, cid, tail) {
-        Ok(logs) => {
-            let c_logs = CString::new(logs).unwrap_or_default();
-            unsafe { *out_logs = c_logs.into_raw() };
-            0
-        }
-        Err(e) => {
-            error!(target: "orbit::ffi", server_id = %sid, container_id = %cid, error = %e, "Docker logs 获取失败");
-            -4
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn orbit_docker_action(
-    app: *mut OrbitApp,
-    server_id: *const c_char,
-    container_id: *const c_char,
-    action: *const c_char,
-    out_output: *mut *mut c_char,
-) -> i32 {
-    if app.is_null()
-        || server_id.is_null()
-        || container_id.is_null()
-        || action.is_null()
-        || out_output.is_null()
-    {
-        return -1;
-    }
-    let app = unsafe { &*app };
-    let sid = match unsafe { CStr::from_ptr(server_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let cid = match unsafe { CStr::from_ptr(container_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let action_str = match unsafe { CStr::from_ptr(action) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(_) => return -3,
-    };
-    match docker::DockerManager::action(&app.pool, &server, &app.db, cid, action_str) {
-        Ok(output) => {
-            let c_output = CString::new(output).unwrap_or_default();
-            unsafe { *out_output = c_output.into_raw() };
-            0
-        }
-        Err(e) => {
-            error!(target: "orbit::ffi", server_id = %sid, container_id = %cid, action = %action_str, error = %e, "Docker 操作失败");
-            -4
-        }
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn orbit_shutdown_pool(app: *mut OrbitApp) {
     if app.is_null() {
         return;
@@ -2250,71 +2037,13 @@ pub extern "C" fn orbit_start_port_forward(
             return -2;
         }
     };
-    let server = match app.db.get_server(sid) {
-        Ok(s) => s,
-        Err(e) => {
-            app.set_error(format!("服务器配置读取失败: {}", e));
-            return -3;
-        }
-    };
-
-    let guard = match crate::transport::create_session(&server, &app.db) {
-        Ok(g) => g,
-        Err(e) => {
-            app.set_error(format!("SSH 连接失败: {}", e));
-            return -4;
-        }
-    };
-
-    let listener = match TcpListener::bind(format!("127.0.0.1:{}", local_port)) {
-        Ok(l) => l,
-        Err(e) => {
-            app.set_error(format!("本地端口 127.0.0.1:{} 绑定失败: {}", local_port, e));
-            return -6;
-        }
-    };
-    if listener.set_nonblocking(true).is_err() {
-        app.set_error("本地监听 socket 设置非阻塞模式失败");
-        return -6;
+    match crate::service::start_port_forward(app, fid, sid, local_port, rhost, remote_port) {
+        Ok(port) => { unsafe { *out_local_port = port }; 0 }
+        Err(error) => { app.set_error(error.to_string()); -4 }
     }
-    let actual_port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-    let running = std::sync::Arc::new(AtomicBool::new(true));
-    let run = running.clone();
-    let remote_host = rhost.to_string();
-
-    {
-        let mut mgr = match app.ssh.lock() {
-            Ok(m) => m,
-            Err(e) => {
-                app.set_error(format!("SSH 会话管理器锁定失败: {}", e));
-                return -7;
-            }
-        };
-        mgr.register_port_forward(fid, running);
-    }
-
-    guard.session.set_blocking(false);
-    let session = guard.session.clone();
-    let channel_open_lock = Arc::new(std::sync::Mutex::new(()));
-
-    let open_lock = channel_open_lock.clone();
-    spawn_port_forward_listener(listener, run, guard, move |local_tcp, run| {
-        let Ok(channel_open_guard) = open_lock.lock() else {
-            return;
-        };
-        let Some(channel) = open_port_forward_channel(&session, &remote_host, remote_port, &run)
-        else {
-            return;
-        };
-        drop(channel_open_guard);
-        proxy_port_forward_connection(local_tcp, channel, run);
-    });
-
-    unsafe { *out_local_port = actual_port };
-    0
 }
 
-fn spawn_port_forward_listener<F, K>(
+pub(crate) fn spawn_port_forward_listener<F, K>(
     listener: TcpListener,
     running: Arc<AtomicBool>,
     keep_alive: K,
@@ -2346,7 +2075,7 @@ where
     })
 }
 
-fn open_port_forward_channel(
+pub(crate) fn open_port_forward_channel(
     session: &ssh2::Session,
     remote_host: &str,
     remote_port: u16,
@@ -2379,7 +2108,7 @@ fn ssh_error_would_block(error: &ssh2::Error) -> bool {
     error.code() == ssh2::ErrorCode::Session(-37)
 }
 
-fn proxy_port_forward_connection(
+pub(crate) fn proxy_port_forward_connection(
     mut local_tcp: TcpStream,
     mut channel: ssh2::Channel,
     running: std::sync::Arc<AtomicBool>,

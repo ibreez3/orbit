@@ -1,0 +1,14 @@
+{
+  "identifier": "main",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install"
+  ]
+}

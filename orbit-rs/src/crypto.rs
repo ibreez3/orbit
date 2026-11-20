@@ -106,15 +106,75 @@ pub trait KeyStore {
     fn create(&self, key: &[u8]) -> Result<bool>;
 }
 
+pub fn platform_key(database_path: &str, required: bool) -> Result<[u8; 32]> {
+    let path = std::path::Path::new(database_path).with_extension("key");
+    crate::credential_file::load_or_migrate(&path, required, || {
+        #[cfg(target_os = "macos")]
+        { MacKeychain { account: "master-key".to_string() }.read() }
+        #[cfg(windows)]
+        { WindowsKeyStore { target: "com.orbit.terminal.credentials.v2/master-key".to_string() }.read() }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        { Ok(None) }
+    })
+}
+
+#[cfg(windows)]
+struct WindowsKeyStore { target: String }
+
+#[cfg(windows)]
+impl KeyStore for WindowsKeyStore {
+    fn read(&self) -> Result<Option<Vec<u8>>> {
+        use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND};
+        use windows_sys::Win32::Security::Credentials::{CredFree, CredReadW, CRED_TYPE_GENERIC};
+        let target: Vec<u16> = self.target.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut credential = std::ptr::null_mut();
+        if unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) } == 0 {
+            if unsafe { GetLastError() } == ERROR_NOT_FOUND {
+                return Ok(None);
+            }
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let bytes = unsafe {
+            if (*credential).CredentialBlobSize == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts((*credential).CredentialBlob, (*credential).CredentialBlobSize as usize).to_vec()
+            }
+        };
+        unsafe { CredFree(credential.cast()); }
+        Ok(Some(bytes))
+    }
+
+    fn create(&self, key: &[u8]) -> Result<bool> {
+        use windows_sys::Win32::Security::Credentials::{CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC};
+        if self.read()?.is_some() {
+            return Ok(false);
+        }
+        let mut target: Vec<u16> = self.target.encode_utf16().chain(std::iter::once(0)).collect();
+        let credential = CREDENTIALW {
+            Type: CRED_TYPE_GENERIC,
+            TargetName: target.as_mut_ptr(),
+            CredentialBlobSize: key.len() as u32,
+            CredentialBlob: key.as_ptr() as *mut u8,
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            ..Default::default()
+        };
+        if unsafe { CredWriteW(&credential, 0) } == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(true)
+    }
+}
+
 pub fn load_key(store: &impl KeyStore, required: bool) -> Result<[u8; 32]> {
     if let Some(key) = store.read()? {
         return key
             .try_into()
-            .map_err(|_| anyhow!("Keychain 中的凭据密钥损坏，未覆盖密钥"));
+            .map_err(|_| anyhow!("凭据密钥损坏，未覆盖密钥"));
     }
     if required {
         bail!(
-            "Keychain 凭据密钥丢失。请恢复原 Keychain 密钥后重试；数据库未更改，不会生成替代密钥"
+            "凭据密钥丢失。请恢复原密钥后重试；数据库未更改，不会生成替代密钥"
         );
     }
     let mut key = [0u8; 32];
@@ -124,10 +184,10 @@ pub fn load_key(store: &impl KeyStore, required: bool) -> Result<[u8; 32]> {
     store.create(&key)?;
     let persisted = store
         .read()?
-        .ok_or_else(|| anyhow!("无法验证 Keychain 密钥保存结果，迁移未开始"))?;
+        .ok_or_else(|| anyhow!("无法验证凭据密钥保存结果，迁移未开始"))?;
     persisted
         .try_into()
-        .map_err(|_| anyhow!("Keychain 中的凭据密钥损坏"))
+        .map_err(|_| anyhow!("凭据密钥损坏"))
 }
 
 #[cfg(target_os = "macos")]
@@ -406,5 +466,34 @@ mod keychain_tests {
         assert_eq!(load_key(&store.0, true).unwrap(), key);
         assert!(!store.0.create(&[99; 32]).unwrap());
         assert_eq!(load_key(&store.0, true).unwrap(), key);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_key_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "creates and deletes one isolated Windows credential"]
+    fn native_windows_key_survives_reopen_without_overwrite() {
+        use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let target: Vec<u16> = self.0.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0); }
+            }
+        }
+        let name = format!("com.orbit.terminal.test/{}", uuid::Uuid::new_v4());
+        let _cleanup = Cleanup(name.clone());
+        let store = WindowsKeyStore { target: name.clone() };
+        assert!(load_key(&store, true).is_err());
+        let key = load_key(&store, false).unwrap();
+        let reopened = WindowsKeyStore { target: name };
+        assert_eq!(load_key(&reopened, true).unwrap(), key);
+        assert!(!reopened.create(&[99; 32]).unwrap());
+        assert_eq!(load_key(&store, true).unwrap(), key);
+        let cipher = CredentialCipher::new(key);
+        assert_eq!(cipher.decrypt(&cipher.encrypt("test-secret").unwrap()).unwrap(), "test-secret");
     }
 }
