@@ -11,7 +11,7 @@ Windows 客户端使用 Tauri 2、React、TypeScript 和 xterm.js，直接调用
 - 分类设置、共享内置主题文件、主题预览、自定义主题、字体与连接配置、配置导入导出。
 - 本地 `orbit.key` 文件保存 AES-GCM 主密钥，并使用仅所有者和 SYSTEM 可访问的 ACL；列表不返回凭据；终端按原始字节传输并限制未消费输出量。
 
-当前为开发版。已实现不等于已完整验收：Windows 真机已验证 PowerShell、分屏、主题、Linux SSH/SFTP/监控、SQLite 查询及备份恢复；其他业务面板的 UI、Agent 协议、真实 AI、MySQL/PostgreSQL 与自动更新尚未全部对齐。逐项状态见 [Windows 功能对齐验收](../docs/windows-parity.md)。
+当前为开发版。已实现不等于已完整验收：Windows 真机已验证 PowerShell、分屏、主题、Linux SSH/SFTP/监控、SQLite 查询及备份恢复；其他业务面板的 UI、Agent 协议、真实 AI、PostgreSQL 尚未全部对齐；MySQL 与签名自动更新已完成真机验收。逐项状态见 [Windows 功能对齐验收](../docs/windows-parity.md)。
 
 ## Windows 开发环境
 
@@ -26,12 +26,12 @@ Windows 客户端使用 Tauri 2、React、TypeScript 和 xterm.js，直接调用
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Test
 ```
 
-脚本载入 MSVC 环境、安装锁定的 npm 依赖、运行核心测试并生成 `orbit-windows/src-tauri/target/release/orbit-windows.exe`。加 `-Bundle` 生成 NSIS 安装包；安装包尚未签名。执行策略仅对该进程生效。
+脚本载入 MSVC 环境、安装锁定的 npm 依赖、运行核心测试并生成 `orbit-windows/src-tauri/target/release/orbit-windows.exe`。加 `-Bundle` 生成 NSIS 安装包和更新签名，需先设置 `TAURI_SIGNING_PRIVATE_KEY`；更新签名不等同于 Windows Authenticode 发布者签名。执行策略仅对该进程生效。
 
 需要代理时，在同一 PowerShell 进程中设置：
 
 ```powershell
-$env:HTTP_PROXY = 'http://192.168.0.3:7890'
+$env:HTTP_PROXY = 'http://127.0.0.1:7890'
 $env:HTTPS_PROXY = $env:HTTP_PROXY
 ```
 
@@ -50,6 +50,9 @@ cargo test --manifest-path orbit-rs/Cargo.toml credential_file::tests
 
 首次迁移旧 Credential Manager 密钥应在已登录的 Windows 桌面会话运行；新安装及迁移完成后，核心不再依赖该登录会话读取密钥。
 
-`orbit-rs/examples/desktop_smoke.rs` 从标准输入读取一行 JSON 配置，验证真实 SSH 输入/输出、尺寸、主机指纹确认、数据库重开和 SFTP UTF-8 文件往返。使用专用测试目录与明确核验过的指纹；不要将密码写入命令参数或版本库。
 
 前端测试需本机 Chrome：在 `orbit-windows` 运行 `npm test`。这些测试模拟 Tauri IPC，覆盖标签生命周期、保存服务器、主机指纹拒绝和目录浏览；不能替代 Windows WebView2 真机验收。中文输入法、高 DPI、全屏 TUI 和长时间大量输出仍需真机交互验收。
+
+## GitHub 构建
+
+同一次 Release 同时触发 `Release DMG` 与 `Release Windows`，分别构建 macOS DMG 和 Windows NSIS EXE。`agent/windows-release-validation` 分支的推送也会同时触发两端构建、测试和签名，但仅上传 Actions Artifacts，不创建 Release 或修改更新清单。详细配置见 [Windows 自动更新与发布](../docs/windows-updates.md)。
