@@ -15,7 +15,7 @@ Windows 使用 Tauri updater + NSIS；macOS 继续使用 Sparkle。应用标识�
 - `orbit-windows/src-tauri/tauri.conf.json` 内置更新签名公钥；私钥不得进入 Git、安装包、日志或文档。
 - Actions Secret `WINDOWS_UPDATER_PRIVATE_KEY` 保存 Tauri 签名私钥；加密私钥时另设 `WINDOWS_UPDATER_KEY_PASSWORD`。
 - 本地构建通过 `TAURI_SIGNING_PRIVATE_KEY` 指向私钥文件（或私钥内容），必要时设置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，再运行 `scripts/build-windows.ps1 -Bundle`。
-- 每次发布同步更新 `orbit-windows/package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json` 的应用版本。版本必须与发布 tag 去掉 `v` 后完全一致，且高于已发布的 Windows 版本。当前首次稳定发布建议 `v0.1.2`。与 macOS 联合发布还需遵守 macOS 的版本/build 规则。
+- 每次发布同步更新 `orbit-windows/package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json` 的应用版本。版本必须与发布 tag 去掉 `v` 后完全一致，且高于已发布的 Windows 版本。两端统一稳定版本为 `v0.1.3`，高于 Windows 验收版本 0.1.2。与 macOS 联合发布还需遵守 macOS 的版本/build 规则。
 - 同一次 Release published 同时触发 macOS `Release DMG` 和 Windows `Release Windows`。两条流水线按平台使用独立并发组，可在 macOS runner 和 Windows runner 上并行构建；同平台的发布仍串行执行。两端上传不同名称的资产到同一个 Release，分别更新 appcast 与 Windows 清单；并发推送 develop 时会先 rebase 再重试。实际并行启动时间取决于 runner 是否空闲。
 - `.github/workflows/release-windows.yml` 响应 Release published，或手动输入已有 tag。流水线验证版本、运行前端测试、构建 NSIS 与 `.sig`，上传版本专属 EXE、签名和 `windows-update.json`。已有资产不会覆盖，防止相同版本被重签或替换。
 - 稳定 tag 成功上传后才更新 develop 的稳定清单；预览 tag 仅上传 Release 资产，不进入稳定更新通道。新旧版本比较防止旧工作流把清单回退。稳定清单更新失败时，现有客户端仍停留在上一版，可修复权限后发布更高版本。
