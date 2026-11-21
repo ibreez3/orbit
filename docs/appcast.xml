@@ -7,16 +7,24 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit 0.0.17</title>
-      <description sparkle:format="markdown"><![CDATA[Orbit 现更名为 Hostwren。本版更新应用图标、菜单和授权提示，并更新中英文 README、工作区布局说明与首次连接指南。应用包路径、CLI、Keychain 凭据和 Sparkle 更新源保持兼容，无需迁移已有配置。
+      <title>Orbit 0.1.3</title>
+      <description sparkle:format="markdown"><![CDATA[macOS 与 Windows 统一升级至 v0.1.3（macOS build 19）。
 
-Apple Silicon · macOS 13+ · build 18。v0.0.8 及更早版本因更新签名公钥已轮换，请手动下载安装一次。]]></description>
-      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.17</sparkle:fullReleaseNotesLink>
-      <pubDate>Wed, 18 Nov 2026 10:20:27 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.17/Orbit-v0.0.17-AppleSilicon.dmg" sparkle:version="18" sparkle:shortVersionString="0.0.17" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="sRbuRJrywCbiWfvL/AjzvRvW/O2t9dxJBG3qtDiGyF6S2j+p1KYKD2iOZ9r26vH15gIflw9g5U7/nWr63FVPAg==" length="15874518" type="application/x-apple-diskimage"></enclosure>
+- 新增 Windows 客户端：SSH、本地终端、SFTP、资源监控、数据库及设置管理。
+- 统一两端界面入口，精简重复设置与工具入口，移除 Docker 功能。
+- MySQL 支持不指定数据库连接、库切换和点击表查看前 200 行；修复字段误识别为表及 SQL 引号问题。
+- 凭据保持 AES-256-GCM 加密，使用本地密钥文件，减少系统凭据库依赖。
+- Windows 新增签名自动更新、下载进度、安装确认及重启；macOS 继续使用 Sparkle 签名自动更新。
+
+自动更新：macOS 稳定通道及 Windows 已启用更新的版本将在安装包完成 CI 构建、签名并上传后收到此版本。升级保留连接配置、凭据和设置，请勿删除应用数据目录或本地密钥文件。
+
+兼容说明：macOS v0.0.8 及更早版本因公钥轮换需手动安装一次。未包含更新功能的旧 Windows 构建也需手动安装一次。macOS 安装包面向 Apple Silicon，Windows 安装包面向 x64。]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.1.3</sparkle:fullReleaseNotesLink>
+      <pubDate>Sat, 21 Nov 2026 14:05:33 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.1.3/Orbit-v0.1.3-AppleSilicon.dmg" sparkle:version="19" sparkle:shortVersionString="0.1.3" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="9SpWe9UYqIhJNe/F8Qi3HHgtZTP0UfyGqTC4HhV7u/hIHZ3wZegLQb6OUadq0LiHr38pkUoiyArmwHP5jvT+Cw==" length="15949034" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: JhW92Q8IO6h3eqq8clZeI3b4uW8qtc/YFkdSU5yIe7g2C7IF11FKofULNudLDcapgtAJEw2Zm8iXEwyJWiC1BQ==
-length: 1667
+edSignature: trnzXnEj1jpAIP1/jODCCOVf0Ciyxmh1yCJiacyGS8M/4WpQUom346huAliWNYTieWpPPke3/MIF7oulNptNAg==
+length: 2344
 -->
