@@ -149,10 +149,20 @@ struct DatabaseSchema: Codable {
 }
 
 struct DatabaseTableSchema: Codable, Identifiable {
+    var namespace: String? = nil
     let name: String
     let columns: [DatabaseColumnSchema]
 
-    var id: String { name }
+    var id: String {
+        guard let namespace else { return name }
+        return Self.qualified(namespace, name)
+    }
+
+    var displayName: String { namespace.map { $0 + "." + name } ?? name }
+
+    static func qualified(_ namespace: String, _ name: String) -> String {
+        [namespace, name].map { DatabaseQueryPolicy.quoteIdentifier($0, engine: "postgres") }.joined(separator: ".")
+    }
 }
 
 struct DatabaseColumnSchema: Codable, Identifiable {
@@ -170,6 +180,7 @@ struct DatabaseQueryRequest: Codable {
     var sql: String
     var read_only: Bool
     var timeout_ms: UInt32
+    var single_row_write: Bool? = nil
 }
 
 struct DatabaseQueryResult: Codable {

@@ -862,6 +862,20 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse(DatabaseQueryResult.self, rc: rc, outJson: outJson)
     }
 
+    func exportDatabaseTable(connectionId: String, databaseName: String, table: DatabaseTableSchema, data: Bool, destination: URL) async throws {
+        let pending = destination.deletingLastPathComponent().appendingPathComponent(".orbit-" + UUID().uuidString + ".sql")
+        let _: Bool = try await databaseRequestAsync("database.export_table", arguments: [
+            "id": connectionId, "database_name": databaseName, "namespace": table.namespace ?? "public",
+            "table": table.name, "data": data, "path": pending.path
+        ], as: Bool.self)
+        defer { try? FileManager.default.removeItem(at: pending) }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: pending)
+        } else {
+            try FileManager.default.moveItem(at: pending, to: destination)
+        }
+    }
+
     func backupDatabaseAsync(connectionId: String, databaseName: String? = nil) async throws -> DatabaseOperationResult {
         try await databaseRequestAsync("database.backup", arguments: ["id": connectionId, "database_name": databaseName ?? ""], as: DatabaseOperationResult.self)
     }

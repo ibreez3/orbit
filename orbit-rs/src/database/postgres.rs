@@ -25,7 +25,7 @@ impl PostgresEngine {
 
     pub fn list_schema(connection: &DatabaseConnection) -> Result<Vec<DatabaseTableSchema>> {
         let mut client = Self::connect(connection)?;
-        list_schema_with_client(&mut client)
+        list_schema_with_client(&mut client, false)
     }
 
     pub fn execute(
@@ -33,6 +33,7 @@ impl PostgresEngine {
         sql: &str,
         read_only: bool,
         timeout_ms: u32,
+        single_row_write: bool,
     ) -> Result<DatabaseQueryResult> {
         if read_only && is_write_statement(sql) {
             return Err(anyhow!("read-only database query rejected write statement"));
@@ -46,6 +47,15 @@ impl PostgresEngine {
                 timeout_ms.max(1)
             ))?;
         }
+        if single_row_write {
+            let mut tx = client.transaction()?;
+            let affected = tx.execute(sql, &[])?;
+            if affected != 1 {
+                return Err(anyhow!("期望修改 1 行，实际匹配 {} 行。请刷新记录。", affected));
+            }
+            tx.commit()?;
+            return Ok(DatabaseQueryResult::empty_message("已提交", affected, started.elapsed().as_millis() as u64));
+        }
         if is_write_statement(sql) {
             let affected = client.execute(sql, &[])?;
             return Ok(DatabaseQueryResult::empty_message(
@@ -55,7 +65,12 @@ impl PostgresEngine {
             ));
         }
 
-        let rows = client.query(sql, &[])?;
+        let rows = if read_only {
+            let mut tx = client.build_transaction().read_only(true).start()?;
+            tx.query(sql, &[])?
+        } else {
+            client.query(sql, &[])?
+        };
         let columns = rows
             .first()
             .map(|row| {
@@ -85,7 +100,7 @@ impl PostgresEngine {
 
     pub fn backup_tables(connection: &DatabaseConnection) -> Result<Vec<DatabaseBackupTable>> {
         let mut client = Self::connect(connection)?;
-        let schema = list_schema_with_client(&mut client)?;
+        let schema = list_schema_with_client(&mut client, true)?;
         let mut tables = Vec::new();
         for table in schema {
             let rows = backup_rows_with_client(&mut client, &table)?;
@@ -128,23 +143,26 @@ impl PostgresEngine {
     }
 }
 
-fn list_schema_with_client(client: &mut Client) -> Result<Vec<DatabaseTableSchema>> {
+fn list_schema_with_client(client: &mut Client, public_only: bool) -> Result<Vec<DatabaseTableSchema>> {
     let rows = client.query(
-        "SELECT c.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default,
-                COALESCE(tc.constraint_type = 'PRIMARY KEY', false) AS is_primary,
-                c.is_identity
+        "SELECT c.table_name, c.column_name, pg_catalog.format_type(a.atttypid,a.atttypmod), c.is_nullable, c.column_default,
+                EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_constraint pk
+                    JOIN pg_catalog.pg_class rel ON rel.oid = pk.conrelid
+                    JOIN pg_catalog.pg_namespace ns ON ns.oid = rel.relnamespace
+                    JOIN pg_catalog.pg_attribute attr ON attr.attrelid = rel.oid AND attr.attnum = ANY(pk.conkey)
+                    WHERE pk.contype = 'p' AND ns.nspname = c.table_schema
+                      AND rel.relname = c.table_name AND attr.attname = c.column_name
+                ) AS is_primary,
+                (c.is_identity = 'YES' OR c.is_generated = 'ALWAYS') AS generated, c.table_schema
          FROM information_schema.columns c
-         LEFT JOIN information_schema.key_column_usage kcu
-           ON c.table_schema = kcu.table_schema
-          AND c.table_name = kcu.table_name
-          AND c.column_name = kcu.column_name
-         LEFT JOIN information_schema.table_constraints tc
-           ON kcu.constraint_schema = tc.constraint_schema
-          AND kcu.constraint_name = tc.constraint_name
-          AND tc.constraint_type = 'PRIMARY KEY'
-         WHERE c.table_schema = 'public'
-         ORDER BY c.table_name, c.ordinal_position",
-        &[],
+         JOIN pg_namespace n ON n.nspname=c.table_schema
+         JOIN pg_class t ON t.relnamespace=n.oid AND t.relname=c.table_name
+         JOIN pg_attribute a ON a.attrelid=t.oid AND a.attname=c.column_name
+         WHERE (NOT $1 OR c.table_schema = 'public') AND c.table_schema <> 'information_schema'
+           AND c.table_schema !~ '^pg_'
+         ORDER BY c.table_schema, c.table_name, c.ordinal_position",
+        &[&public_only],
     )?;
     Ok(rows_to_schema(rows))
 }
@@ -173,19 +191,21 @@ fn rows_to_schema(rows: Vec<Row>) -> Vec<DatabaseTableSchema> {
     let mut tables: Vec<DatabaseTableSchema> = Vec::new();
     for row in rows {
         let table_name: String = row.get(0);
+        let namespace: String = row.get(7);
         let column = DatabaseColumnSchema {
             name: row.get(1),
             db_type: row.get(2),
             nullable: row.get::<_, String>(3) == "YES",
             primary_key: row.get(5),
             default_value: row.get(4),
-            auto_generated: row.get::<_, String>(6) == "YES",
+            auto_generated: row.get(6),
         };
 
-        if let Some(table) = tables.iter_mut().find(|table| table.name == table_name) {
+        if let Some(table) = tables.last_mut().filter(|table| table.name == table_name && table.namespace.as_deref() == Some(namespace.as_str())) {
             table.columns.push(column);
         } else {
             tables.push(DatabaseTableSchema {
+                namespace: Some(namespace),
                 name: table_name,
                 columns: vec![column],
             });

@@ -20,6 +20,29 @@ pub fn is_write_statement(sql: &str) -> bool {
     )
 }
 
+pub fn allows_read_query(sql: &str, engine: &str) -> bool {
+    let token = first_sql_token(sql);
+    let allowed = matches!(token.as_deref(), Some("select" | "with" | "explain" | "values"))
+        || (engine == "mysql" && matches!(token.as_deref(), Some("show" | "describe" | "desc")));
+    if !allowed || is_write_statement(sql) {
+        return false;
+    }
+    if engine == "mysql" && (sql.contains("/*!") || sql.contains("/*M!")) {
+        return false;
+    }
+    if engine == "remote_sqlite" {
+        for (index, _) in sql.match_indices(';') {
+            if !sql[index + 1..].trim().is_empty() {
+                let Ok(prefix) = std::ffi::CString::new(&sql[..=index]) else { return false };
+                if unsafe { rusqlite::ffi::sqlite3_complete(prefix.as_ptr()) } != 0 {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 pub fn mysql_type_for_sqlite(sqlite_type: &str) -> String {
     let normalized = sqlite_type.trim().to_uppercase();
 
@@ -225,6 +248,17 @@ mod tests {
         assert!(!is_write_statement(
             "WITH recent AS (SELECT 1), logs AS (SELECT * FROM update_log) SELECT * FROM recent"
         ));
+    }
+
+    #[test]
+    fn query_policy_accepts_one_read_and_preserves_quoted_semicolons() {
+        assert!(allows_read_query("SELECT 'a;b';", "remote_sqlite"));
+        assert!(!allows_read_query("SELECT 1; SELECT 2", "remote_sqlite"));
+        for engine in ["remote_sqlite", "mysql", "postgres"] {
+            assert!(!allows_read_query("BEGIN", engine));
+            assert!(!allows_read_query("DELETE FROM users", engine));
+            assert!(allows_read_query("WITH t AS (SELECT 1) SELECT * FROM t", engine));
+        }
     }
 
     #[test]

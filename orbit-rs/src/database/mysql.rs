@@ -38,6 +38,7 @@ impl MysqlEngine {
         sql: &str,
         read_only: bool,
         timeout_ms: u32,
+        single_row_write: bool,
     ) -> Result<DatabaseQueryResult> {
         if read_only && is_write_statement(sql) {
             return Err(anyhow!("read-only database query rejected write statement"));
@@ -46,6 +47,16 @@ impl MysqlEngine {
         let started = Instant::now();
         let mut conn = Self::connect(connection)?;
         Self::apply_statement_timeout(&mut conn, timeout_ms);
+        if single_row_write {
+            let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
+            tx.query_drop(sql)?;
+            let affected = tx.affected_rows();
+            if affected != 1 {
+                return Err(anyhow!("期望修改 1 行，实际匹配 {} 行。请刷新记录。", affected));
+            }
+            tx.commit()?;
+            return Ok(DatabaseQueryResult::empty_message("已提交", affected, started.elapsed().as_millis() as u64));
+        }
         if is_write_statement(sql) {
             conn.query_drop(sql)?;
             return Ok(DatabaseQueryResult::empty_message(
@@ -55,7 +66,20 @@ impl MysqlEngine {
             ));
         }
 
+        if read_only {
+            let opts = mysql::TxOpts::default().set_access_mode(Some(mysql::AccessMode::ReadOnly));
+            let mut tx = conn.start_transaction(opts)?;
+            let result = tx.exec_iter(sql, ())?;
+            return Self::collect_query_result(result, started);
+        }
         let result = conn.query_iter(sql)?;
+        Self::collect_query_result(result, started)
+    }
+
+    fn collect_query_result<T: mysql::prelude::Protocol>(
+        result: mysql::QueryResult<'_, '_, '_, T>,
+        started: Instant,
+    ) -> Result<DatabaseQueryResult> {
         let columns = result
             .columns()
             .as_ref()
@@ -184,6 +208,59 @@ impl MysqlEngine {
         Ok(inserted)
     }
 
+    pub fn export_table(connection: &DatabaseConnection, table: &str, data: bool, file: std::fs::File) -> Result<()> {
+        use std::io::Write;
+        let mut out = std::io::BufWriter::new(file);
+        let mut conn = Self::connect(connection)?;
+        conn.query_drop("SET time_zone = '+00:00'")?;
+        let opts = mysql::TxOpts::default().set_isolation_level(Some(mysql::IsolationLevel::RepeatableRead))
+            .set_access_mode(Some(mysql::AccessMode::ReadOnly));
+        let mut tx = conn.start_transaction(opts)?;
+        let name = quote_ident(table, "mysql");
+        tx.query_drop(format!("SELECT 1 FROM {name} LIMIT 0"))?;
+        let row: mysql::Row = tx.query_first(format!("SHOW CREATE TABLE {name}"))?.ok_or_else(|| anyhow!("找不到表"))?;
+        let ddl: String = row.get("Create Table").ok_or_else(|| anyhow!("仅支持导出普通表"))?;
+        writeln!(out, "SET @orbit_old_mode=@@SESSION.sql_mode, @orbit_old_tz=@@SESSION.time_zone;")?;
+        writeln!(out, "SET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO', time_zone='+00:00';")?;
+        writeln!(out, "{ddl};")?;
+        if data {
+            let fields: Vec<(String,String,String)> = tx.exec("SELECT COLUMN_NAME,DATA_TYPE,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? ORDER BY ORDINAL_POSITION", (table,))?;
+            let mut cols = Vec::new();
+            let mut values = Vec::new();
+            for (column, ty, extra) in fields {
+                if extra.contains("VIRTUAL GENERATED") || extra.contains("STORED GENERATED") { continue; }
+                let col = quote_ident(&column, "mysql");
+                let value = match ty.as_str() {
+                    "geometry" | "point" | "linestring" | "polygon" | "multipoint" | "multilinestring" | "multipolygon" | "geometrycollection" =>
+                        format!("CONCAT('ST_GeomFromWKB(X''',HEX(ST_AsWKB({col})),''',',ST_SRID({col}),')')"),
+                    "bit" | "binary" | "varbinary" | "blob" | "tinyblob" | "mediumblob" | "longblob" =>
+                        format!("CONCAT('X''',HEX({col}),'''')"),
+                    _ => format!("CONCAT('CONVERT(X''',HEX(CONVERT({col} USING utf8mb4)),''' USING utf8mb4)')"),
+                };
+                values.push(format!("CASE WHEN {col} IS NULL THEN 'NULL' ELSE {value} END"));
+                cols.push(col);
+            }
+            let prefix = format!("INSERT INTO {name} ({}) VALUES (", cols.join(", "));
+            writeln!(out, "START TRANSACTION;")?;
+            let query = format!("SELECT {} FROM {name}", values.join(","));
+            for row in tx.query_iter(query)? {
+                let row = row?;
+                write!(out, "{prefix}")?;
+                for i in 0..row.len() {
+                    if i > 0 { write!(out, ",")?; }
+                    let value = row.get::<Option<Vec<u8>>, _>(i).flatten().ok_or_else(|| anyhow!("字段编码失败，请检查服务器 max_allowed_packet 限制"))?;
+                    out.write_all(&value)?;
+                }
+                writeln!(out, ");")?;
+            }
+            writeln!(out, "COMMIT;")?;
+        }
+        writeln!(out, "SET SESSION sql_mode=@orbit_old_mode, time_zone=@orbit_old_tz;")?;
+        out.flush()?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn connect(connection: &DatabaseConnection) -> Result<mysql::Conn> {
         let mut builder = OptsBuilder::new()
             .ip_or_hostname(Some(connection.host.clone()))
@@ -264,6 +341,7 @@ fn rows_to_schema(
             });
         } else {
             tables.push(DatabaseTableSchema {
+                namespace: None,
                 name: table_name,
                 columns: vec![DatabaseColumnSchema {
                     name: column_name,
@@ -305,7 +383,7 @@ fn mysql_value_to_string(value: Value) -> Result<Option<String>> {
 
 fn mysql_extra_is_auto_generated(extra: &str) -> bool {
     let normalized = extra.to_ascii_lowercase();
-    normalized.contains("auto_increment") || normalized.contains("generated")
+    normalized.contains("auto_increment") || normalized.contains("virtual generated") || normalized.contains("stored generated")
 }
 
 fn is_mysql_binary_type(db_type: &str) -> bool {
@@ -485,6 +563,13 @@ mod tests {
         )]);
 
         assert!(schema[0].columns[0].auto_generated);
+    }
+
+    #[test]
+    fn mysql_default_timestamp_remains_editable() {
+        assert!(!mysql_extra_is_auto_generated("DEFAULT_GENERATED on update CURRENT_TIMESTAMP"));
+        assert!(mysql_extra_is_auto_generated("VIRTUAL GENERATED"));
+        assert!(mysql_extra_is_auto_generated("STORED GENERATED"));
     }
 
     #[test]

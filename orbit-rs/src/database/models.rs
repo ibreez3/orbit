@@ -82,6 +82,8 @@ pub struct DatabaseColumnSchema {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseTableSchema {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
     pub name: String,
     pub columns: Vec<DatabaseColumnSchema>,
 }
@@ -98,6 +100,8 @@ pub struct DatabaseQueryRequest {
     pub sql: String,
     pub read_only: bool,
     pub timeout_ms: u32,
+    #[serde(default)]
+    pub single_row_write: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

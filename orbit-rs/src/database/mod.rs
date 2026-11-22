@@ -6,6 +6,7 @@ pub mod postgres;
 pub mod sql;
 pub mod sqlite_remote;
 pub mod store;
+mod table_export;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -53,6 +54,12 @@ impl DatabaseManager {
             }
             "database.schema" => serde_json::to_value(Self::list_schema_in_database(db, pool, text("id")?, database_name)?)?,
             "database.query" => serde_json::to_value(Self::execute_in_database(db, pool, text("id")?, &serde_json::from_value(args["input"].clone())?, database_name)?)?,
+            "database.export_table" => {
+                let c = scoped_connection(DatabaseStore::get_connection(db, text("id")?)?, database_name)?;
+                table_export::export(db, &c, text("namespace")?, text("table")?,
+                    args["data"].as_bool().ok_or_else(|| anyhow!("missing data"))?, std::path::Path::new(text("path")?))?;
+                serde_json::Value::Bool(true)
+            }
             "database.backup" => serde_json::to_value(Self::backup_in_database(db, pool, text("id")?, database_name)?)?,
             "database.restore" => serde_json::to_value(Self::restore_in_database(db, pool, &serde_json::from_value(args["input"].clone())?, database_name)?)?,
             "database.prepare_import" => serde_json::to_value(Self::prepare_import_in_database(db, text("backup_path")?, text("id")?, text("mode")?, database_name)?)?,
@@ -108,11 +115,14 @@ impl DatabaseManager {
 
     pub fn execute_in_database(db: &Database, pool: &transport::SessionPool, connection_id: &str, request: &QueryRequest, database_name: Option<&str>) -> Result<QueryResult> {
         let connection = scoped_connection(DatabaseStore::get_connection(db, connection_id)?, database_name)?;
+        if request.read_only && !sql::allows_read_query(&request.sql, &connection.engine) {
+            return Err(anyhow!("SQL 查询仅支持单条只读查询"));
+        }
+        if request.single_row_write && (request.read_only || !crate::database::sql::is_write_statement(&request.sql)) {
+            return Err(anyhow!("expected a writable record operation"));
+        }
         match connection.engine.as_str() {
             "remote_sqlite" => {
-                if request.read_only && crate::database::sql::is_write_statement(&request.sql) {
-                    return Err(anyhow!("read-only database query rejected write statement"));
-                }
                 let server = db.get_server(&connection.ssh_server_id)?;
                 SqliteRemote::execute(
                     pool,
@@ -121,6 +131,7 @@ impl DatabaseManager {
                     &connection.sqlite_path,
                     &request.sql,
                     request.timeout_ms,
+                    request.single_row_write,
                 )
             }
             "mysql" => with_driver_connection(db, &connection, |connection| {
@@ -129,6 +140,7 @@ impl DatabaseManager {
                     &request.sql,
                     request.read_only,
                     request.timeout_ms,
+                    request.single_row_write,
                 )
             }),
             "postgres" => with_driver_connection(db, &connection, |connection| {
@@ -137,6 +149,7 @@ impl DatabaseManager {
                     &request.sql,
                     request.read_only,
                     request.timeout_ms,
+                    request.single_row_write,
                 )
             }),
             engine => Err(anyhow!("unsupported database engine: {}", engine)),

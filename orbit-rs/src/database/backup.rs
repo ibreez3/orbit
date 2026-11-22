@@ -308,6 +308,7 @@ mod tests {
     #[test]
     fn sqlite_json_rows_are_mapped_by_schema_column_name() {
         let table = DatabaseTableSchema {
+            namespace: None,
             name: "sample".into(),
             columns: vec![
                 DatabaseColumnSchema {
@@ -340,6 +341,7 @@ mod tests {
     #[test]
     fn sqlite_legacy_rows_are_mapped_by_schema_column_name() {
         let table = DatabaseTableSchema {
+            namespace: None,
             name: "sample".into(),
             columns: vec![
                 DatabaseColumnSchema {

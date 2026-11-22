@@ -111,8 +111,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.terminal
-        MARKETING_VERSION: "0.1.3"
-        CURRENT_PROJECT_VERSION: "19"
+        MARKETING_VERSION: "0.1.4"
+        CURRENT_PROJECT_VERSION: "20"
         INFOPLIST_FILE: Orbit/Info.plist
         PRODUCT_NAME: Orbit
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

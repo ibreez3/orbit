@@ -651,8 +651,8 @@ private struct DatabasePane: View {
                 }
 
                 SettingsGroup("安全") {
-                    SettingsToggle("只读模式", isOn: $dbReadOnlyMode, identifier: "dbReadOnlyToggle")
-                    Text("只读模式下禁止执行 INSERT / UPDATE / DELETE 等写操作")
+                    SettingsToggle("所有数据库连接只读", isOn: $dbReadOnlyMode, identifier: "dbReadOnlyToggle")
+                    Text("开启后，所有连接的表数据均为只读。SQL 查询始终只读。")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)

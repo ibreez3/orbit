@@ -614,12 +614,31 @@ impl SshManager {
         command: &str,
         timeout_ms: u32,
     ) -> Result<SshCommandOutput> {
+        Self::exec_command_with_input(pool, server, db, command, timeout_ms, None)
+    }
+
+    pub fn exec_command_with_input(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        command: &str,
+        timeout_ms: u32,
+        input: Option<&[u8]>,
+    ) -> Result<SshCommandOutput> {
         debug!(server = %server.name, command, timeout_ms, "执行远程命令并检查退出状态");
         let _lease = pool.acquire_scoped(server, db)?;
         let result = pool.with_session_mut(&server.id, |session| {
             let mut channel = session.channel_session()?;
             channel.exec(command)?;
             session.set_timeout(timeout_ms.max(1));
+
+            if let Some(bytes) = input {
+                if let Err(err) = channel.write_all(bytes).map_err(anyhow::Error::from)
+                    .and_then(|_| channel.send_eof().map_err(Into::into)) {
+                    session.set_timeout(0);
+                    return Err(err);
+                }
+            }
 
             let mut stdout = String::new();
             let stdout_result = channel.read_to_string(&mut stdout);
