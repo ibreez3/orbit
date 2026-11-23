@@ -31,3 +31,10 @@ build/
 # Legacy/prototype artifacts
 src-tauri/
 bg/
+
+!orbit-windows/src-tauri/
+orbit-windows/src-tauri/target/
+orbit-windows/src-tauri/gen/
+!orbit-windows/package-lock.json
+orbit-windows/test-results/
+orbit-windows/playwright-report/

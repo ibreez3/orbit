@@ -14,39 +14,9 @@ struct SessionToolDockView: View {
             dockButton(.snippets, symbol: "text.insert", title: "命令片段")
             dockButton(.logs, symbol: "list.bullet.rectangle", title: "日志")
 
-            Button(action: openDockerTab) {
-                Image(systemName: "shippingbox")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
-            .disabled(activeServer() == nil)
-            .foregroundStyle(activeServer() == nil ? Color.secondary.opacity(0.35) : Color.secondary)
-            .help(activeServer() == nil ? "选择远端服务器后可用 Docker" : "Docker")
-            .accessibilityLabel("Docker")
-
-            Button(action: openDatabaseTab) {
-                Image(systemName: "cylinder.split.1x2")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("数据库")
-            .accessibilityLabel("数据库")
-
             Spacer()
 
-            Button(action: { SettingsWindowController.shared.open(with: appState) }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14))
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("设置")
-            .accessibilityLabel("设置")
-            .accessibilityIdentifier("dock-settings")
+
         }
         .padding(.vertical, 10)
         .frame(width: 52)
@@ -78,17 +48,4 @@ struct SessionToolDockView: View {
         .accessibilityIdentifier("dock-\(tool.rawValue)")
     }
 
-    private func activeServer() -> Server? {
-        guard let serverId = appState.activeSessionContext.serverId, serverId != "local" else { return nil }
-        return inventoryState.servers.first(where: { $0.id == serverId })
-    }
-
-    private func openDockerTab() {
-        guard let server = activeServer() else { return }
-        appState.addTab(server: server, type: .docker)
-    }
-
-    private func openDatabaseTab() {
-        appState.openDatabaseWorkspace()
-    }
 }

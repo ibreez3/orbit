@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "target/release/orbit-cli.exe": "orbit-cli.exe"
+    },
+    "createUpdaterArtifacts": true
+  }
+}

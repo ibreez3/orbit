@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="340" viewBox="0 0 900 340">
+  <title>Hostwren workspace layout</title>
+  <desc>Server inventory at left, terminal tabs and split panes at center, with an SFTP tool card over the current session.</desc>
+  <rect width="900" height="340" rx="20" fill="#102b38"/>
+  <g font-family="system-ui,sans-serif">
+    <rect x="16" y="16" width="184" height="308" rx="10" fill="#1c4148"/>
+    <g fill="#f6ecd4"><text x="36" y="52" font-size="23" font-weight="bold">Hostwren</text><text x="36" y="97">Servers</text></g>
+    <g fill="#a6cbc4" font-size="15"><text x="43" y="132">⌄  Production</text><text x="55" y="164">●  api-01</text><text x="55" y="194">○  worker-02</text></g>
+    <rect x="216" y="16" width="668" height="308" rx="10" fill="#14242d"/>
+    <path d="M216 69H884M548 69V324" stroke="#38535c"/>
+    <g fill="#f6ecd4" font-size="17"><text x="236" y="50">api-01</text><text x="360" y="50" fill="#99b6b8">Local shell</text></g>
+    <g fill="#79d7b0" font-family="monospace" font-size="16"><text x="238" y="111">$ uptime</text><text x="238" y="144" fill="#c4d3d3">up 12 days, 3 users</text><text x="238" y="188">$ ▋</text><text x="568" y="111">$ tail -f app.log</text></g>
+    <rect x="610" y="140" width="250" height="157" rx="12" fill="#f5f0e5"/>
+    <g fill="#183b40"><text x="632" y="173" font-size="18" font-weight="bold">SFTP · api-01</text><text x="632" y="202" font-size="14">/var/log</text><path d="M632 214H837" stroke="#b7c7c1"/><text x="632" y="242">app.log</text><text x="632" y="271">worker.log</text></g>
+  </g>
+</svg>

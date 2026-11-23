@@ -6,6 +6,7 @@ pub mod postgres;
 pub mod sql;
 pub mod sqlite_remote;
 pub mod store;
+mod table_export;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -40,6 +41,33 @@ pub use store::DatabaseStore;
 pub struct DatabaseManager;
 
 impl DatabaseManager {
+    pub fn request(db: &Database, pool: &transport::SessionPool, action: &str, args: &serde_json::Value) -> Result<serde_json::Value> {
+        let text = |key: &str| args[key].as_str().ok_or_else(|| anyhow!("missing {}", key));
+        let database_name = args["database_name"].as_str();
+        Ok(match action {
+            "database.catalogs" => {
+                let connection = DatabaseStore::get_connection(db, text("id")?)?;
+                let names = if connection.engine == "mysql" && connection.database_name.is_empty() {
+                    with_driver_connection(db, &connection, MysqlEngine::list_databases)?
+                } else { vec![connection.database_name] };
+                serde_json::to_value(names)?
+            }
+            "database.schema" => serde_json::to_value(Self::list_schema_in_database(db, pool, text("id")?, database_name)?)?,
+            "database.query" => serde_json::to_value(Self::execute_in_database(db, pool, text("id")?, &serde_json::from_value(args["input"].clone())?, database_name)?)?,
+            "database.export_table" => {
+                let c = scoped_connection(DatabaseStore::get_connection(db, text("id")?)?, database_name)?;
+                table_export::export(db, &c, text("namespace")?, text("table")?,
+                    args["data"].as_bool().ok_or_else(|| anyhow!("missing data"))?, std::path::Path::new(text("path")?))?;
+                serde_json::Value::Bool(true)
+            }
+            "database.backup" => serde_json::to_value(Self::backup_in_database(db, pool, text("id")?, database_name)?)?,
+            "database.restore" => serde_json::to_value(Self::restore_in_database(db, pool, &serde_json::from_value(args["input"].clone())?, database_name)?)?,
+            "database.prepare_import" => serde_json::to_value(Self::prepare_import_in_database(db, text("backup_path")?, text("id")?, text("mode")?, database_name)?)?,
+            "database.import" => serde_json::to_value(Self::run_import_in_database(db, &serde_json::from_value(args["input"].clone())?, database_name)?)?,
+            _ => return Err(anyhow!("unsupported database action: {}", action)),
+        })
+    }
+
     pub fn test_connection(
         db: &Database,
         pool: &transport::SessionPool,
@@ -58,12 +86,12 @@ impl DatabaseManager {
         }
     }
 
-    pub fn list_schema(
-        db: &Database,
-        pool: &transport::SessionPool,
-        connection_id: &str,
-    ) -> Result<Schema> {
-        let connection = DatabaseStore::get_connection(db, connection_id)?;
+    pub fn list_schema(db: &Database, pool: &transport::SessionPool, connection_id: &str) -> Result<Schema> {
+        Self::list_schema_in_database(db, pool, connection_id, None)
+    }
+
+    pub fn list_schema_in_database(db: &Database, pool: &transport::SessionPool, connection_id: &str, database_name: Option<&str>) -> Result<Schema> {
+        let connection = scoped_connection(DatabaseStore::get_connection(db, connection_id)?, database_name)?;
         let tables = match connection.engine.as_str() {
             "remote_sqlite" => {
                 let server = db.get_server(&connection.ssh_server_id)?;
@@ -81,18 +109,20 @@ impl DatabaseManager {
         })
     }
 
-    pub fn execute(
-        db: &Database,
-        pool: &transport::SessionPool,
-        connection_id: &str,
-        request: &QueryRequest,
-    ) -> Result<QueryResult> {
-        let connection = DatabaseStore::get_connection(db, connection_id)?;
+    pub fn execute(db: &Database, pool: &transport::SessionPool, connection_id: &str, request: &QueryRequest) -> Result<QueryResult> {
+        Self::execute_in_database(db, pool, connection_id, request, None)
+    }
+
+    pub fn execute_in_database(db: &Database, pool: &transport::SessionPool, connection_id: &str, request: &QueryRequest, database_name: Option<&str>) -> Result<QueryResult> {
+        let connection = scoped_connection(DatabaseStore::get_connection(db, connection_id)?, database_name)?;
+        if request.read_only && !sql::allows_read_query(&request.sql, &connection.engine) {
+            return Err(anyhow!("SQL 查询仅支持单条只读查询"));
+        }
+        if request.single_row_write && (request.read_only || !crate::database::sql::is_write_statement(&request.sql)) {
+            return Err(anyhow!("expected a writable record operation"));
+        }
         match connection.engine.as_str() {
             "remote_sqlite" => {
-                if request.read_only && crate::database::sql::is_write_statement(&request.sql) {
-                    return Err(anyhow!("read-only database query rejected write statement"));
-                }
                 let server = db.get_server(&connection.ssh_server_id)?;
                 SqliteRemote::execute(
                     pool,
@@ -101,6 +131,7 @@ impl DatabaseManager {
                     &connection.sqlite_path,
                     &request.sql,
                     request.timeout_ms,
+                    request.single_row_write,
                 )
             }
             "mysql" => with_driver_connection(db, &connection, |connection| {
@@ -109,6 +140,7 @@ impl DatabaseManager {
                     &request.sql,
                     request.read_only,
                     request.timeout_ms,
+                    request.single_row_write,
                 )
             }),
             "postgres" => with_driver_connection(db, &connection, |connection| {
@@ -117,18 +149,19 @@ impl DatabaseManager {
                     &request.sql,
                     request.read_only,
                     request.timeout_ms,
+                    request.single_row_write,
                 )
             }),
             engine => Err(anyhow!("unsupported database engine: {}", engine)),
         }
     }
 
-    pub fn backup(
-        db: &Database,
-        pool: &transport::SessionPool,
-        connection_id: &str,
-    ) -> Result<OpResult> {
-        let connection = DatabaseStore::get_connection(db, connection_id)?;
+    pub fn backup(db: &Database, pool: &transport::SessionPool, connection_id: &str) -> Result<OpResult> {
+        Self::backup_in_database(db, pool, connection_id, None)
+    }
+
+    pub fn backup_in_database(db: &Database, pool: &transport::SessionPool, connection_id: &str, database_name: Option<&str>) -> Result<OpResult> {
+        let connection = scoped_connection(DatabaseStore::get_connection(db, connection_id)?, database_name)?;
         let tables = match connection.engine.as_str() {
             "remote_sqlite" => {
                 let server = db.get_server(&connection.ssh_server_id)?;
@@ -179,13 +212,13 @@ impl DatabaseManager {
         )
     }
 
-    pub fn restore(
-        db: &Database,
-        pool: &transport::SessionPool,
-        request: &RestoreRequest,
-    ) -> Result<OpResult> {
+    pub fn restore(db: &Database, pool: &transport::SessionPool, request: &RestoreRequest) -> Result<OpResult> {
+        Self::restore_in_database(db, pool, request, None)
+    }
+
+    pub fn restore_in_database(db: &Database, pool: &transport::SessionPool, request: &RestoreRequest, database_name: Option<&str>) -> Result<OpResult> {
         validate_restore_mode(&request.mode)?;
-        let connection = DatabaseStore::get_connection(db, &request.target_connection_id)?;
+        let connection = scoped_connection(DatabaseStore::get_connection(db, &request.target_connection_id)?, database_name)?;
         let artifact = read_artifact(&request.backup_path)?;
         if artifact.source.engine != connection.engine {
             return Err(anyhow!(
@@ -230,13 +263,12 @@ impl DatabaseManager {
         )
     }
 
-    pub fn prepare_import(
-        db: &Database,
-        backup_path: &str,
-        target_connection_id: &str,
-        mode: &str,
-    ) -> Result<ImportPlan> {
-        let connection = DatabaseStore::get_connection(db, target_connection_id)?;
+    pub fn prepare_import(db: &Database, backup_path: &str, target_connection_id: &str, mode: &str) -> Result<ImportPlan> {
+        Self::prepare_import_in_database(db, backup_path, target_connection_id, mode, None)
+    }
+
+    pub fn prepare_import_in_database(db: &Database, backup_path: &str, target_connection_id: &str, mode: &str, database_name: Option<&str>) -> Result<ImportPlan> {
+        let connection = scoped_connection(DatabaseStore::get_connection(db, target_connection_id)?, database_name)?;
         if connection.engine != "mysql" {
             return Err(anyhow!("SQLite backup import target must be MySQL"));
         }
@@ -266,12 +298,13 @@ impl DatabaseManager {
         }
     }
 
-    pub fn run_import(
-        db: &Database,
-        request: &DatabaseImportRequest,
-    ) -> Result<DatabaseOperationResult> {
+    pub fn run_import(db: &Database, request: &DatabaseImportRequest) -> Result<DatabaseOperationResult> {
+        Self::run_import_in_database(db, request, None)
+    }
+
+    pub fn run_import_in_database(db: &Database, request: &DatabaseImportRequest, database_name: Option<&str>) -> Result<DatabaseOperationResult> {
         validate_mysql_import_plan(&request.plan)?;
-        let connection = DatabaseStore::get_connection(db, &request.plan.target_connection_id)?;
+        let connection = scoped_connection(DatabaseStore::get_connection(db, &request.plan.target_connection_id)?, database_name)?;
         if connection.engine != "mysql" {
             return Err(anyhow!("SQLite backup import target must be MySQL"));
         }
@@ -306,6 +339,22 @@ impl DatabaseManager {
         .with_artifact(&request.plan.backup_path)
         .with_affected_rows(affected_rows))
     }
+}
+
+fn scoped_connection(mut connection: DatabaseConnection, database_name: Option<&str>) -> Result<DatabaseConnection> {
+    if let Some(name) = database_name.filter(|name| !name.is_empty()) {
+        if !connection.database_name.is_empty() && connection.database_name != name {
+            return Err(anyhow!("此连接已指定数据库，不允许切换"));
+        }
+        if connection.engine != "mysql" && connection.database_name != name {
+            return Err(anyhow!("此连接不支持切换数据库"));
+        }
+        connection.database_name = name.to_string();
+    }
+    if connection.engine == "mysql" && connection.database_name.is_empty() {
+        return Err(anyhow!("请先选择数据库"));
+    }
+    Ok(connection)
 }
 
 fn with_driver_connection<T>(
@@ -496,6 +545,32 @@ fn restore_table_name(prefix: &str, table_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mysql_connection(database: &str) -> DatabaseConnection {
+        serde_json::from_value(serde_json::json!({
+            "id":"connection", "name":"test", "group_name":"", "engine":"mysql",
+            "ssh_server_id":"", "use_ssh_tunnel":false, "host":"localhost", "port":3306,
+            "database_name":database, "username":"test", "password":"", "sqlite_path":"",
+            "ssl_mode":"disable", "created_at":"", "updated_at":""
+        })).unwrap()
+    }
+
+    #[test]
+    fn runtime_database_does_not_change_saved_connection() {
+        let connection = mysql_connection("");
+        assert_eq!(scoped_connection(connection.clone(), Some("first")).unwrap().database_name, "first");
+        assert_eq!(scoped_connection(connection.clone(), Some("second")).unwrap().database_name, "second");
+        assert!(connection.database_name.is_empty());
+        assert!(scoped_connection(connection, None).is_err());
+    }
+
+    #[test]
+    fn fixed_database_rejects_switching() {
+        let connection = mysql_connection("fixed");
+        assert!(scoped_connection(connection.clone(), Some("other")).is_err());
+        assert_eq!(scoped_connection(connection.clone(), Some("fixed")).unwrap().database_name, "fixed");
+        assert_eq!(scoped_connection(connection, None).unwrap().database_name, "fixed");
+    }
 
     #[test]
     fn rejects_restore_modes_other_than_overwrite() {

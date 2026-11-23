@@ -178,6 +178,9 @@ struct MainView: View {
             headerFlexibleSpace
 
             Menu {
+                Button("快速连接") { appState.openWorkspaceEntry(.quickConnect) }
+                Button("本地终端") { appState.addLocalTerminalTab() }
+                Divider()
                 Button("添加服务器") { appState.openDialog() }
                 Button("新建凭据组") { appState.openCgDialog() }
             } label: {
@@ -375,8 +378,6 @@ struct MainView: View {
         case .database:
             DatabaseView(tab: tab, appState: appState)
                 .id(tab.id)
-        case .docker:
-            DockerView(appState: appState, tab: tab)
                 .id(tab.id)
         }
     }
@@ -494,7 +495,7 @@ struct MainView: View {
                         .font(.system(size: 28))
                         .foregroundStyle(.secondary)
 
-                    Text("退出 Orbit")
+                    Text("退出 Hostwren")
                         .font(.system(size: 16, weight: .semibold))
 
                     Text("关闭所有标签页后将退出应用程序。")

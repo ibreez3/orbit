@@ -7,28 +7,24 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit 0.0.15</title>
-      <description sparkle:format="markdown"><![CDATA[## Orbit v0.0.15
+      <title>Orbit 0.1.3</title>
+      <description sparkle:format="markdown"><![CDATA[macOS 与 Windows 统一升级至 v0.1.3（macOS build 19）。
 
-### 修复
+- 新增 Windows 客户端：SSH、本地终端、SFTP、资源监控、数据库及设置管理。
+- 统一两端界面入口，精简重复设置与工具入口，移除 Docker 功能。
+- MySQL 支持不指定数据库连接、库切换和点击表查看前 200 行；修复字段误识别为表及 SQL 引号问题。
+- 凭据保持 AES-256-GCM 加密，使用本地密钥文件，减少系统凭据库依赖。
+- Windows 新增签名自动更新、下载进度、安装确认及重启；macOS 继续使用 Sparkle 签名自动更新。
 
-- 终端输出洪峰（如 `cat` 大文件、日志狂刷、全屏 TUI 高频刷新）期间，主线程可能被大量输出分片长时间占用，导致界面卡顿、输入响应变慢。本次将输出泵改为按时间预算调度：每轮主队列处理最多约 4ms，单块从 64KB 降到 8KB，每帧最多 4 块，剩余数据留到下一帧继续处理，让 UI 在输出突发时保持可响应。
-- 分片粒度调整后仍严格保持字节顺序与完整性，输出内容不会丢失或乱序；新增回归测试，验证输出突发期间主队列能被正常服务。
+自动更新：macOS 稳定通道及 Windows 已启用更新的版本将在安装包完成 CI 构建、签名并上传后收到此版本。升级保留连接配置、凭据和设置，请勿删除应用数据目录或本地密钥文件。
 
-### 安装
-
-- Apple Silicon（arm64），macOS 13.0+。
-- 本版本为 ad-hoc 签名，暂未 Apple 公证；首次打开如被 Gatekeeper 拦截，请右键 → 打开，或执行 `xattr -cr /Applications/Orbit.app`。
-- 从 v0.0.8 及更早版本升级：由于 Sparkle 公钥轮换，需要手动安装一次本版本，之后可继续自动更新。
-- DMG 由 Release DMG workflow 构建、验证并附加到此 Release。
-
-**Full Changelog**: https://github.com/ibreez3/orbit/compare/v0.0.14...v0.0.15]]></description>
-      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.0.15</sparkle:fullReleaseNotesLink>
-      <pubDate>Wed, 18 Nov 2026 08:39:55 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.0.15/Orbit-v0.0.15-AppleSilicon.dmg" sparkle:version="16" sparkle:shortVersionString="0.0.15" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="gaE4UXIG5bWClOmGrqiADDyOFpmhD2VUK/rbQEAfxmmFPux4coIWhDY8WMqT3eF2n5HxAf3UT7Nmd3/0TtkfDw==" length="15874287" type="application/x-apple-diskimage"></enclosure>
+兼容说明：macOS v0.0.8 及更早版本因公钥轮换需手动安装一次。未包含更新功能的旧 Windows 构建也需手动安装一次。macOS 安装包面向 Apple Silicon，Windows 安装包面向 x64。]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.1.3</sparkle:fullReleaseNotesLink>
+      <pubDate>Sat, 21 Nov 2026 14:05:33 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.1.3/Orbit-v0.1.3-AppleSilicon.dmg" sparkle:version="19" sparkle:shortVersionString="0.1.3" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="9SpWe9UYqIhJNe/F8Qi3HHgtZTP0UfyGqTC4HhV7u/hIHZ3wZegLQb6OUadq0LiHr38pkUoiyArmwHP5jvT+Cw==" length="15949034" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: BA5wMZk+ds4vBFJCA+54ACVbwGikxf+rQDIttMtaPtVWWHRmWSICkItbbtNZCVjf6ftoSOZFBzj9C4oyLu7FDQ==
-length: 2408
+edSignature: trnzXnEj1jpAIP1/jODCCOVf0Ciyxmh1yCJiacyGS8M/4WpQUom346huAliWNYTieWpPPke3/MIF7oulNptNAg==
+length: 2344
 -->

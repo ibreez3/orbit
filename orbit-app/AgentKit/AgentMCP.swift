@@ -200,7 +200,7 @@ public enum AgentToolCatalog {
         ),
         MCPToolDefinition(
             name: AgentToolName.approvalStatus,
-            description: "Check whether a pending write approval has been granted in Orbit.",
+            description: "Check whether a pending write approval has been granted in Hostwren.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object(["requestId": .object(["type": .string("string")])]),
@@ -279,7 +279,7 @@ public final class MCPBridgeCore {
                     value: .object([
                         "status": .string("pending_approval"),
                         "requestId": .string(pendingRequestId ?? ""),
-                        "message": .string("Approve this Agent in Orbit, then retry the same tool call.")
+                        "message": .string("Approve this Agent in Hostwren, then retry the same tool call.")
                     ])
                 )
             }
@@ -305,7 +305,7 @@ public final class MCPBridgeCore {
                         value: .object([
                             "status": .string("pending_approval"),
                             "message": .string(
-                                "The Orbit session ended. Approve this Agent again, then retry the same tool call."
+                                "The Hostwren session ended. Approve this Agent again, then retry the same tool call."
                             )
                         ])
                     )
@@ -361,7 +361,7 @@ public final class MCPBridgeCore {
                 }
                 throw AgentSocketClientError.remote(AgentErrorBody(
                     code: .admissionDenied,
-                    message: "Orbit denied the agent connection"
+                    message: "Hostwren denied the agent connection"
                 ))
             }
         }

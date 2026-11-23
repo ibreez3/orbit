@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct DatabaseBackupSheet: View {
     let appState: AppState
     let initialTargetConnectionId: String?
+    var initialDatabaseName: String = ""
+    @State private var databaseName = ""
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var inventoryState: InventoryState
@@ -20,10 +22,14 @@ struct DatabaseBackupSheet: View {
             Divider()
             content
             Divider()
+            if let target = inventoryState.databaseConnections.first(where: { $0.id == targetConnectionId }), target.engine == "mysql" {
+                DatabaseCatalogPicker(appState: appState, connection: target, selection: $databaseName).padding(12)
+            }
             footer
         }
         .frame(width: 560)
-        .onAppear(perform: applyInitialSelection)
+        .onAppear { applyInitialSelection(); databaseName = initialDatabaseName }
+        .onChange(of: targetConnectionId) { _ in databaseName = targetConnectionId == initialTargetConnectionId ? initialDatabaseName : "" }
     }
 
     private var header: some View {
@@ -168,7 +174,7 @@ struct DatabaseBackupSheet: View {
                 target_connection_id: targetConnectionId,
                 mode: "overwrite"
             )
-            let result = try await appState.restoreDatabaseBackup(request: request)
+            let result = try await appState.restoreDatabaseBackup(request: request, databaseName: databaseName)
             resultMessage = appState.databaseOperationMessage(result)
         } catch {
             errorMessage = error.localizedDescription

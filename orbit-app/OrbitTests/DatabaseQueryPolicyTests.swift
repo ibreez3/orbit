@@ -2,6 +2,14 @@ import XCTest
 @testable import Orbit
 
 final class DatabaseQueryPolicyTests: XCTestCase {
+    func testIdentifierQuotingMatchesDatabaseEngine() {
+        XCTAssertEqual(DatabaseQueryPolicy.quoteIdentifier("access_auths", engine: "mysql"), "`access_auths`")
+        XCTAssertEqual(DatabaseQueryPolicy.quoteIdentifier("odd`table", engine: "mysql"), "`odd``table`")
+        XCTAssertEqual(DatabaseQueryPolicy.quoteIdentifier("a.b", engine: "mysql"), "`a.b`")
+        XCTAssertEqual(DatabaseQueryPolicy.quoteIdentifier("odd\"table", engine: "postgres"), "\"odd\"\"table\"")
+        XCTAssertEqual(DatabaseQueryPolicy.quoteIdentifier("items", engine: "remote_sqlite"), "\"items\"")
+    }
+
     func testAddsLimitToPlainSelect() {
         XCTAssertEqual(
             DatabaseQueryPolicy.applyingAutoLimit(

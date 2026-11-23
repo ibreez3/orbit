@@ -814,8 +814,27 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse(DatabaseOperationResult.self, rc: rc, outJson: outJson)
     }
 
-    func listDatabaseSchemaAsync(connectionId: String) async throws -> DatabaseSchema {
-        try await runOffThread { try self.listDatabaseSchema(connectionId: connectionId) }
+    func databaseRequestAsync<T: Decodable>(_ action: String, arguments: [String: Any], as type: T.Type) async throws -> T {
+        let data = try JSONSerialization.data(withJSONObject: arguments)
+        let json = String(decoding: data, as: UTF8.self)
+        return try await runOffThread {
+            try self.ensureInitialized()
+            var output: UnsafeMutablePointer<CChar>?
+            let rc = action.withCString { actionPointer in
+                json.withCString { argumentPointer in
+                    orbit_db_request(self.app, actionPointer, argumentPointer, &output)
+                }
+            }
+            return try self.decodeDatabaseResponse(type, rc: rc, outJson: output)
+        }
+    }
+
+    func listDatabaseCatalogsAsync(connectionId: String) async throws -> [String] {
+        try await databaseRequestAsync("database.catalogs", arguments: ["id": connectionId], as: [String].self)
+    }
+
+    func listDatabaseSchemaAsync(connectionId: String, databaseName: String? = nil) async throws -> DatabaseSchema {
+        try await databaseRequestAsync("database.schema", arguments: ["id": connectionId, "database_name": databaseName ?? ""], as: DatabaseSchema.self)
     }
 
     func listDatabaseSchema(connectionId: String) throws -> DatabaseSchema {
@@ -827,8 +846,8 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse(DatabaseSchema.self, rc: rc, outJson: outJson)
     }
 
-    func executeDatabaseQueryAsync(connectionId: String, request: DatabaseQueryRequest) async throws -> DatabaseQueryResult {
-        try await runOffThread { try self.executeDatabaseQuery(connectionId: connectionId, request: request) }
+    func executeDatabaseQueryAsync(connectionId: String, request: DatabaseQueryRequest, databaseName: String? = nil) async throws -> DatabaseQueryResult {
+        try await databaseRequestAsync("database.query", arguments: ["id": connectionId, "database_name": databaseName ?? "", "input": try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))], as: DatabaseQueryResult.self)
     }
 
     func executeDatabaseQuery(connectionId: String, request: DatabaseQueryRequest) throws -> DatabaseQueryResult {
@@ -843,8 +862,22 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse(DatabaseQueryResult.self, rc: rc, outJson: outJson)
     }
 
-    func backupDatabaseAsync(connectionId: String) async throws -> DatabaseOperationResult {
-        try await runOffThread { try self.backupDatabase(connectionId: connectionId) }
+    func exportDatabaseTable(connectionId: String, databaseName: String, table: DatabaseTableSchema, data: Bool, destination: URL) async throws {
+        let pending = destination.deletingLastPathComponent().appendingPathComponent(".orbit-" + UUID().uuidString + ".sql")
+        let _: Bool = try await databaseRequestAsync("database.export_table", arguments: [
+            "id": connectionId, "database_name": databaseName, "namespace": table.namespace ?? "public",
+            "table": table.name, "data": data, "path": pending.path
+        ], as: Bool.self)
+        defer { try? FileManager.default.removeItem(at: pending) }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: pending)
+        } else {
+            try FileManager.default.moveItem(at: pending, to: destination)
+        }
+    }
+
+    func backupDatabaseAsync(connectionId: String, databaseName: String? = nil) async throws -> DatabaseOperationResult {
+        try await databaseRequestAsync("database.backup", arguments: ["id": connectionId, "database_name": databaseName ?? ""], as: DatabaseOperationResult.self)
     }
 
     func backupDatabase(connectionId: String) throws -> DatabaseOperationResult {
@@ -867,8 +900,8 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse([DatabaseBackupRecord].self, rc: rc, outJson: outJson)
     }
 
-    func restoreDatabaseAsync(request: DatabaseRestoreRequest) async throws -> DatabaseOperationResult {
-        try await runOffThread { try self.restoreDatabase(request: request) }
+    func restoreDatabaseAsync(request: DatabaseRestoreRequest, databaseName: String? = nil) async throws -> DatabaseOperationResult {
+        try await databaseRequestAsync("database.restore", arguments: ["database_name": databaseName ?? "", "input": try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))], as: DatabaseOperationResult.self)
     }
 
     func restoreDatabase(request: DatabaseRestoreRequest) throws -> DatabaseOperationResult {
@@ -881,14 +914,8 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse(DatabaseOperationResult.self, rc: rc, outJson: outJson)
     }
 
-    func prepareDatabaseImportAsync(backupPath: String, targetConnectionId: String, mode: String) async throws -> DatabaseImportPlan {
-        try await runOffThread {
-            try self.prepareDatabaseImport(
-                backupPath: backupPath,
-                targetConnectionId: targetConnectionId,
-                mode: mode
-            )
-        }
+    func prepareDatabaseImportAsync(backupPath: String, targetConnectionId: String, mode: String, databaseName: String? = nil) async throws -> DatabaseImportPlan {
+        try await databaseRequestAsync("database.prepare_import", arguments: ["id": targetConnectionId, "backup_path": backupPath, "mode": mode, "database_name": databaseName ?? ""], as: DatabaseImportPlan.self)
     }
 
     func prepareDatabaseImport(backupPath: String, targetConnectionId: String, mode: String) throws -> DatabaseImportPlan {
@@ -904,8 +931,8 @@ class OrbitBridge: SftpTransferClient {
         return try decodeDatabaseResponse(DatabaseImportPlan.self, rc: rc, outJson: outJson)
     }
 
-    func runDatabaseImportAsync(request: DatabaseImportRequest) async throws -> DatabaseOperationResult {
-        try await runOffThread { try self.runDatabaseImport(request: request) }
+    func runDatabaseImportAsync(request: DatabaseImportRequest, databaseName: String? = nil) async throws -> DatabaseOperationResult {
+        try await databaseRequestAsync("database.import", arguments: ["database_name": databaseName ?? "", "input": try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))], as: DatabaseOperationResult.self)
     }
 
     func runDatabaseImport(request: DatabaseImportRequest) throws -> DatabaseOperationResult {
@@ -1299,84 +1326,6 @@ class OrbitBridge: SftpTransferClient {
         }
         defer { orbit_free_string(json) }
         return try Self.decodeJSON([ServerProcess].self, from: json)
-    }
-
-    // MARK: - Docker
-
-    func listDockerContainersAsync(serverId: String) async throws -> [DockerContainer] {
-        try await runOffThread { try self.listDockerContainers(serverId: serverId) }
-    }
-
-    func listDockerContainers(serverId: String) throws -> [DockerContainer] {
-        try ensureInitialized()
-        var outJson: UnsafeMutablePointer<CChar>?
-        let rc = serverId.withCString { sidPtr in
-            orbit_docker_list_containers(app, sidPtr, &outJson)
-        }
-        guard rc == 0, let json = outJson else {
-            throw OrbitError.apiError(rc)
-        }
-        defer { orbit_free_string(json) }
-        return try Self.decodeJSON([DockerContainer].self, from: json)
-    }
-
-    func getDockerStatsAsync(serverId: String) async throws -> [DockerContainerStats] {
-        try await runOffThread { try self.getDockerStats(serverId: serverId) }
-    }
-
-    func getDockerStats(serverId: String) throws -> [DockerContainerStats] {
-        try ensureInitialized()
-        var outJson: UnsafeMutablePointer<CChar>?
-        let rc = serverId.withCString { sidPtr in
-            orbit_docker_stats(app, sidPtr, &outJson)
-        }
-        guard rc == 0, let json = outJson else {
-            throw OrbitError.apiError(rc)
-        }
-        defer { orbit_free_string(json) }
-        return try Self.decodeJSON([DockerContainerStats].self, from: json)
-    }
-
-    func getDockerLogsAsync(serverId: String, containerId: String, tail: UInt32 = 200) async throws -> String {
-        try await runOffThread { try self.getDockerLogs(serverId: serverId, containerId: containerId, tail: tail) }
-    }
-
-    func getDockerLogs(serverId: String, containerId: String, tail: UInt32 = 200) throws -> String {
-        try ensureInitialized()
-        var outLogs: UnsafeMutablePointer<CChar>?
-        let rc = serverId.withCString { sidPtr in
-            containerId.withCString { cidPtr in
-                orbit_docker_logs(app, sidPtr, cidPtr, tail, &outLogs)
-            }
-        }
-        guard rc == 0, let logs = outLogs else {
-            throw OrbitError.apiError(rc)
-        }
-        defer { orbit_free_string(logs) }
-        return String(cString: logs)
-    }
-
-    @discardableResult
-    func dockerActionAsync(serverId: String, containerId: String, action: String) async throws -> String {
-        try await runOffThread { try self.dockerAction(serverId: serverId, containerId: containerId, action: action) }
-    }
-
-    @discardableResult
-    func dockerAction(serverId: String, containerId: String, action: String) throws -> String {
-        try ensureInitialized()
-        var outOutput: UnsafeMutablePointer<CChar>?
-        let rc = serverId.withCString { sidPtr in
-            containerId.withCString { cidPtr in
-                action.withCString { actionPtr in
-                    orbit_docker_action(app, sidPtr, cidPtr, actionPtr, &outOutput)
-                }
-            }
-        }
-        guard rc == 0, let output = outOutput else {
-            throw OrbitError.apiError(rc)
-        }
-        defer { orbit_free_string(output) }
-        return String(cString: output)
     }
 
     func exportConfig() throws -> String {

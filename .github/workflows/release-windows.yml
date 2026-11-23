@@ -1,0 +1,138 @@
+name: Release Windows
+
+on:
+  push:
+    branches: ["agent/windows-release-validation"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: orbit-release-windows
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.WINDOWS_UPDATER_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.WINDOWS_UPDATER_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.sha }}
+      - name: Resolve release
+        id: release
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:RELEASE_TAG }
+          if (!$tag) { $tag = 'v' + (Get-Content orbit-windows/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') { throw 'Invalid release tag' }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+          "stable=$($tag -match '^v\d+\.\d+\.\d+$')" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: orbit-windows/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate version and signing configuration
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if (!$env:TAURI_SIGNING_PRIVATE_KEY) { throw 'WINDOWS_UPDATER_PRIVATE_KEY is required' }
+          $config = Get-Content orbit-windows/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $package = Get-Content orbit-windows/package.json -Raw | ConvertFrom-Json
+          $cargo = Select-String '^version = "([^"]+)"$' orbit-windows/src-tauri/Cargo.toml | Select-Object -First 1
+          if ($config.version -ne $env:RELEASE_VERSION -or $package.version -ne $env:RELEASE_VERSION -or $cargo.Matches.Groups[1].Value -ne $env:RELEASE_VERSION) { throw 'Windows versions must match the release tag' }
+          if (!$config.plugins.updater.pubkey -or !$config.plugins.updater.requireSignedVersion -or $config.plugins.updater.dangerousInsecureTransportProtocol) { throw 'Invalid updater trust configuration' }
+      - name: Validate frontend
+        working-directory: orbit-windows
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed' }
+      - name: Build signed installer
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Bundle
+      - name: Prepare release assets
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          $installer = @(Get-ChildItem orbit-windows/src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          $name = "Orbit-$env:RELEASE_TAG-Windows-x64-setup.exe"
+          Copy-Item $installer[0].FullName "release/$name"
+          Copy-Item "$($installer[0].FullName).sig" "release/$name.sig"
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            Set-Content release/notes.md 'CI build validation; not a published update.' -Encoding utf8
+          } else {
+            gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json body --jq .body | Set-Content release/notes.md -Encoding utf8
+            if ($LASTEXITCODE -ne 0) { throw 'Could not read release notes' }
+          }
+          python scripts/windows-update-manifest.py --version $env:RELEASE_VERSION --url "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$name" --signature "release/$name.sig" --notes release/notes.md --output release/windows-update.json
+          if ($LASTEXITCODE -ne 0) { throw 'Manifest validation failed' }
+      - name: Upload installer to GitHub Release
+        if: github.event_name != 'push'
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $name = "Orbit-$env:RELEASE_TAG-Windows-x64-setup.exe"
+          gh release upload $env:RELEASE_TAG "release/$name" "release/$name.sig" release/windows-update.json --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed; do not overwrite an existing signed release' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-signed-release
+          path: release/*
+      - name: Publish stable update manifest
+        if: github.event_name != 'push' && steps.release.outputs.stable == 'True'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          Copy-Item release/windows-update.json "$env:RUNNER_TEMP/windows-update.json"
+          git fetch origin develop
+          git checkout -B windows-update-feed origin/develop
+          if (Test-Path docs/windows-update.json) {
+            $previous = Get-Content docs/windows-update.json -Raw | ConvertFrom-Json
+            if ([version]$previous.version -ge [version]$env:RELEASE_VERSION) { throw 'Refusing to replace a newer or identical stable feed' }
+          }
+          Copy-Item "$env:RUNNER_TEMP/windows-update.json" docs/windows-update.json
+          git config user.name github-actions[bot]
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/windows-update.json
+          git commit -m "chore: update Windows feed for v$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw 'Feed commit failed' }
+          git push origin HEAD:develop
+          if ($LASTEXITCODE -ne 0) {
+            git fetch origin develop
+            if ($LASTEXITCODE -ne 0) { throw 'Feed refresh failed' }
+            git rebase origin/develop
+            if ($LASTEXITCODE -ne 0) { throw 'Feed rebase failed; resolve the conflict before publishing' }
+            git push origin HEAD:develop
+            if ($LASTEXITCODE -ne 0) { throw 'Feed push failed after refreshing develop' }
+          }

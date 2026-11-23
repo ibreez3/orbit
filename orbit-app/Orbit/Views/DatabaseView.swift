@@ -3,6 +3,10 @@ import SwiftUI
 struct DatabaseView: View {
     let tab: TabItem
     let appState: AppState
+    private enum Panel { case objects, data, structure, sql, er }
+    @State private var panel: Panel = .objects
+    @State private var gridLocked = false
+    @State private var databaseName = ""
     @State private var schema: DatabaseSchema?
     @State private var queryResult: DatabaseQueryResult?
     @State private var errorMessage: String?
@@ -28,9 +32,17 @@ struct DatabaseView: View {
     }
 
     var body: some View {
-        HSplitView {
-            tableListPanel
-            editorAndResultsPanel
+        VStack(spacing: 0) {
+            if let connection, connection.engine == "mysql" {
+                DatabaseCatalogPicker(appState: appState, connection: connection, selection: Binding(get: { databaseName }, set: switchDatabase))
+                    .disabled(gridLocked || isExecuting || isLoadingSchema || isBackupRunning)
+                    .padding(8)
+                Divider()
+            }
+            HSplitView {
+                tableListPanel.disabled(gridLocked)
+                editorAndResultsPanel
+            }
         }
         .onAppear {
             restoreSnapshot()
@@ -54,11 +66,11 @@ struct DatabaseView: View {
         .onChange(of: dbDefaultLimit) { _ in applyDatabaseSettings() }
         .onChange(of: dbAutoLimit) { _ in applyDatabaseSettings() }
         .sheet(isPresented: $showRestoreSheet) {
-            DatabaseBackupSheet(appState: appState, initialTargetConnectionId: connection?.id)
+            DatabaseBackupSheet(appState: appState, initialTargetConnectionId: connection?.id, initialDatabaseName: databaseName)
                 .environmentObject(appState.inventoryState)
         }
         .sheet(isPresented: $showImportMapping) {
-            DatabaseImportMappingView(appState: appState, initialTargetConnectionId: connection?.id)
+            DatabaseImportMappingView(appState: appState, initialTargetConnectionId: connection?.id, initialDatabaseName: databaseName)
                 .environmentObject(appState.inventoryState)
         }
     }
@@ -122,23 +134,27 @@ struct DatabaseView: View {
             } else if filteredTables.isEmpty {
                 emptyPanel(schema == nil ? "尚未加载 Schema" : "没有匹配的表")
             } else {
-                List(selection: $selectedTable) {
+                List {
                     ForEach(filteredTables) { table in
-                        TableSchemaRow(table: table)
-                            .tag(table.name)
+                        Button {
+                            if panel == .structure { selectedTable = table.id } else { selectTable(table.id) }
+                        } label: {
+                            TableSchemaRow(table: table)
+                                .contentShape(Rectangle())
+                        }
+                            .buttonStyle(.plain)
+                            .listRowBackground(selectedTable == table.id ? Color.accentColor.opacity(0.12) : Color.clear)
                             .contextMenu {
-                                Button("查询前 \(Int(dbDefaultLimit)) 行") {
-                                    selectTable(table.name, replaceSQL: true)
+                                Button("查看表数据") {
+                                    selectTable(table.id)
                                 }
+                                Button("查看结构与索引") { selectedTable = table.id; panel = .structure }
                                 Button("复制表名") {
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(table.name, forType: .string)
                                 }
                             }
-                            .onTapGesture {
-                                selectTable(table.name, replaceSQL: false)
-                            }
-                        if selectedTable == table.name {
+                        if selectedTable == table.id {
                             ForEach(table.columns) { column in
                                 HStack(spacing: 6) {
                                     Image(systemName: column.primary_key ? "key.fill" : "number")
@@ -160,6 +176,7 @@ struct DatabaseView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .disabled(isExecuting)
             }
         }
         .frame(minWidth: 210, idealWidth: 250, maxWidth: 340)
@@ -167,10 +184,73 @@ struct DatabaseView: View {
 
     private var editorAndResultsPanel: some View {
         VStack(spacing: 0) {
-            sqlEditor
+            HStack {
+                Picker("视图", selection: $panel) {
+                    Text("对象").tag(Panel.objects)
+                    Text("表数据").tag(Panel.data)
+                    Text("结构与索引").tag(Panel.structure)
+                    Text("SQL 查询").tag(Panel.sql)
+                    Label("ER 图", systemImage: "point.3.connected.trianglepath.dotted").tag(Panel.er)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .disabled(isExecuting || gridLocked)
+                Spacer()
+            }.padding(8)
             Divider()
-            resultsPanel
+            switch panel {
+            case .sql:
+                sqlEditor
+                resultsPanel
+            case .objects, .data, .structure, .er:
+                if let schema, let connection {
+                    if panel == .objects {
+                        Table(filteredTables) {
+                            TableColumn("表名") { table in
+                                Button { selectTable(table.id) } label: {
+                                    Label(table.displayName, systemImage: "tablecells")
+                                }.buttonStyle(.plain).help("打开表数据")
+                            }
+                            TableColumn("字段数") { table in Text(String(table.columns.count)) }.width(58)
+                            TableColumn("主键") { table in
+                                Text(table.columns.filter(\.primary_key).map(\.name).joined(separator: ", "))
+                            }
+                        }
+                    } else if panel == .er {
+                        DatabaseRelationshipView(tables: schema.tables, fetch: {
+                            try await runGridSQL(DatabaseTableQuery.relationships(connection.engine), true)
+                        }, openTable: selectTable)
+                        .id(schemaRequestRevision)
+                    } else if let table = schema.tables.first(where: { $0.id == selectedTable }) {
+                        if panel == .structure {
+                            DatabaseStructureView(query: DatabaseTableQuery(engine: connection.engine, table: table),
+                                                  readOnly: dbReadOnlyMode, navigationLocked: $gridLocked, execute: { sql, readOnly in
+                                try await runTableSQL(sql, readOnly: readOnly, singleRow: false)
+                            }, export: { url, data in
+                                try await appState.bridge.exportDatabaseTable(connectionId: connection.id, databaseName: databaseName,
+                                                                              table: table, data: data, destination: url)
+                            }).id(table.id).id(schemaRequestRevision)
+                        } else {
+                            DatabaseTableGrid(query: DatabaseTableQuery(engine: connection.engine, table: table),
+                                              readOnly: dbReadOnlyMode, navigationLocked: $gridLocked, execute: runGridSQL)
+                                .id(table.columns.map(\.name))
+                                .id(table.id)
+                        }
+                    } else { emptyPanel("选择表以浏览记录") }
+                } else { emptyPanel(errorMessage ?? (isLoadingSchema ? "正在加载数据库结构…" : "选择数据库以查看表结构")) }
+            }
         }
+    }
+
+    private func runGridSQL(_ sql: String, _ readOnly: Bool) async throws -> DatabaseQueryResult {
+        try await runTableSQL(sql, readOnly: readOnly, singleRow: !readOnly)
+    }
+
+    private func runTableSQL(_ sql: String, readOnly: Bool, singleRow: Bool) async throws -> DatabaseQueryResult {
+        guard let connection, readOnly || !dbReadOnlyMode else { throw CocoaError(.fileWriteNoPermission) }
+        let request = DatabaseQueryRequest(sql: sql, read_only: readOnly, timeout_ms: UInt32(dbQueryTimeout * 1000), single_row_write: singleRow)
+        return try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request, databaseName: databaseName)
     }
 
     private var sqlEditor: some View {
@@ -212,8 +292,8 @@ struct DatabaseView: View {
 
                 Spacer()
 
-                Toggle("只读", isOn: $dbReadOnlyMode)
-                    .toggleStyle(.checkbox)
+                Label("只读查询", systemImage: "lock")
+                    .foregroundStyle(.secondary)
                     .font(.system(size: 11))
 
                 Button(action: formatQuery) {
@@ -259,8 +339,8 @@ struct DatabaseView: View {
                 ProgressView("执行 SQL…")
                     .font(.system(size: 12))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let queryResult {
-                queryResultView(queryResult)
+            } else if let result = queryResult {
+                queryResultView(result)
             } else {
                 emptyPanel("执行 SQL 查看结果")
             }
@@ -271,11 +351,6 @@ struct DatabaseView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                 Spacer()
-                if dbReadOnlyMode {
-                    Text("只读")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                }
                 Text("\(Int(dbQueryTimeout))s 超时")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
@@ -339,19 +414,19 @@ struct DatabaseView: View {
         let q = tableSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return all }
         return all.filter {
-            $0.name.lowercased().contains(q)
+            $0.displayName.lowercased().contains(q)
                 || $0.columns.contains { $0.name.lowercased().contains(q) }
         }
     }
 
     private var canExecuteQuery: Bool {
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        return !dbReadOnlyMode || !isWriteStatement(trimmed)
+        guard !trimmed.isEmpty, connection?.engine != "mysql" || !(connection?.database_name ?? "").isEmpty || !databaseName.isEmpty else { return false }
+        return !isWriteStatement(trimmed)
     }
 
     private var statusText: String {
-        if let queryResult {
+        if let queryResult = queryResult {
             if !queryResult.columns.isEmpty {
                 return "\(queryResult.rows.count) 行，\(queryResult.columns.count) 列，\(queryResult.elapsed_ms) ms"
             }
@@ -373,14 +448,15 @@ struct DatabaseView: View {
             publishAIContext()
             return
         }
+        guard connection.engine != "mysql" || !connection.database_name.isEmpty || !databaseName.isEmpty else { return }
         isLoadingSchema = true
         errorMessage = nil
         do {
-            let loaded = try await appState.bridge.listDatabaseSchemaAsync(connectionId: connection.id)
+            let loaded = try await appState.bridge.listDatabaseSchemaAsync(connectionId: connection.id, databaseName: databaseName)
             guard isCurrentSchemaRequest(schemaRevision, invalidationToken: schemaInvalidationToken) else { return }
             schema = loaded
-            if selectedTable == nil {
-                selectedTable = loaded.tables.first?.name
+            if !loaded.tables.contains(where: { $0.id == selectedTable }) {
+                selectedTable = loaded.tables.first?.id
             }
             saveSnapshot()
         } catch {
@@ -409,10 +485,10 @@ struct DatabaseView: View {
                     limit: Int(dbDefaultLimit),
                     enabled: dbAutoLimit
                 ),
-                read_only: dbReadOnlyMode,
+                read_only: true,
                 timeout_ms: UInt32(dbQueryTimeout * 1000)
             )
-            let result = try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request)
+            let result = try await appState.bridge.executeDatabaseQueryAsync(connectionId: connection.id, request: request, databaseName: databaseName)
             guard isCurrentQueryRequest(queryRevision, invalidationToken: queryInvalidationToken) else { return }
             queryResult = result
             saveSnapshot()
@@ -426,20 +502,18 @@ struct DatabaseView: View {
         publishAIContext()
     }
 
-    private func selectTable(_ tableName: String, replaceSQL: Bool) {
+    private func selectTable(_ tableName: String) {
+        guard !gridLocked, !isExecuting else { return }
         selectedTable = tableName
-        let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if replaceSQL || trimmed.isEmpty || trimmed.hasPrefix("SELECT * FROM") {
-            let limitClause = dbAutoLimit ? " LIMIT \(Int(dbDefaultLimit))" : ""
-            sqlText = "SELECT * FROM \(quoteIdentifier(tableName))\(limitClause);"
-        }
+        panel = .data
     }
 
     private func applyDatabaseSettings() {
         guard dbAutoLimit else { return }
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty, let table = selectedTable ?? schema?.tables.first?.name {
-            sqlText = "SELECT * FROM \(quoteIdentifier(table)) LIMIT \(Int(dbDefaultLimit));"
+        if trimmed.isEmpty, let table = schema?.tables.first(where: { $0.id == selectedTable }) ?? schema?.tables.first {
+            let source = table.namespace == nil ? quoteIdentifier(table.name) : table.id
+            sqlText = "SELECT * FROM \(source) LIMIT \(Int(dbDefaultLimit));"
         }
     }
 
@@ -458,7 +532,7 @@ struct DatabaseView: View {
     }
 
     private func quoteIdentifier(_ value: String) -> String {
-        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        DatabaseQueryPolicy.quoteIdentifier(value, engine: connection?.engine ?? "remote_sqlite")
     }
 
     @MainActor
@@ -468,7 +542,7 @@ struct DatabaseView: View {
         backupStatusMessage = nil
         backupStatusIsError = false
         do {
-            let result = try await appState.backupDatabaseConnectionResult(connection)
+            let result = try await appState.backupDatabaseConnectionResult(connection, databaseName: databaseName)
             backupStatusIsError = !result.ok
             backupStatusMessage = appState.databaseOperationMessage(result)
         } catch {
@@ -478,11 +552,22 @@ struct DatabaseView: View {
         isBackupRunning = false
     }
 
+    private func switchDatabase(_ name: String) {
+        guard name != databaseName else { return }
+        databaseName = name
+        clearLoadedState()
+        sqlText = ""
+        saveSnapshot()
+        Task { await loadSchema() }
+    }
+
     private func restoreSnapshot() {
         guard let snapshot = appState.databasePanelSnapshot(for: tab.id) else { return }
+        databaseName = snapshot.databaseName
         schema = snapshot.schema
         selectedTable = snapshot.selectedTable
         if !snapshot.sqlText.isEmpty {
+            panel = .sql
             sqlText = snapshot.sqlText
         }
         queryResult = snapshot.queryResult
@@ -495,6 +580,8 @@ struct DatabaseView: View {
         isLoadingSchema = false
         isExecuting = false
         schema = nil
+        panel = .objects
+        gridLocked = false
         selectedTable = nil
         queryResult = nil
         errorMessage = nil
@@ -515,6 +602,7 @@ struct DatabaseView: View {
     private func saveSnapshot() {
         appState.saveDatabasePanelSnapshot(
             DatabasePanelSnapshot(
+                databaseName: databaseName,
                 schema: schema,
                 selectedTable: selectedTable,
                 sqlText: sqlText,
@@ -563,7 +651,7 @@ private struct TableSchemaRow: View {
             Image(systemName: "tablecells")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            Text(table.name)
+            Text(table.displayName)
                 .font(.system(size: 12))
                 .lineLimit(1)
             Spacer()
@@ -592,6 +680,36 @@ private struct ResultRow: View {
                     .background(isHeader ? Color.primary.opacity(0.07) : Color.clear)
                     .border(Color.primary.opacity(0.08), width: 0.5)
             }
+        }
+    }
+}
+
+struct DatabaseCatalogPicker: View {
+    let appState: AppState
+    let connection: DatabaseConnection
+    @Binding var selection: String
+    @State private var databases: [String] = []
+    @State private var error: String?
+
+    var body: some View {
+        HStack {
+            if connection.database_name.isEmpty {
+                Picker("数据库", selection: $selection) {
+                    Text("选择数据库").tag("")
+                    ForEach(databases, id: \.self) { Text($0).tag($0) }
+                }
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            } else {
+                Text("数据库：\(connection.database_name)（固定）")
+            }
+            Spacer()
+        }
+        .task(id: connection.id + connection.database_name) {
+            guard connection.database_name.isEmpty else { selection = connection.database_name; return }
+            do {
+                databases = try await appState.bridge.listDatabaseCatalogsAsync(connectionId: connection.id)
+                error = nil
+            } catch { self.error = error.localizedDescription }
         }
     }
 }

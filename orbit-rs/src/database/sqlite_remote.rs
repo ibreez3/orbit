@@ -57,7 +57,7 @@ impl SqliteRemoteCommand {
             }
             Self::Read { path, sql } => {
                 format!(
-                    "sqlite3 -header -separator {} -nullvalue {} {} {}",
+                    "sqlite3 -cmd 'PRAGMA query_only=ON' -header -separator {} -nullvalue {} {} {}",
                     shell_quote(SQLITE_COLUMN_SEPARATOR),
                     shell_quote(SQLITE_NULL_VALUE),
                     shell_quote(path),
@@ -167,7 +167,7 @@ impl SqliteRemote {
         sqlite_path: &str,
         table_name: &str,
     ) -> Result<String> {
-        let sql = format!("PRAGMA table_info({})", sqlite_ident(table_name));
+        let sql = format!("PRAGMA table_xinfo({})", sqlite_ident(table_name));
         let command = SqliteRemoteCommand::read(sqlite_path, &sql).to_shell();
         ssh::SshManager::exec_command_checked(
             pool,
@@ -198,6 +198,7 @@ impl SqliteRemote {
             let columns = info_rows
                 .into_iter()
                 .filter_map(|info| {
+                    if info.get("hidden").and_then(|v| v.as_deref()) == Some("1") { return None; }
                     let name = info.get("name")?.clone()?;
                     Some(DatabaseColumnSchema {
                         name,
@@ -219,11 +220,12 @@ impl SqliteRemote {
                             .unwrap_or(0)
                             != 0,
                         default_value: info.get("dflt_value").cloned().flatten(),
-                        auto_generated: false,
+                        auto_generated: matches!(info.get("hidden").and_then(|v| v.as_deref()), Some("2" | "3")),
                     })
                 })
                 .collect();
             tables.push(DatabaseTableSchema {
+                namespace: None,
                 name: name.to_string(),
                 columns,
             });
@@ -273,8 +275,21 @@ impl SqliteRemote {
         sqlite_path: &str,
         sql: &str,
         timeout_ms: u32,
+        single_row_write: bool,
     ) -> Result<DatabaseQueryResult> {
         let started = Instant::now();
+        if single_row_write {
+            let script = single_row_script(sql);
+            let command = format!("sqlite3 -batch -bail {}", shell_quote(sqlite_path));
+            let output = if sql.contains(['\r', '\n', '\0']) {
+                let command = format!("{} {}", command, shell_quote(&script));
+                ssh::SshManager::exec_command_output_with_timeout(pool, server, db, &command, timeout_ms)?
+            } else {
+                ssh::SshManager::exec_command_with_input(pool, server, db, &command, timeout_ms, Some(script.as_bytes()))?
+            };
+            output.into_success_stdout("提交记录，要求恰好修改一行")?;
+            return Ok(DatabaseQueryResult::empty_message("已提交", 1, started.elapsed().as_millis() as u64));
+        }
         let write_statement = is_write_statement(sql);
         let output = Self::execute_raw(pool, server, db, sqlite_path, sql, timeout_ms)?;
         let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -325,6 +340,13 @@ impl SqliteRemote {
             .filter(|s| !s.is_empty())
             .map(str::to_string))
     }
+}
+
+fn single_row_script(sql: &str) -> String {
+    format!(
+        "PRAGMA foreign_keys=ON;\nBEGIN IMMEDIATE;\nCREATE TEMP TABLE orbit_edit_count(n INTEGER CHECK(n=1));\n{};\nINSERT OR ROLLBACK INTO temp.orbit_edit_count VALUES(changes());\nCOMMIT;\n",
+        sql.trim_end_matches(';')
+    )
 }
 
 fn sqlite_ident(identifier: &str) -> String {
@@ -457,13 +479,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn checked_edit_rolls_back_when_multiple_rows_match() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE t(v INTEGER); INSERT INTO t VALUES(1),(1);").unwrap();
+        assert!(db.execute_batch(&single_row_script("UPDATE t SET v=2")).is_err());
+        assert!(db.is_autocommit());
+        let count: i64 = db.query_row("SELECT count(*) FROM t WHERE v=1", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 2);
+    }
+
+
+    #[test]
     fn quotes_remote_sqlite_path_and_sql_for_shell_without_readonly_flag() {
         assert_eq!(
             shell_quote("/tmp/prod's db.sqlite"),
             "'/tmp/prod'\"'\"'s db.sqlite'"
         );
         let command = SqliteRemoteCommand::read("/tmp/prod's db.sqlite", "SELECT 'ok'").to_shell();
-        assert!(!command.contains("-readonly"));
+        assert!(command.contains("PRAGMA query_only=ON"));
         assert!(!command.contains("-json"));
         assert!(command.contains("-header"));
         assert!(command.contains("-separator"));

@@ -105,45 +105,6 @@ enum TabType: String, CaseIterable {
     case sftp
     case monitor
     case database
-    case docker
-}
-
-struct DockerContainer: Codable, Identifiable {
-    let id: String
-    let name: String
-    let image: String
-    let command: String
-    let status: String
-    let state: String
-    let ports: String
-    let created: String
-    let running_for: String
-    let size: String
-
-    var shortId: String { String(id.prefix(12)) }
-    var isRunning: Bool { state.lowercased() == "running" || status.lowercased().hasPrefix("up") }
-}
-
-struct DockerContainerStats: Codable, Identifiable {
-    let id: String
-    let name: String
-    let cpu_percent: String
-    let memory_usage: String
-    let memory_percent: String
-    let network_io: String
-    let block_io: String
-    let pids: String
-}
-
-struct DockerPanelSnapshot {
-    var containers: [DockerContainer] = []
-    var statsById: [String: DockerContainerStats] = [:]
-    var selectedContainerId: String?
-    var logs: String = ""
-    var query: String = ""
-    var logQuery: String = ""
-    var error: String?
-    var lastUpdated: Date?
 }
 
 // MARK: - Database
@@ -188,10 +149,20 @@ struct DatabaseSchema: Codable {
 }
 
 struct DatabaseTableSchema: Codable, Identifiable {
+    var namespace: String? = nil
     let name: String
     let columns: [DatabaseColumnSchema]
 
-    var id: String { name }
+    var id: String {
+        guard let namespace else { return name }
+        return Self.qualified(namespace, name)
+    }
+
+    var displayName: String { namespace.map { $0 + "." + name } ?? name }
+
+    static func qualified(_ namespace: String, _ name: String) -> String {
+        [namespace, name].map { DatabaseQueryPolicy.quoteIdentifier($0, engine: "postgres") }.joined(separator: ".")
+    }
 }
 
 struct DatabaseColumnSchema: Codable, Identifiable {
@@ -209,6 +180,7 @@ struct DatabaseQueryRequest: Codable {
     var sql: String
     var read_only: Bool
     var timeout_ms: UInt32
+    var single_row_write: Bool? = nil
 }
 
 struct DatabaseQueryResult: Codable {
@@ -274,6 +246,7 @@ struct DatabaseImportRequest: Codable {
 }
 
 struct DatabasePanelSnapshot {
+    var databaseName: String = ""
     var schema: DatabaseSchema?
     var selectedTable: String?
     var sqlText: String = ""

@@ -9,17 +9,18 @@ struct StatusBarView: View {
         let context = appState.activeSessionContext
 
         HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor(for: context))
-                .frame(width: 6, height: 6)
-
-            Text(activeSessionCount == 0 ? "无活动会话" : "已连接 \(activeSessionCount) 个会话")
-                .lineLimit(1)
-                .accessibilityIdentifier("statusBarSummary")
+            if activeSessionCount > 0 {
+                Circle()
+                    .fill(statusColor(for: context))
+                    .frame(width: 6, height: 6)
+                Text("已连接 \(activeSessionCount) 个会话")
+                    .lineLimit(1)
+                    .accessibilityIdentifier("statusBarSummary")
+            }
 
             Spacer()
 
-            Text("\(keyBindings.binding(for: "quickConnect").displayString) 快速连接 · \(keyBindings.binding(for: "commandPalette").displayString) 命令面板")
+            Text("\(keyBindings.binding(for: "commandPalette").displayString) 命令面板")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)

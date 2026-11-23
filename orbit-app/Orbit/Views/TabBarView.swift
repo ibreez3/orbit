@@ -3,7 +3,6 @@ import SwiftUI
 struct TabBarView: View {
     let appState: AppState
     @EnvironmentObject var tabState: TabState
-    @ObservedObject private var keyBindings = KeyBindings.shared
     @State private var hoveredTabId: String? = nil
 
     var body: some View {
@@ -19,30 +18,7 @@ struct TabBarView: View {
 
             Spacer()
 
-            Button(action: {
-                appState.openWorkspaceEntry(.quickConnect)
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 28, height: 28)
-                    .background(Color.accentColor.opacity(0.1))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("快速连接 (\(keyBindings.binding(for: "quickConnect").displayString))")
-            .accessibilityLabel("打开快速连接")
-
             networkIndicator
-
-            Button(action: { SettingsWindowController.shared.open(with: appState) }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .help("Settings (⌘,)")
-            .accessibilityLabel("打开设置")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -56,14 +32,7 @@ struct TabBarView: View {
         let isConnectionTab = activeTab?.type == .terminal || activeTab?.type == .sftp || activeTab?.type == .monitor
 
         guard let tab = activeTab, isConnectionTab else {
-            return AnyView(
-                Circle()
-                    .fill(Color.secondary.opacity(0.3))
-                    .frame(width: 8, height: 8)
-                    .frame(width: 28, height: 28)
-                    .help("无活动会话")
-                    .accessibilityLabel("无活动会话")
-            )
+            return AnyView(EmptyView())
         }
 
         if tab.type == .sftp {

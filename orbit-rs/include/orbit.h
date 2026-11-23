@@ -79,6 +79,8 @@ ORBIT_API int32_t orbit_db_list_backup_records(struct OrbitApp *app, char **out_
 
 ORBIT_API int32_t orbit_db_test_connection(struct OrbitApp *app, const char *id, bool install_sqlite, char **out_json);
 
+ORBIT_API int32_t orbit_db_request(struct OrbitApp *app, const char *action, const char *args, char **out_json);
+
 ORBIT_API int32_t orbit_db_list_schema(struct OrbitApp *app, const char *connection_id, char **out_json);
 
 ORBIT_API int32_t orbit_db_execute(struct OrbitApp *app, const char *connection_id, const char *json_request, char **out_json);
@@ -140,14 +142,6 @@ ORBIT_API int32_t orbit_get_server_stats(struct OrbitApp *app, const char *serve
 ORBIT_API int32_t orbit_get_server_home(struct OrbitApp *app, const char *server_id, char **out_home);
 
 ORBIT_API int32_t orbit_get_server_processes(struct OrbitApp *app, const char *server_id, char **out_json);
-
-ORBIT_API int32_t orbit_docker_list_containers(struct OrbitApp *app, const char *server_id, char **out_json);
-
-ORBIT_API int32_t orbit_docker_stats(struct OrbitApp *app, const char *server_id, char **out_json);
-
-ORBIT_API int32_t orbit_docker_logs(struct OrbitApp *app, const char *server_id, const char *container_id, uint32_t tail, char **out_logs);
-
-ORBIT_API int32_t orbit_docker_action(struct OrbitApp *app, const char *server_id, const char *container_id, const char *action, char **out_output);
 
 ORBIT_API void orbit_shutdown_pool(struct OrbitApp *app);
 

@@ -1,6 +1,8 @@
 name: Release DMG
 
 on:
+  push:
+    branches: ["agent/windows-release-validation"]
   workflow_dispatch:
     inputs:
       tag:
@@ -19,7 +21,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: orbit-release
+  group: orbit-release-macos
   cancel-in-progress: false
 
 jobs:
@@ -33,6 +35,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.sha }}
+          fetch-depth: 0
+
       - name: Resolve release tag
         id: release
         shell: bash
@@ -45,6 +53,9 @@ jobs:
             TAG="$RELEASE_TAG"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="$INPUT_TAG"
+          else
+            BASE="$(sed -n 's/.*MARKETING_VERSION: *"\([^"]*\)".*/\1/p' orbit-app/project.yml | head -1)"
+            TAG="v${BASE}-ci.${GITHUB_RUN_NUMBER}"
           fi
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
             echo "::error::Invalid release tag"
@@ -62,12 +73,6 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "asset=Orbit-${TAG}-AppleSilicon.dmg" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout release source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.release.outputs.tag }}
-          fetch-depth: 0
 
       - name: Select Xcode 27.2
         shell: bash
@@ -152,6 +157,7 @@ jobs:
           gh --version
 
       - name: Fetch release notes
+        if: github.event_name != 'push'
         shell: bash
         env:
           TAG: ${{ steps.release.outputs.tag }}
@@ -235,11 +241,11 @@ jobs:
 
           mkdir -p "$(dirname "$DMG_PATH")"
           rm -f "$DMG_PATH"
-          ditto "$APP_PATH" "$DMG_ROOT/Orbit.app"
+          ditto "$APP_PATH" "$DMG_ROOT/Hostwren.app"
           ln -s /Applications "$DMG_ROOT/Applications"
 
           hdiutil create \
-            -volname "Orbit ${{ steps.release.outputs.tag }}" \
+            -volname "Hostwren ${{ steps.release.outputs.tag }}" \
             -srcfolder "$DMG_ROOT" \
             -fs HFS+ \
             -ov \
@@ -262,7 +268,7 @@ jobs:
           MOUNT_DIR="$(mktemp -d /tmp/orbit-dmg.XXXXXX)"
           hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
           trap 'hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true; rmdir "$MOUNT_DIR" 2>/dev/null || true' EXIT
-          bash ./scripts/verify-app.sh "$MOUNT_DIR/Orbit.app"
+          bash ./scripts/verify-app.sh "$MOUNT_DIR/Hostwren.app"
           hdiutil detach "$MOUNT_DIR" -quiet
           trap - EXIT
           rmdir "$MOUNT_DIR"
@@ -296,6 +302,7 @@ jobs:
           echo "length=$LENGTH" >> "$GITHUB_OUTPUT"
 
       - name: Upload DMG to GitHub Release
+        if: github.event_name != 'push'
         shell: bash
         run: |
           set -euo pipefail
@@ -315,7 +322,7 @@ jobs:
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets
 
       - name: Update appcast on develop
-        if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
+        if: github.event_name != 'push' && env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
         shell: bash
         run: |
           set -euo pipefail
@@ -359,7 +366,7 @@ jobs:
             --tag "$TAG" --version "$VERSION" --build "$BUILD_VERSION" $PREVIEW_FLAG
 
       - name: Sign and push appcast
-        if: env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
+        if: github.event_name != 'push' && env.SPARKLE_PRIVATE_KEY != '' && (github.event_name != 'workflow_dispatch' || inputs.update_appcast)
         shell: bash
         run: |
           set -euo pipefail

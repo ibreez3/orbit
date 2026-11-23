@@ -77,7 +77,7 @@ public enum AgentCLI {
         }
 
         guard let credential else {
-            throw AgentCLIError.denied("Orbit did not issue an agent session")
+            throw AgentCLIError.denied("Hostwren did not issue an agent session")
         }
         let record = try sessions.save(credential, clientName: clientName)
         let payload: [String: String] = [
@@ -101,18 +101,18 @@ public enum AgentCLI {
             switch status.status {
             case .approved:
                 guard let session = status.session else {
-                    throw AgentCLIError.denied("Orbit approved without a session credential")
+                    throw AgentCLIError.denied("Hostwren approved without a session credential")
                 }
                 return session
             case .denied, .expired:
                 throw AgentCLIError.denied(
-                    status.error?.message ?? "Orbit denied the agent connection"
+                    status.error?.message ?? "Hostwren denied the agent connection"
                 )
             case .pending:
                 Thread.sleep(forTimeInterval: 1)
             }
         }
-        throw AgentCLIError.denied("Timed out waiting for Orbit approval")
+        throw AgentCLIError.denied("Timed out waiting for Hostwren approval")
     }
 
     private static func runServers(
