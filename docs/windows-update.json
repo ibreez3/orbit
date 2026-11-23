@@ -1,11 +1,11 @@
 {
-  "version": "0.1.3",
-  "notes": "macOS 与 Windows 统一升级至 v0.1.3（macOS build 19）。\n\n- 新增 Windows 客户端：SSH、本地终端、SFTP、资源监控、数据库及设置管理。\n- 统一两端界面入口，精简重复设置与工具入口，移除 Docker 功能。\n- MySQL 支持不指定数据库连接、库切换和点击表查看前 200 行；修复字段误识别为表及 SQL 引号问题。\n- 凭据保持 AES-256-GCM 加密，使用本地密钥文件，减少系统凭据库依赖。\n- Windows 新增签名自动更新、下载进度、安装确认及重启；macOS 继续使用 Sparkle 签名自动更新。\n\n自动更新：macOS 稳定通道及 Windows 已启用更新的版本将在安装包完成 CI 构建、签名并上传后收到此版本。升级保留连接配置、凭据和设置，请勿删除应用数据目录或本地密钥文件。\n\n兼容说明：macOS v0.0.8 及更早版本因公钥轮换需手动安装一次。未包含更新功能的旧 Windows 构建也需手动安装一次。macOS 安装包面向 Apple Silicon，Windows 安装包面向 x64。",
-  "pub_date": "2026-11-21T14:10:11.302264+00:00",
+  "version": "0.1.4",
+  "notes": "## macOS 数据库工作台\n\n- 表数据每页 500 条，支持翻页、筛选、排序、长字段展开和单元格编辑。允许为空的字段可显式设为 SQL NULL，修改暂存后提交。\n- SQL 查询保持只读。数据库级 ER 图展示外键关系，支持从图中打开表。\n- 新增「结构与索引」页，查看字段、主键和索引，创建或删除普通、唯一及联合索引。\n- 当前表可导出为同引擎 SQL，提供「仅表结构」和「表结构及全部数据」两种模式。PostgreSQL 导出使用本机 pg_dump。\n- 优化大表按主键编辑及相邻页翻页。Windows 安装包同步版本号至 0.1.4。\n\n使用 v0.0.8 及更早 macOS 版本的用户需手动安装一次以切换更新签名公钥。",
+  "pub_date": "2026-11-23T08:10:29.592342+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUemFEM1NVMm1rZWUraDc4cUYrQXdRSWt4SGRYK0tJUXdwbGdEUS83aGRQdFljU0YwR2tPMDlPaXhZY3pUUWRqRkdyaWEvQm9XaDNtbVhTRlJMRkJWYUwwa2JUTVZONVFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjcwMjA2CWZpbGU6T3JiaXRfMC4xLjNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS4zCmIycGZ6RC9HNEdDQ3BlTm04MUxOWUdNeDBtZkVYcEdObDk1OExWTzBzbmdxaUU5STZzZDAwc2MvVElnQm1ZVDRhYzUrVkIrcG5DY1lGRGRKa3dVckJRPT0K",
-      "url": "https://github.com/ibreez3/orbit/releases/download/v0.1.3/Orbit-v0.1.3-Windows-x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUemFEM1NVMm1rZWZORHVhUVUrWWRKTEFJTVNXNHFOSzgwbEptUHZkekY2VVJ0REM5NXh1UkxDRmNrbXpwNGFRMVZ4VU4ycU1MOTF3TDVqR252RG8zNmZRVGh6Q0c2RVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDIxNDIyCWZpbGU6T3JiaXRfMC4xLjRfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS40CndpTVlRZmg2ZVYxYXZQQ1kvUENmYXZ6T1FCS0s2MWlpRTJ5RFE1K05RMXlndzAzTUp6K2I2blRnc1ZZQVp0d1BveEE0c0JsdlVDcC9JeTA4UmdoQUFnPT0K",
+      "url": "https://github.com/ibreez3/orbit/releases/download/v0.1.4/Orbit-v0.1.4-Windows-x64-setup.exe"
     }
   }
 }
