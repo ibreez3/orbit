@@ -7,22 +7,20 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Orbit macOS stable updates</description>
     <language>zh-CN</language>
     <item>
-      <title>Orbit 0.1.4</title>
-      <description sparkle:format="markdown"><![CDATA[## macOS 数据库工作台
+      <title>Orbit 0.1.5</title>
+      <description sparkle:format="markdown"><![CDATA[### macOS
+关闭 SSH 终端时，确认框会直接显示服务器名称，方便在多个会话之间核对即将断开的连接。弹窗沿用退出确认框的半透明面板和按钮样式。
 
-- 表数据每页 500 条，支持翻页、筛选、排序、长字段展开和单元格编辑。允许为空的字段可显式设为 SQL NULL，修改暂存后提交。
-- SQL 查询保持只读。数据库级 ER 图展示外键关系，支持从图中打开表。
-- 新增「结构与索引」页，查看字段、主键和索引，创建或删除普通、唯一及联合索引。
-- 当前表可导出为同引擎 SQL，提供「仅表结构」和「表结构及全部数据」两种模式。PostgreSQL 导出使用本机 pg_dump。
-- 优化大表按主键编辑及相邻页翻页。Windows 安装包同步版本号至 0.1.4。
+### 安装与更新
+macOS Apple Silicon 用户可下载本页的 DMG。由于更新签名公钥已轮换，仍在使用 v0.0.8 或更早版本的用户需要手动安装一次，之后即可继续使用自动更新。
 
-使用 v0.0.8 及更早 macOS 版本的用户需手动安装一次以切换更新签名公钥。]]></description>
-      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.1.4</sparkle:fullReleaseNotesLink>
-      <pubDate>Mon, 23 Nov 2026 08:06:25 +0000</pubDate>
-      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.1.4/Orbit-v0.1.4-AppleSilicon.dmg" sparkle:version="20" sparkle:shortVersionString="0.1.4" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="vER7OfXP+RFm2foSP9wJQ9+0vLSTyT5kps34VWTrGmqjKaIEzkp2WyxKIy4OXhWjBat7doWk5xp1w8n+b81PDg==" length="16452727" type="application/x-apple-diskimage"></enclosure>
+Windows 安装包同步更新到 v0.1.5。本次界面调整仅适用于 macOS。]]></description>
+      <sparkle:fullReleaseNotesLink>https://github.com/ibreez3/orbit/releases/tag/v0.1.5</sparkle:fullReleaseNotesLink>
+      <pubDate>Wed, 25 Nov 2026 08:16:52 +0000</pubDate>
+      <enclosure url="https://github.com/ibreez3/orbit/releases/download/v0.1.5/Orbit-v0.1.5-AppleSilicon.dmg" sparkle:version="21" sparkle:shortVersionString="0.1.5" sparkle:minimumSystemVersion="13.0" sparkle:edSignature="Q0IYJfw0TsHVAd3yOQFv8U2KOE73e8g1rHKAAy5SPl7o59gLQe7Z4XrQK0X5FaSyZmZxBAYIULBOorkDuJvvBg==" length="16465525" type="application/x-apple-diskimage"></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: DnRLBuiK6eE509yrNZky6UoUyoGdN8esIt3gHGyVtO5KM4RNvWescI9rrXtSSMvcLn02jz7OOoKr95LNsL7wBw==
-length: 2033
+edSignature: DNJa0Nkw3g+5eVclg6JxcA7Z0XKKaDa8W64V7vtO9t9h1uBdA40wX7je6uHHMw4CKgXKbdvfVixEzMJdQhI5Dw==
+length: 1775
 -->
