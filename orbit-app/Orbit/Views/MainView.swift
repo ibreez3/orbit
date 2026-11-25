@@ -407,44 +407,17 @@ struct MainView: View {
                     .ignoresSafeArea()
                     .onTapGesture { appState.cancelCloseTab() }
 
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("关闭「\(tab.serverName)」的终端？")
+                        .font(.system(size: 16, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("SSH 连接将断开，正在运行的交互命令可能中止。")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     HStack(spacing: 12) {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.orange)
-                            .frame(width: 32, height: 32)
-                            .background(Color.orange.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("关闭终端")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.primary)
-
-                            Text("此操作会断开当前 SSH 连接。")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(tab.title)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-
-                        Text("终端会话将被关闭，正在运行的交互命令也会随连接一起结束。")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.045))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    HStack(spacing: 10) {
                         Spacer()
 
                         Button("取消") {
@@ -453,9 +426,9 @@ struct MainView: View {
                         .keyboardShortcut(.cancelAction)
                         .buttonStyle(.plain)
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 7)
-                        .background(Color.primary.opacity(0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
 
                         Button("关闭终端") {
                             appState.confirmCloseTab()
@@ -463,20 +436,16 @@ struct MainView: View {
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.plain)
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 7)
-                        .background(Color.orange.opacity(0.9))
+                        .padding(.vertical, 6)
+                        .background(Color.red.opacity(0.85))
                         .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                 }
                 .padding(22)
                 .frame(width: 360)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
