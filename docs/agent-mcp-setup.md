@@ -1,6 +1,6 @@
 # Hostwren AI Agent 接入
 
-Hostwren 可以让本机 AI Agent（Claude Code、Codex、DeepSeek Harness）使用已保存服务器的 SSH 执行能力，而 Agent 不会拿到服务器密码或私钥。
+Hostwren 可以让本机 AI Agent（Claude Code、Codex、DeepSeek Harness）访问已开放的服务器，以及只读查询已开放的数据库连接。连接凭据由 Hostwren 管理。
 
 ## 前置条件
 
@@ -103,3 +103,16 @@ export ORBIT_AGENT_SESSION=<sessionId>
 - **Claude Code 工具超时**：所有调用约 55 秒内返回；长命令会返回 job id，通过 `orbit_job_status` / `orbit_job_output` 轮询。
 - **shell 超时**：`orbit_shell_exec` 最多等待 50 秒；命令可能仍在运行，关闭 shell 或改用 `orbit_exec` 的 job 语义。
 - **shell 不存在**：会话撤销、服务器从 AI 暴露中关闭或 Hostwren 退出都会关闭 shell；重新打开即可。
+
+## macOS 数据库只读访问
+
+在设置 → AI Agent → 数据库只读访问中启用要开放的连接。新连接和已有连接均默认关闭。已批准的 CLI 或 MCP 会话可以查询该连接账号可读的数据，关闭开关后再次调用即被拒绝。使用专用只读数据库账号可限制可见的数据和可执行的数据库函数。
+
+```bash
+orbit-cli db list
+orbit-cli db schema --db <连接ID>
+orbit-cli db schema --db <连接ID> --table <上一步返回的表ID>
+orbit-cli db query --db <连接ID> --sql 'SELECT COUNT(*) FROM orders'
+```
+
+MCP 对应工具为 `orbit_db_list`、`orbit_db_schema`、`orbit_db_query`。MySQL 连接未指定库名时，先用 schema 查看 catalogs，再在 schema 或 query 中传入 `--catalog`（MCP 参数为 `catalog`）。查询支持单条 SELECT 或只读 WITH，语句超时为 15 秒，结果最多返回 200 行，列和行的 JSON 大小预算为 256 KiB。返回的 `truncated` 表示是否省略了结果行。远程 SQLite 查询需要远端 sqlite3 支持 `-safe`、`-readonly` 和 `-json`。

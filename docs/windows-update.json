@@ -1,11 +1,11 @@
 {
-  "version": "0.1.4",
-  "notes": "## macOS 数据库工作台\n\n- 表数据每页 500 条，支持翻页、筛选、排序、长字段展开和单元格编辑。允许为空的字段可显式设为 SQL NULL，修改暂存后提交。\n- SQL 查询保持只读。数据库级 ER 图展示外键关系，支持从图中打开表。\n- 新增「结构与索引」页，查看字段、主键和索引，创建或删除普通、唯一及联合索引。\n- 当前表可导出为同引擎 SQL，提供「仅表结构」和「表结构及全部数据」两种模式。PostgreSQL 导出使用本机 pg_dump。\n- 优化大表按主键编辑及相邻页翻页。Windows 安装包同步版本号至 0.1.4。\n\n使用 v0.0.8 及更早 macOS 版本的用户需手动安装一次以切换更新签名公钥。",
-  "pub_date": "2026-11-23T08:10:29.592342+00:00",
+  "version": "0.1.5",
+  "notes": "### macOS\n关闭 SSH 终端时，确认框会直接显示服务器名称，方便在多个会话之间核对即将断开的连接。弹窗沿用退出确认框的半透明面板和按钮样式。\n\n### 安装与更新\nmacOS Apple Silicon 用户可下载本页的 DMG。由于更新签名公钥已轮换，仍在使用 v0.0.8 或更早版本的用户需要手动安装一次，之后即可继续使用自动更新。\n\nWindows 安装包同步更新到 v0.1.5。本次界面调整仅适用于 macOS。",
+  "pub_date": "2026-11-25T08:22:14.739252+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUemFEM1NVMm1rZWZORHVhUVUrWWRKTEFJTVNXNHFOSzgwbEptUHZkekY2VVJ0REM5NXh1UkxDRmNrbXpwNGFRMVZ4VU4ycU1MOTF3TDVqR252RG8zNmZRVGh6Q0c2RVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDIxNDIyCWZpbGU6T3JiaXRfMC4xLjRfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS40CndpTVlRZmg2ZVYxYXZQQ1kvUENmYXZ6T1FCS0s2MWlpRTJ5RFE1K05RMXlndzAzTUp6K2I2blRnc1ZZQVp0d1BveEE0c0JsdlVDcC9JeTA4UmdoQUFnPT0K",
-      "url": "https://github.com/ibreez3/orbit/releases/download/v0.1.4/Orbit-v0.1.4-Windows-x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUemFEM1NVMm1rZVRJWWk5U1QrLzV4cjNzdndJZmk4Y25jeHVpT2NIK0xROTZZMXRaaGNZaXV3MTV2bG15WVdYREg2QkpScU9tYSsyRXorM01sVGFEL2VZZng5Qk1iN1E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTk0OTI5CWZpbGU6T3JiaXRfMC4xLjVfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS41CnpQaDJzOUI0T2Zmc0J0K0J4NFREbVdhcytScSswSysrekM4WVFGNmVQcVdVbG0yWFBXRDUrR2E5Q3pFQnc0MXEzM3lSTndEMEE2Mk9CaDZRUFUzWEJnPT0K",
+      "url": "https://github.com/ibreez3/orbit/releases/download/v0.1.5/Orbit-v0.1.5-Windows-x64-setup.exe"
     }
   }
 }

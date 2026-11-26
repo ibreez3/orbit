@@ -34,6 +34,7 @@ impl PostgresEngine {
         read_only: bool,
         timeout_ms: u32,
         single_row_write: bool,
+        row_limit: Option<i32>,
     ) -> Result<DatabaseQueryResult> {
         if read_only && is_write_statement(sql) {
             return Err(anyhow!("read-only database query rejected write statement"));
@@ -67,7 +68,12 @@ impl PostgresEngine {
 
         let rows = if read_only {
             let mut tx = client.build_transaction().read_only(true).start()?;
-            tx.query(sql, &[])?
+            if let Some(limit) = row_limit {
+                let portal = tx.bind(sql, &[])?;
+                tx.query_portal(&portal, limit)?
+            } else {
+                tx.query(sql, &[])?
+            }
         } else {
             client.query(sql, &[])?
         };

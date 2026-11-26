@@ -93,6 +93,7 @@ public enum AgentErrorCode: String, Codable, Sendable {
     case approvalTimeout = "approval_timeout"
     case serverNotFound = "server_not_found"
     case serverNotExposed = "server_not_exposed"
+    case databaseAccessDenied = "database_access_denied"
     case writeGrantRequired = "write_grant_required"
     case writeDenied = "write_denied"
     case commandTimeout = "command_timeout"
@@ -247,6 +248,9 @@ public struct AgentActiveSession: Codable, Equatable, Sendable {
 }
 
 public enum AgentToolName {
+    public static let dbList = "orbit_db_list"
+    public static let dbSchema = "orbit_db_schema"
+    public static let dbQuery = "orbit_db_query"
     public static let listServers = "orbit_list_servers"
     public static let exec = "orbit_exec"
     public static let jobStatus = "orbit_job_status"

@@ -43,6 +43,14 @@ pub fn allows_read_query(sql: &str, engine: &str) -> bool {
     true
 }
 
+pub fn allows_agent_query(sql: &str, engine: &str) -> bool {
+    matches!(first_sql_token(sql).as_deref(), Some("select" | "with"))
+        && allows_read_query(sql, engine)
+        && !(engine == "mysql" && sql.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|word| word.eq_ignore_ascii_case("outfile") || word.eq_ignore_ascii_case("dumpfile")))
+        && !(engine == "mysql" && sql.contains("/*+"))
+}
+
 pub fn mysql_type_for_sqlite(sqlite_type: &str) -> String {
     let normalized = sqlite_type.trim().to_uppercase();
 
@@ -201,6 +209,21 @@ fn sql_without_comments_or_string_literals(sql: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_queries_only_admit_read_shapes() {
+        for engine in ["mysql", "postgres", "remote_sqlite"] {
+            for sql in ["SELECT 1", "WITH t AS (SELECT 1) SELECT * FROM t"] {
+                assert!(super::allows_agent_query(sql, engine));
+            }
+            for sql in ["UPDATE t SET n=1", "WITH t AS (DELETE FROM x RETURNING *) SELECT * FROM t",
+                        "EXPLAIN ANALYZE DELETE FROM t", "PRAGMA query_only=OFF"] {
+                assert!(!super::allows_agent_query(sql, engine));
+            }
+        }
+        assert!(!super::allows_agent_query("SELECT 1; SELECT 2", "remote_sqlite"));
+        assert!(!super::allows_agent_query("SELECT 1 INTO OUTFILE 'x'", "mysql"));
+    }
+
     use super::*;
 
     #[test]

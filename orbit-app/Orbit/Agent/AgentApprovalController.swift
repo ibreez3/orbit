@@ -52,7 +52,7 @@ final class AgentApprovalController: NSObject, AgentApprovalPresenting {
         switch pending.kind {
         case .admission(let request):
             title = "AI Agent 请求接入 Hostwren"
-            message = "允许 \(request.agentName) 使用 Hostwren 的服务器执行能力？"
+            message = "允许 \(request.agentName) 访问已开放的服务器并只读查询已开放的数据库？"
             details = """
             Agent: \(request.agentName)
             Client: \(request.clientVersion.isEmpty ? "unknown" : request.clientVersion)
