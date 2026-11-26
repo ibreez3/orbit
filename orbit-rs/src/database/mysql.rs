@@ -39,6 +39,7 @@ impl MysqlEngine {
         read_only: bool,
         timeout_ms: u32,
         single_row_write: bool,
+        row_limit: Option<i32>,
     ) -> Result<DatabaseQueryResult> {
         if read_only && is_write_statement(sql) {
             return Err(anyhow!("read-only database query rejected write statement"));
@@ -46,7 +47,11 @@ impl MysqlEngine {
 
         let started = Instant::now();
         let mut conn = Self::connect(connection)?;
-        Self::apply_statement_timeout(&mut conn, timeout_ms);
+        let timeout = Self::apply_statement_timeout(&mut conn, timeout_ms);
+        if let Some(limit) = row_limit {
+            timeout?;
+            conn.query_drop(format!("SET SESSION sql_select_limit = {}", limit))?;
+        }
         if single_row_write {
             let mut tx = conn.start_transaction(mysql::TxOpts::default())?;
             tx.query_drop(sql)?;
@@ -70,15 +75,16 @@ impl MysqlEngine {
             let opts = mysql::TxOpts::default().set_access_mode(Some(mysql::AccessMode::ReadOnly));
             let mut tx = conn.start_transaction(opts)?;
             let result = tx.exec_iter(sql, ())?;
-            return Self::collect_query_result(result, started);
+            return Self::collect_query_result(result, started, row_limit);
         }
         let result = conn.query_iter(sql)?;
-        Self::collect_query_result(result, started)
+        Self::collect_query_result(result, started, row_limit)
     }
 
     fn collect_query_result<T: mysql::prelude::Protocol>(
         result: mysql::QueryResult<'_, '_, '_, T>,
         started: Instant,
+        row_limit: Option<i32>,
     ) -> Result<DatabaseQueryResult> {
         let columns = result
             .columns()
@@ -86,7 +92,7 @@ impl MysqlEngine {
             .iter()
             .map(|column| column.name_str().to_string())
             .collect::<Vec<_>>();
-        let rows = result
+        let rows = result.take(row_limit.map_or(usize::MAX, |n| n as usize))
             .map(|row| {
                 let row = row?;
                 row.unwrap()
@@ -105,9 +111,9 @@ impl MysqlEngine {
         })
     }
 
-    fn apply_statement_timeout(conn: &mut mysql::Conn, timeout_ms: u32) {
+    fn apply_statement_timeout(conn: &mut mysql::Conn, timeout_ms: u32) -> Result<()> {
         if timeout_ms == 0 {
-            return;
+            return Ok(());
         }
         let ms = timeout_ms.max(1);
         // MySQL 5.7.8+ uses milliseconds; MariaDB uses seconds.
@@ -116,11 +122,12 @@ impl MysqlEngine {
             .is_err()
         {
             let seconds = ms as f64 / 1000.0;
-            let _ = conn.query_drop(format!(
+            conn.query_drop(format!(
                 "SET SESSION max_statement_time = {:.3}",
                 seconds
-            ));
+            ))?;
         }
+        Ok(())
     }
 
     pub fn backup_tables(connection: &DatabaseConnection) -> Result<Vec<DatabaseBackupTable>> {

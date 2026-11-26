@@ -10,6 +10,19 @@ public final class AgentExposureStore {
         self.defaults = defaults
     }
 
+    public func isEnabled(databaseId: String) -> Bool {
+        defaults.bool(forKey: "agentDatabaseEnabled." + databaseId)
+    }
+
+    public func setEnabled(_ enabled: Bool, databaseId: String) {
+        let key = "agentDatabaseEnabled." + databaseId
+        if enabled {
+            defaults.set(true, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     public func isEnabled(serverId: String) -> Bool {
         !disabledServerIds.contains(serverId)
     }

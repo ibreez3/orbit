@@ -12,6 +12,23 @@ final class AgentGatewayTests: XCTestCase {
         XCTAssertFalse(gateway.isRunning)
     }
 
+    func testDatabaseGrantIsIndependentAndRevocationAppliesToAdmittedSession() async throws {
+        let gateway = makeGateway(approver: FakeApprover(result: true))
+        let session = try await approveSession(gateway)
+        let db = UUID().uuidString
+        let store = AgentExposureStore.shared
+        XCTAssertFalse(store.isEnabled(databaseId: db))
+        store.setEnabled(true, databaseId: db)
+        XCTAssertTrue(store.isEnabled(databaseId: db))
+        XCTAssertFalse(store.isEnabled(databaseId: UUID().uuidString))
+        store.setEnabled(false, databaseId: db)
+        for tool in [AgentToolName.dbSchema, AgentToolName.dbQuery] {
+            let response = await gateway.handle(callRequest(id: "db", session: session, tool: tool,
+                                                           args: ["db": .string(db), "sql": .string("SELECT 1")]))
+            XCTAssertEqual(response.error?.code, .databaseAccessDenied)
+        }
+    }
+
     func testCallWithoutTokenIsUnauthorized() async {
         let gateway = makeGateway(approver: FakeApprover(result: true))
         let response = await gateway.handle(

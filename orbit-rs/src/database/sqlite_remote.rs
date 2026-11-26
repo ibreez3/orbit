@@ -149,14 +149,23 @@ impl SqliteRemote {
         })
     }
 
+    fn schema_command(path: &str, sql: &str, agent: bool) -> String {
+        if agent {
+            return format!("sqlite3 -batch -bail -init /dev/null -safe -readonly -header -separator {} -nullvalue {} {} {}",
+                shell_quote(SQLITE_COLUMN_SEPARATOR), shell_quote(SQLITE_NULL_VALUE), shell_quote(path), shell_quote(sql));
+        }
+        SqliteRemoteCommand::read(path, sql).to_shell()
+    }
+
     pub fn list_table_names(
         pool: &transport::SessionPool,
         server: &Server,
         db: &Database,
         sqlite_path: &str,
+        agent: bool,
     ) -> Result<String> {
         let sql = "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name";
-        let command = SqliteRemoteCommand::read(sqlite_path, sql).to_shell();
+        let command = Self::schema_command(sqlite_path, sql, agent);
         ssh::SshManager::exec_command_checked(pool, server, db, &command, "list SQLite tables")
     }
 
@@ -165,10 +174,11 @@ impl SqliteRemote {
         server: &Server,
         db: &Database,
         sqlite_path: &str,
+        agent: bool,
         table_name: &str,
     ) -> Result<String> {
         let sql = format!("PRAGMA table_xinfo({})", sqlite_ident(table_name));
-        let command = SqliteRemoteCommand::read(sqlite_path, &sql).to_shell();
+        let command = Self::schema_command(sqlite_path, &sql, agent);
         ssh::SshManager::exec_command_checked(
             pool,
             server,
@@ -183,15 +193,16 @@ impl SqliteRemote {
         server: &Server,
         db: &Database,
         sqlite_path: &str,
+        agent: bool,
     ) -> Result<Vec<DatabaseTableSchema>> {
-        let tables_output = Self::list_table_names(pool, server, db, sqlite_path)?;
+        let tables_output = Self::list_table_names(pool, server, db, sqlite_path, agent)?;
         let table_rows = parse_sqlite_output("list schema tables", &tables_output)?.row_maps();
         let mut tables = Vec::new();
         for row in table_rows {
             let Some(name) = row.get("name").and_then(|value| value.as_deref()) else {
                 continue;
             };
-            let info_output = Self::table_info(pool, server, db, sqlite_path, name)?;
+            let info_output = Self::table_info(pool, server, db, sqlite_path, agent, name)?;
             let info_rows =
                 parse_sqlite_output(&format!("read schema for table {}", name), &info_output)?
                     .row_maps();
@@ -255,6 +266,34 @@ impl SqliteRemote {
             timeout_ms,
         )?
         .into_success_stdout("execute SQLite command")
+    }
+
+    pub fn agent_query(
+        pool: &transport::SessionPool,
+        server: &Server,
+        db: &Database,
+        path: &str,
+        sql: &str,
+    ) -> Result<DatabaseQueryResult> {
+        let started = Instant::now();
+        let statement = sql.trim().trim_end_matches(';');
+        let limited = format!("SELECT * FROM (\n{}\n) LIMIT {}", statement, super::AGENT_MAX_ROWS + 1);
+        let command = format!("sqlite3 -batch -bail -init /dev/null -safe -readonly -json {} {}",
+            shell_quote(path), shell_quote(&limited));
+        let output = ssh::SshManager::exec_command_output_with_timeout(pool, server, db, &command, 15_000)?
+            .into_success_stdout("query SQLite")?;
+        let records: Vec<serde_json::Map<String, serde_json::Value>> = if output.trim().is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&output)?
+        };
+        let columns: Vec<String> = records.first().map(|row| row.keys().cloned().collect()).unwrap_or_default();
+        let rows = records.iter().map(|row| columns.iter().map(|column| match &row[column] {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(value) => Some(value.clone()),
+            value => Some(value.to_string()),
+        }).collect()).collect();
+        Ok(DatabaseQueryResult { columns, rows, affected_rows: 0, elapsed_ms: started.elapsed().as_millis() as u64, message: String::new() })
     }
 
     pub fn execute_script(

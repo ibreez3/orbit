@@ -799,6 +799,7 @@ class OrbitBridge: SftpTransferClient {
             orbit_db_delete_connection(app, idPtr)
         }
         try checkDatabaseResult(rc)
+        AgentExposureStore.shared.setEnabled(false, databaseId: id)
     }
 
     func testDatabaseConnectionAsync(id: String, installSqlite: Bool) async throws -> DatabaseOperationResult {

@@ -33,6 +33,23 @@ final class AgentCLITests: XCTestCase {
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
 
+    func testDatabaseCommandsForwardConnectionAndReadArguments() throws {
+        let client = FakeGatewayClient()
+        let sessions = try makeSessions()
+        try saveSession(sessions)
+        for (arguments, tool, expected) in [
+            (["list"], AgentToolName.dbList, [:]),
+            (["schema", "--db", "d", "--table", "orders"], AgentToolName.dbSchema, ["db": "d", "table": "orders"]),
+            (["query", "--db", "d", "--catalog", "app", "--sql", "SELECT 1"],
+             AgentToolName.dbQuery, ["db": "d", "catalog": "app", "sql": "SELECT 1"])
+        ] {
+            try AgentCLI.run(arguments: ["db"] + arguments + ["--session", "s"], client: client,
+                             sessions: sessions, stdout: { _ in }, stderr: { _ in })
+            XCTAssertEqual(client.lastTool, tool)
+            XCTAssertEqual(client.lastArgs, .object(expected.mapValues(AgentJSONValue.string)))
+        }
+    }
+
     func testExecRequiresASession() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("cli-\(UUID().uuidString)", isDirectory: true)

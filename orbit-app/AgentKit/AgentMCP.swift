@@ -83,6 +83,36 @@ public struct MCPToolDefinition: Codable, Equatable, Sendable {
 public enum AgentToolCatalog {
     public static let phase1Tools: [MCPToolDefinition] = [
         MCPToolDefinition(
+            name: AgentToolName.dbList,
+            description: "List database connections enabled for this agent.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([:]),
+                "required": .array([]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.dbSchema,
+            description: "List tables or describe a table by its returned id. For a MySQL connection without a default catalog, omit catalog to discover catalogs.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object(["db": .object(["type": .string("string")]), "catalog": .object(["type": .string("string")]), "table": .object(["type": .string("string")])]),
+                "required": .array([.string("db")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
+            name: AgentToolName.dbQuery,
+            description: "Run one read-only SELECT or WITH query on an enabled database. Returns at most 200 rows.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object(["db": .object(["type": .string("string")]), "catalog": .object(["type": .string("string")]), "sql": .object(["type": .string("string")])]),
+                "required": .array([.string("db"), .string("sql")]),
+                "additionalProperties": .bool(false)
+            ])
+        ),
+        MCPToolDefinition(
             name: AgentToolName.listServers,
             description: "List servers that the user has exposed to AI agents. Returns ids, names, hosts, folders, and tags.",
             inputSchema: .object([
