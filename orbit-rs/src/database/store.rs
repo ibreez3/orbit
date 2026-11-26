@@ -11,6 +11,18 @@ impl DatabaseStore {
     const CONNECTION_COLUMNS: &'static str = "id, name, group_name, engine, ssh_server_id, use_ssh_tunnel, host, port, database_name, username, password, sqlite_path, ssl_mode, created_at, updated_at";
     const BACKUP_RECORD_COLUMNS: &'static str = "id, connection_id, connection_name, engine, artifact_path, operation, status, summary, created_at";
 
+    pub fn agent_connections(db: &Database) -> Result<Vec<serde_json::Value>> {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name, engine, database_name FROM database_connections ORDER BY group_name, name")?;
+        let rows = stmt.query_map([], |row| Ok(serde_json::json!({
+            "id": row.get::<_, String>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "engine": row.get::<_, String>(2)?,
+            "database": row.get::<_, String>(3)?,
+        })))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn list_connections(db: &Database) -> Result<Vec<DatabaseConnection>> {
         let conn = db.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!(

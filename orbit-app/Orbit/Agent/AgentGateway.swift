@@ -381,6 +381,8 @@ final class AgentGateway {
         }
 
         switch tool {
+        case AgentToolName.dbList, AgentToolName.dbSchema, AgentToolName.dbQuery:
+            return await handleDatabase(request, tool: tool, credential: credential)
         case AgentToolName.listServers:
             do {
                 lock.lock()
@@ -416,6 +418,83 @@ final class AgentGateway {
             return await handleJobCancel(request, execService: execService, sessionId: sessionId)
         default:
             return errorResponse(request.id, .invalidRequest, "Unsupported agent tool: \(tool)")
+        }
+    }
+
+    private struct DatabaseSummary: Codable {
+        let id: String
+        let name: String
+        let engine: String
+        let database: String
+    }
+
+    private func handleDatabase(_ request: AgentRequest, tool: String, credential: AgentSessionCredential) async -> AgentResponse {
+        let sessionId = credential.sessionId
+        let bridge = OrbitBridge.shared
+        let exposure = AgentExposureStore.shared
+        let args = request.args?.objectValue ?? [:]
+        let db = args["db"]?.stringValue ?? ""
+        var target: String?
+        var outcome = "failed"
+        defer {
+            record(AgentAuditEvent(type: "agent.database", sessionId: sessionId,
+                                   agent: sessions.agentName(sessionId: sessionId), tool: tool,
+                                   command: target, mode: "read", result: outcome))
+        }
+        do {
+            if tool != AgentToolName.dbList && !exposure.isEnabled(databaseId: db) {
+                return errorResponse(request.id, .databaseAccessDenied, "This agent does not have access to this database connection.")
+            }
+            let connections = try await bridge.databaseRequestAsync("database.agent_list", arguments: [:], as: [DatabaseSummary].self)
+            if tool == AgentToolName.dbList {
+                let items = connections.filter { exposure.isEnabled(databaseId: $0.id) }
+                outcome = "ok"
+                return ok(request.id, .object(["connections": try .encoding(items)]))
+            }
+            guard let connection = connections.first(where: { $0.id == db }), exposure.isEnabled(databaseId: db) else {
+                return errorResponse(request.id, .databaseAccessDenied, "This agent does not have access to this database connection.")
+            }
+            target = connection.name
+            let catalog = args["catalog"]?.stringValue
+            let result: AgentJSONValue
+            if tool == AgentToolName.dbSchema {
+                if connection.engine == "mysql", connection.database.isEmpty, catalog == nil {
+                    let catalogs = try await bridge.listDatabaseCatalogsAsync(connectionId: db)
+                    result = .object(["catalogs": try .encoding(catalogs)])
+                } else {
+                    let schema = try await bridge.databaseRequestAsync("database.agent_schema", arguments: [
+                        "id": db, "database_name": catalog ?? ""
+                    ], as: DatabaseSchema.self)
+                    if let table = args["table"]?.stringValue {
+                        let matches = schema.tables.filter { $0.id == table || $0.name == table }
+                        guard matches.count == 1, let match = matches.first else {
+                            return errorResponse(request.id, .invalidRequest, "Unknown or ambiguous table. Use its listed id.")
+                        }
+                        result = try .encoding(match)
+                    } else {
+                        result = .object(["tables": .array(schema.tables.map {
+                            .object(["id": .string($0.id), "name": .string($0.displayName)])
+                        })])
+                    }
+                }
+            } else {
+                guard let sql = args["sql"]?.stringValue, !sql.isEmpty else {
+                    return errorResponse(request.id, .invalidRequest, "Expected a read-only SQL query")
+                }
+                result = try await bridge.databaseRequestAsync("database.agent_query", arguments: [
+                    "id": db, "database_name": catalog ?? "", "sql": sql
+                ], as: AgentJSONValue.self)
+            }
+            guard sessions.validate(credential) == .valid else {
+                return errorResponse(request.id, .sessionExpired, "The agent session ended")
+            }
+            guard exposure.isEnabled(databaseId: db) else {
+                return errorResponse(request.id, .databaseAccessDenied, "This agent does not have access to this database connection.")
+            }
+            outcome = "ok"
+            return ok(request.id, result)
+        } catch {
+            return errorResponse(request.id, .invalidRequest, "Database request failed. Check the connection, catalog, and read-only SQL.")
         }
     }
 

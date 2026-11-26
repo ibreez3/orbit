@@ -12,6 +12,9 @@ final class AgentMCPTests: XCTestCase {
         ))
         let names = toolNames(response)
         XCTAssertTrue(names.contains(AgentToolName.listServers))
+        XCTAssertTrue(names.contains(AgentToolName.dbList))
+        XCTAssertTrue(names.contains(AgentToolName.dbSchema))
+        XCTAssertTrue(names.contains(AgentToolName.dbQuery))
         XCTAssertTrue(names.contains(AgentToolName.exec))
         XCTAssertTrue(names.contains(AgentToolName.shellOpen))
         XCTAssertTrue(names.contains(AgentToolName.shellExec))
@@ -48,6 +51,29 @@ final class AgentMCPTests: XCTestCase {
             ])
         ))
         XCTAssertTrue(textContent(response).contains("servers"))
+    }
+
+    func testDeniedDatabaseQueryKeepsSessionForAuthorizedDatabase() throws {
+        let client = FakeGatewayClient()
+        let core = MCPBridgeCore(client: client)
+        func query(_ database: String) -> MCPResponse? {
+            core.handle(MCPRequest(id: .string(database), method: "tools/call", params: .object([
+                "name": .string(AgentToolName.dbQuery),
+                "arguments": .object(["db": .string(database), "sql": .string("SELECT 1")])
+            ])))
+        }
+
+        let denied = query("hidden")
+        XCTAssertEqual(denied?.result?.objectValue?["isError"], .bool(true))
+        let error = try JSONDecoder().decode(AgentErrorBody.self, from: Data(textContent(denied).utf8))
+        XCTAssertEqual(error.code, .databaseAccessDenied)
+        client.admission = .pending(requestId: "unexpected-readmission")
+
+        let allowed = query("visible")
+        XCTAssertEqual(allowed?.result?.objectValue?["isError"], .bool(false))
+        let result = try JSONDecoder().decode(AgentJSONValue.self, from: Data(textContent(allowed).utf8))
+        XCTAssertEqual(result.objectValue?["rows"], .array([.array([.string("1")])]))
+        XCTAssertEqual(client.callCount, 2)
     }
 
     func testExpiredSessionTriggersReadmissionOnNextCall() {
@@ -130,6 +156,11 @@ final class FakeGatewayClient: AgentGatewayCalling {
         lastTool = tool
         lastArgs = args
         switch tool {
+        case AgentToolName.dbQuery:
+            guard args.objectValue?["db"] != .string("hidden") else {
+                throw AgentSocketClientError.remote(AgentErrorBody(code: .databaseAccessDenied, message: "Database access denied"))
+            }
+            return .object(["rows": .array([.array([.string("1")])])])
         case AgentToolName.jobStatus:
             return .object(["status": .string("running")])
         case AgentToolName.jobOutput:

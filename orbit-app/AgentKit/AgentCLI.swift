@@ -27,12 +27,14 @@ public enum AgentCLI {
         stderr: (String) -> Void
     ) throws {
         guard let command = arguments.first else {
-            throw AgentCLIError.usage("Usage: orbit-cli <auth|servers|exec|job|shell> ...")
+            throw AgentCLIError.usage("Usage: orbit-cli <auth|servers|exec|job|shell|db> ...")
         }
         let rest = Array(arguments.dropFirst())
         switch command {
         case "auth":
             try runAuth(rest, client: client, sessions: sessions, stdout: stdout)
+        case "db":
+            try runDatabase(rest, client: client, sessions: sessions, stdout: stdout)
         case "servers":
             try runServers(rest, client: client, sessions: sessions, stdout: stdout)
         case "exec":
@@ -128,6 +130,42 @@ public enum AgentCLI {
             args: .object([:]),
             session: session
         )
+        stdout(result.jsonString ?? "{}")
+    }
+
+    private static func runDatabase(
+        _ arguments: [String],
+        client: AgentGatewayCalling,
+        sessions: AgentSessionFileStore,
+        stdout: (String) -> Void
+    ) throws {
+        let parsed = parse(Array(arguments.dropFirst()))
+        let tool: String
+        var args: [String: AgentJSONValue] = [:]
+        switch arguments.first {
+        case "list":
+            tool = AgentToolName.dbList
+        case "schema", "query":
+            guard let db = parsed.options["--db"], !db.isEmpty else {
+                throw AgentCLIError.usage("db schema/query requires --db <connection id>")
+            }
+            args["db"] = .string(db)
+            if let catalog = parsed.options["--catalog"] { args["catalog"] = .string(catalog) }
+            if arguments.first == "query" {
+                guard let sql = parsed.options["--sql"], !sql.isEmpty else {
+                    throw AgentCLIError.usage("db query requires --sql")
+                }
+                args["sql"] = .string(sql)
+                tool = AgentToolName.dbQuery
+            } else {
+                if let table = parsed.options["--table"] { args["table"] = .string(table) }
+                tool = AgentToolName.dbSchema
+            }
+        default:
+            throw AgentCLIError.usage("Usage: orbit-cli db <list|schema|query>")
+        }
+        let session = try resolveSession(parsed, sessions: sessions)
+        let result = try client.call(tool: tool, args: .object(args), session: session)
         stdout(result.jsonString ?? "{}")
     }
 

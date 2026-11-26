@@ -38,6 +38,8 @@ use crate::transport;
 pub use models::*;
 pub use store::DatabaseStore;
 
+const AGENT_MAX_ROWS: usize = 200;
+
 pub struct DatabaseManager;
 
 impl DatabaseManager {
@@ -45,6 +47,7 @@ impl DatabaseManager {
         let text = |key: &str| args[key].as_str().ok_or_else(|| anyhow!("missing {}", key));
         let database_name = args["database_name"].as_str();
         Ok(match action {
+            "database.agent_list" => serde_json::to_value(DatabaseStore::agent_connections(db)?)?,
             "database.catalogs" => {
                 let connection = DatabaseStore::get_connection(db, text("id")?)?;
                 let names = if connection.engine == "mysql" && connection.database_name.is_empty() {
@@ -52,7 +55,24 @@ impl DatabaseManager {
                 } else { vec![connection.database_name] };
                 serde_json::to_value(names)?
             }
-            "database.schema" => serde_json::to_value(Self::list_schema_in_database(db, pool, text("id")?, database_name)?)?,
+            "database.schema" | "database.agent_schema" => serde_json::to_value(Self::schema(db, pool, text("id")?, database_name, action == "database.agent_schema")?)?,
+            "database.agent_query" => {
+                let connection = scoped_connection(DatabaseStore::get_connection(db, text("id")?)?, database_name)?;
+                let sql = text("sql")?;
+                if !sql::allows_agent_query(sql, &connection.engine) {
+                    return Err(anyhow!("Expected one read-only SELECT or WITH query"));
+                }
+                let result = match connection.engine.as_str() {
+                    "mysql" => with_driver_connection(db, &connection, |c| MysqlEngine::execute(c, sql, true, 15_000, false, Some((AGENT_MAX_ROWS + 1) as i32)))?,
+                    "postgres" => with_driver_connection(db, &connection, |c| PostgresEngine::execute(c, sql, true, 15_000, false, Some((AGENT_MAX_ROWS + 1) as i32)))?,
+                    "remote_sqlite" => {
+                        let server = db.get_server(&connection.ssh_server_id)?;
+                        SqliteRemote::agent_query(pool, &server, db, &connection.sqlite_path, sql)?
+                    }
+                    _ => return Err(anyhow!("Unsupported database engine")),
+                };
+                agent_query_result(result)?
+            }
             "database.query" => serde_json::to_value(Self::execute_in_database(db, pool, text("id")?, &serde_json::from_value(args["input"].clone())?, database_name)?)?,
             "database.export_table" => {
                 let c = scoped_connection(DatabaseStore::get_connection(db, text("id")?)?, database_name)?;
@@ -91,11 +111,15 @@ impl DatabaseManager {
     }
 
     pub fn list_schema_in_database(db: &Database, pool: &transport::SessionPool, connection_id: &str, database_name: Option<&str>) -> Result<Schema> {
+        Self::schema(db, pool, connection_id, database_name, false)
+    }
+
+    fn schema(db: &Database, pool: &transport::SessionPool, connection_id: &str, database_name: Option<&str>, agent: bool) -> Result<Schema> {
         let connection = scoped_connection(DatabaseStore::get_connection(db, connection_id)?, database_name)?;
         let tables = match connection.engine.as_str() {
             "remote_sqlite" => {
                 let server = db.get_server(&connection.ssh_server_id)?;
-                SqliteRemote::list_schema(pool, &server, db, &connection.sqlite_path)?
+                SqliteRemote::list_schema(pool, &server, db, &connection.sqlite_path, agent)?
             }
             "mysql" => with_driver_connection(db, &connection, MysqlEngine::list_schema)?,
             "postgres" => with_driver_connection(db, &connection, PostgresEngine::list_schema)?,
@@ -141,6 +165,7 @@ impl DatabaseManager {
                     request.read_only,
                     request.timeout_ms,
                     request.single_row_write,
+                    None,
                 )
             }),
             "postgres" => with_driver_connection(db, &connection, |connection| {
@@ -150,6 +175,7 @@ impl DatabaseManager {
                     request.read_only,
                     request.timeout_ms,
                     request.single_row_write,
+                    None,
                 )
             }),
             engine => Err(anyhow!("unsupported database engine: {}", engine)),
@@ -165,7 +191,7 @@ impl DatabaseManager {
         let tables = match connection.engine.as_str() {
             "remote_sqlite" => {
                 let server = db.get_server(&connection.ssh_server_id)?;
-                let schema = SqliteRemote::list_schema(pool, &server, db, &connection.sqlite_path)?;
+                let schema = SqliteRemote::list_schema(pool, &server, db, &connection.sqlite_path, false)?;
                 let mut tables = Vec::new();
                 for table in schema {
                     let sql = format!(
@@ -339,6 +365,28 @@ impl DatabaseManager {
         .with_artifact(&request.plan.backup_path)
         .with_affected_rows(affected_rows))
     }
+}
+
+fn agent_query_result(mut result: QueryResult) -> Result<serde_json::Value> {
+    const MAX_BYTES: usize = 256 * 1024;
+    let mut bytes = serde_json::to_vec(&result.columns)?.len();
+    if bytes >= MAX_BYTES {
+        return Err(anyhow!("Column names exceed the result size limit"));
+    }
+    let mut count = 0;
+    for row in result.rows.iter().take(AGENT_MAX_ROWS) {
+        bytes += serde_json::to_vec(row)?.len() + 1;
+        if bytes > MAX_BYTES {
+            break;
+        }
+        count += 1;
+    }
+    let truncated = count < result.rows.len();
+    result.rows.truncate(count);
+    Ok(serde_json::json!({
+        "columns": result.columns, "rows": result.rows,
+        "elapsedMs": result.elapsed_ms, "truncated": truncated,
+    }))
 }
 
 fn scoped_connection(mut connection: DatabaseConnection, database_name: Option<&str>) -> Result<DatabaseConnection> {
@@ -545,6 +593,21 @@ fn restore_table_name(prefix: &str, table_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_result_preserves_nulls_and_reports_omitted_rows() {
+        let mut result = QueryResult::empty_message("", 0, 10);
+        result.columns = vec!["n".into()];
+        result.rows = vec![vec![None]; AGENT_MAX_ROWS + 1];
+        let limited = agent_query_result(result.clone()).unwrap();
+        assert_eq!(limited["rows"].as_array().unwrap().len(), AGENT_MAX_ROWS);
+        assert!(limited["rows"][0][0].is_null());
+        assert_eq!(limited["truncated"], true);
+        result.rows.truncate(1);
+        assert_eq!(agent_query_result(result.clone()).unwrap()["truncated"], false);
+        result.rows.push(vec![Some("x".repeat(256 * 1024))]);
+        assert_eq!(agent_query_result(result).unwrap()["rows"], serde_json::json!([[null]]));
+    }
 
     fn mysql_connection(database: &str) -> DatabaseConnection {
         serde_json::from_value(serde_json::json!({

@@ -88,6 +88,27 @@ struct AgentPane: View {
                     }
                 }
 
+                SettingsGroup("数据库只读访问") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("启用后，已批准的 Agent 可查询该连接账号有权读取的数据。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        if inventoryState.databaseConnections.isEmpty {
+                            Text("暂无数据库连接")
+                        }
+                        ForEach(inventoryState.databaseConnections) { connection in
+                            Toggle(connection.name, isOn: Binding(
+                                get: { AgentExposureStore.shared.isEnabled(databaseId: connection.id) },
+                                set: {
+                                    AgentExposureStore.shared.setEnabled($0, databaseId: connection.id)
+                                    revision += 1
+                                }
+                            ))
+                            .toggleStyle(.switch)
+                        }
+                    }
+                }
+
                 SettingsGroup("活跃 AI 会话") {
                     if sessions.isEmpty {
                         Text("暂无活跃会话")
@@ -130,6 +151,9 @@ struct AgentPane: View {
                                         .foregroundStyle(.secondary)
                                         .frame(width: 150, alignment: .leading)
                                     VStack(alignment: .leading, spacing: 1) {
+                                        if event.type == "agent.database", let agent = event.agent {
+                                            Text(agent).font(.system(size: 11))
+                                        }
                                         if let tool = event.tool {
                                             Text(tool)
                                                 .font(.system(size: 11))
@@ -167,6 +191,7 @@ struct AgentPane: View {
             .padding(20)
         }
         .onAppear {
+            appState.loadDatabaseConnections()
             if gatewayEnabled {
                 startGateway()
             }
